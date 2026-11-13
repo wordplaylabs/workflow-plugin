@@ -3104,6 +3104,26 @@ describe("the install check", () => {
   });
 });
 
+// plans/priority-queue.md, part 6 and part 7.
+describe("a plan put first", () => {
+  const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
+  it("the Plan first message is one sentence in three files", () => {
+    const message =
+      "`Plan first: plans/<topic>.md. Build it next, once the plan in hand is built; nothing to answer.`";
+    for (const agent of ["executor", "assistant", "planner"]) {
+      const text = readFileSync(join(plugin, "agents", `${agent}.md`), "utf8");
+      expect(text.replace(/\n[ \t]*/g, " "), agent).toContain(message);
+      expect(text, agent).toContain("plans first");
+    }
+    const handbook = readFileSync(join(plugin, "docs", "workflow.md"), "utf8");
+    expect(handbook).toContain("**A plan put first is built next.**");
+    expect(handbook).toContain("(decisions.md#plan-put-first)");
+    expect(readFileSync(join(plugin, "docs", "decisions.md"), "utf8")).toContain(
+      "- `plan-put-first` **A plan or a brief the owner puts first is taken",
+    );
+  });
+});
+
 describe("the scripts' type declarations", () => {
   const scripts = new URL("../plugins/workflow/scripts/", import.meta.url);
   const files = readdirSync(scripts).filter((file) => file.endsWith(".d.mts"));

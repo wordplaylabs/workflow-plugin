@@ -124,7 +124,8 @@ Sources as its "Where to look".
    - `Related: #31.` (or `Related: #31 and branch <name>.`) for each open
      pull request or branch the brief or the context names that is a
      different thing on the same files.
-   - The brief's `From: <Project>, <path>.` and `Issue: #<n>.` lines.
+   - The brief's `From: <Project>, <path>.` and `Issue: #<n>.` lines,
+     and its `First:` line, as it stands.
    - `Touches <name>'s part (<what>).` at the head of "What was asked".
    When another person's open pull request already decides what the
    brief asks, ask once: build it as its own pull request (recommended),
@@ -201,8 +202,11 @@ run and its address in the body. Such a plan waits for `status: ready`;
 say the issue's address.
 
 **Any other plan** is handed to the executor ("The queue"): run `plans`;
-a live executor gets one `SendMessage`, `Plan ready: plans/<topic>.md. Build it when you are free, in queue order; nothing to answer.`, else run
-`plans start plans/<topic>.md`. Say which happened, or the refusal, and
+a live executor gets one `SendMessage`, `Plan ready: plans/<topic>.md. Build it when you are free, in queue order; nothing to answer.` (a plan with a `First` line:
+`Plan first: plans/<topic>.md. Build it next, once the plan in hand is built; nothing to answer.`), else run
+`plans start plans/<topic>.md`. When ${user_config.owner} says here to
+put your plan first, run `plans first plans/<topic>.md` before the
+hand-off. Say which happened, or the refusal, and
 with `land: pull-request` the topic and whether its pull request opens.
 One message per plan. Paused, write the plan and say so. A dropped plan
 is handed to nobody. "Pause the queue" and "resume the queue" are `plans

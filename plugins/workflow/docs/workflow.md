@@ -458,6 +458,19 @@ request mode `plans` names what each brief and plan looks related to, and
 the author answers with a `Related` line.
 (decisions.md#plan-state-in-file, decisions.md#related-line)
 
+**A plan put first is built next.** On the owner's word, `plans first
+<path>` writes `First: <date> <time>.` under the header paragraph of a
+waiting plan or brief; the queue puts the files so marked ahead of the
+rest, the latest marked on top, then oldest first, a handed-over plan
+still before all, and `plans` says `first since` on each. The executor
+takes it at the point between two plans and never stops the one in
+hand: the tool hook refuses a Building line on another plan while a
+ready plan put first is free, and without `land: pull-request` a plan
+built as first is pushed before the rest of its batch is built. The
+planner carries a brief's line into its plan. The line counts only
+while its file waits; `plans first --undo <path>` takes it out.
+(decisions.md#plan-put-first)
+
 **One checkout has one executor**, which holds `.claude/executor.lock`;
 another's edits are refused. Its Stop hook holds the stop on a red or
 unfinished run of its push, or pull request of the checkout, whose fix

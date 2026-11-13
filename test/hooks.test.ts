@@ -87,6 +87,8 @@ import {
   relatedWork,
   fromOf,
   issueOf,
+  firstOf,
+  firstUnread,
   readyOf,
   carriesOf,
   carryOf,
@@ -1497,6 +1499,109 @@ describe("plan-queue", () => {
       "plans/earlier.md",
       "plans/later.md",
     ]);
+  });
+
+  // plans/priority-queue.md, part 1.
+  describe("a plan put first", () => {
+    it("firstOf", () => {
+      const head = "# P\n\nPlan only, 13 November 2026, for Javi.\n\n";
+      const at = (h: number, m: number, sec = 0) =>
+        Date.UTC(2026, 10, 13) + ((h * 60 + m) * 60 + sec) * 1000;
+      const of = (line: string) => firstOf(`${head}${line}\n\n## What was asked\n`);
+      expect(of("First: 13 November 2026 15:42:07.")).toEqual({
+        day: "13 November 2026",
+        time: "15:42",
+        at: at(15, 42, 7),
+      });
+      expect(of("First: 13 November 2026, 15:42")).toEqual({
+        day: "13 November 2026",
+        time: "15:42",
+        at: at(15, 42),
+      });
+      expect(of("First: 13 November 2026.")).toEqual({
+        day: "13 November 2026",
+        time: "",
+        at: at(0, 0),
+      });
+      expect(of("First: 2026-11-13 9:05.")).toEqual({
+        day: "2026-11-13",
+        time: "09:05",
+        at: at(9, 5),
+      });
+      // Past a status section, as the executor's lines sit above the header.
+      expect(
+        firstOf(
+          "# P\n\n## Planning, 13 November 2026, session s1\n\nBrief for the planner, 13 November 2026.\n\nFirst: 13 November 2026 10:00.\n\n## What was asked\n",
+        ),
+      ).toMatchObject({ time: "10:00" });
+      // Not in a fence, not below the first `## `.
+      expect(of("```\nFirst: 13 November 2026 15:42.\n```")).toBeNull();
+      expect(firstOf(`${head}## What was asked\n\nFirst: 13 November 2026 15:42.\n`)).toBeNull();
+      expect(of("First: soon.")).toBeNull();
+      expect(firstUnread(`${head}First: soon.\n\n## What was asked\n`)).toBe(true);
+      expect(firstUnread(`${head}First: 13 November 2026 15:42.\n\n## What was asked\n`)).toBe(
+        false,
+      );
+      expect(firstUnread(`${head}## What was asked\n`)).toBe(false);
+    });
+
+    it("stateOf, first", () => {
+      const line = "First: 13 November 2026 15:42.\n\n";
+      const plan = `# P\n\nPlan only, 13 November 2026, for Javi.\n\n${line}`;
+      const brief = `# B\n\nBrief for the planner, 13 November 2026.\n\n${line}`;
+      const first = (text: string, live: string[] | null = []) =>
+        stateOf(text, { live })?.first?.time ?? null;
+      expect(first(brief)).toBe("15:42");
+      expect(
+        first(
+          `${brief.replace("# B\n\n", "# B\n\n## Planning, 13 November 2026, session p1\n\n")}`,
+          ["p1"],
+        ),
+      ).toBe("15:42");
+      expect(first(plan)).toBe("15:42");
+      expect(first(`${plan.replace("for Javi.", "for Javi.\n\nIssue: #4.")}`)).toBe("15:42");
+      expect(stateOf(`${plan.replace("for Javi.", "for Javi.\n\nIssue: #4.")}`)?.state).toBe(
+        "planned",
+      );
+      expect(first(`${plan}## Handing over, 13 November 2026\n\nStep in hand: 2\n`)).toBe("15:42");
+      expect(
+        first(plan.replace("# P\n\n", "# P\n\n## Building, 13 November 2026, session b1\n\n"), [
+          "b1",
+        ]),
+      ).toBeNull();
+      expect(first(`${plan}## Built, 13 November 2026\n\nCommit 0123abcd.\n`)).toBeNull();
+      expect(
+        first(`${plan}## Dropped, 13 November 2026\n\nDropped on Javi's word: gone.\n`),
+      ).toBeNull();
+      expect(
+        first(
+          brief.replace("Brief for the planner", "Brief for the planner") +
+            "## Dropped, 13 November 2026\n\nGone.\n",
+        ),
+      ).toBeNull();
+      expect(first(plan.replace("13 November 2026, for", "20 October 2026, for"))).toBeNull();
+    });
+
+    it("readPlans, put first", () => {
+      const dir = join(repo, "first-plans");
+      mkdirSync(dir, { recursive: true });
+      const first = (time: string) => `First: 13 November 2026 ${time}.\n\n`;
+      writeFileSync(join(dir, "oldest.md"), header("10 November 2026"));
+      writeFileSync(join(dir, "newer.md"), header("12 November 2026"));
+      writeFileSync(join(dir, "b.md"), `${header("13 November 2026")}${first("15:42:07")}`);
+      writeFileSync(join(dir, "c.md"), `${header("13 November 2026")}${first("16:05:00")}`);
+      writeFileSync(
+        join(dir, "handed.md"),
+        `${header("11 November 2026")}## Handing over, 12 November 2026\n\nStep in hand: 2\n`,
+      );
+      expect(readPlans(dir).map((p) => p.path)).toEqual([
+        "plans/handed.md",
+        "plans/c.md",
+        "plans/b.md",
+        "plans/oldest.md",
+        "plans/newer.md",
+      ]);
+    });
   });
 
   it("lists the queue under its headings, in order", () => {
@@ -8735,5 +8840,432 @@ else if (args.includes("--bg")) {
     expect(net.queue(["stop"], ownerStop)).toBe("");
     expect(net.calls()).toBe("");
     expect(net.started()).toEqual([]);
+  });
+});
+
+// plans/priority-queue.md: the owner puts a plan first, and the executor builds it next.
+describe("a plan put first, in a project", () => {
+  const ids = {
+    exec: "f1000000-0000-0000-0000-000000000000",
+    planner: "f2000000-0000-0000-0000-000000000000",
+    other: "f3000000-0000-0000-0000-000000000000",
+  };
+  const stateFile = (id: string) => join(tmpdir(), `workflow-queue-${id}.json`);
+  const execRow = {
+    sessionId: ids.exec,
+    name: "First Executor 1",
+    kind: "background",
+    status: "busy",
+    state: "working",
+  };
+  let dir: string;
+  let projects: string;
+  const env = (rows: object[] | null) => ({
+    ...process.env,
+    CLAUDE_PROJECT_DIR: dir,
+    WORKFLOW_ROOT: dir,
+    WORKFLOW_PROJECTS: projects,
+    WORKFLOW_STARTS_LOG: join(dir, ".claude", "starts.log"),
+    WORKFLOW_USAGE_FILE: join(dir, ".claude", "usage.json"),
+    WORKFLOW_LIVE:
+      rows === null ? "null" : JSON.stringify(rows.map((one) => ({ ...one, cwd: dir }))),
+  });
+  const run = (args: string[], input: object = {}, rows: object[] | null = []) =>
+    spawnSync("node", [join(here, "plan-queue.mjs"), ...args], {
+      input: JSON.stringify(input),
+      encoding: "utf8",
+      env: env(rows),
+    });
+  const queue = (args: string[], input: object = {}, rows: object[] | null = []) =>
+    run(args, input, rows).stdout;
+  const file = (name: string) => join(dir, "plans", name);
+  const plan = (day: string, extra = "") =>
+    `# P\n\nPlan only, ${day}, for Javi; the executor builds it.\n\n${extra}## What was asked\n\nA change.\n`;
+  /** The queue as each case starts it: a.md of 12 November, b.md and c.md of 13 November. */
+  const reset = () => {
+    rmSync(join(dir, "plans"), { recursive: true, force: true });
+    mkdirSync(join(dir, "plans"));
+    writeFileSync(file("a.md"), plan("12 November 2026"));
+    writeFileSync(file("b.md"), plan("13 November 2026"));
+    for (const id of Object.values(ids)) rmSync(stateFile(id), { force: true });
+  };
+  const rows = (out: string, title: string) => {
+    const at = out.indexOf(`\n${title}\n`);
+    if (at < 0) return [];
+    const block = out.slice(at + title.length + 2).split("\n\n")[0];
+    return block.split("\n").filter((line) => line.startsWith("  "));
+  };
+  const SINCE = /first since \d{1,2} [A-Z][a-z]+ \d{2}:\d{2}/;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "first-"));
+    projects = mkdtempSync(join(tmpdir(), "first-projects-"));
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    mkdirSync(join(dir, ".claude"));
+    writeFileSync(join(dir, ".claude", "workflow.md"), "---\nname: First\nbranch: test\n---\n");
+  });
+  afterAll(() => {
+    for (const id of Object.values(ids)) rmSync(stateFile(id), { force: true });
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(projects, { recursive: true, force: true });
+  });
+
+  it("plans first puts a ready plan at the top and says since when", () => {
+    reset();
+    const before = statSync(file("b.md"));
+    const said = run(["first", "plans/b.md"]);
+    expect(said.status).toBe(0);
+    expect(said.stdout).toMatch(
+      /^plans\/b\.md is first since \d{1,2} [A-Z][a-z]+ \d{2}:\d{2}: plans lists it at the top, and it is taken next, after the work in hand\.\n$/,
+    );
+    const after = statSync(file("b.md"));
+    const text = readFileSync(file("b.md"), "utf8");
+    expect(text).toMatch(
+      /builds it\.\n\nFirst: \d{1,2} [A-Z][a-z]+ \d{4} \d{2}:\d{2}:\d{2}\.\n\n## What was asked/,
+    );
+    expect(Math.round(after.mtimeMs)).toBe(Math.round(before.mtimeMs));
+    expect(Math.round(after.atimeMs)).toBe(Math.round(before.atimeMs));
+    const listed = queue(["list"]);
+    expect(listed).not.toContain("Ready, oldest first");
+    const ready = rows(listed, "Ready, put first, then oldest first");
+    expect(ready[0]).toMatch(/^ {2}plans\/b\.md +Plan only, 13 November, first since /);
+    expect(ready[0]).toMatch(SINCE);
+    expect(ready[1]).toMatch(/^ {2}plans\/a\.md +Plan only, 12 November$/);
+    // Run again, the line is replaced, not doubled.
+    run(["first", "plans/b.md"]);
+    expect(readFileSync(file("b.md"), "utf8").match(/^First:/gm)).toHaveLength(1);
+    // A path in any shape the start reads.
+    expect(run(["first", "./plans/a.md"]).stdout).toMatch(/^plans\/a\.md is first since/);
+  });
+
+  it("the latest put first is on top", () => {
+    reset();
+    writeFileSync(file("c.md"), plan("13 November 2026"));
+    writeFileSync(file("b.md"), plan("13 November 2026", "First: 1 January 2026 09:00:00.\n\n"));
+    expect(run(["first", "plans/c.md"]).status).toBe(0);
+    const ready = rows(queue(["list"]), "Ready, put first, then oldest first");
+    expect(ready.map((line) => line.trim().split(/\s+/)[0])).toEqual([
+      "plans/c.md",
+      "plans/b.md",
+      "plans/a.md",
+    ]);
+    expect(ready[1]).toContain("first since 1 January 09:00");
+  });
+
+  it("a mark within the same second as another is still the later (Codex C3)", () => {
+    reset();
+    // Another plan marked a minute ahead of the clock: the next mark goes a second past it.
+    const ahead = new Date(Date.now() + 60_000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const months =
+      "January February March April May June July August September October November December".split(
+        " ",
+      );
+    const stamp = `${ahead.getDate()} ${months[ahead.getMonth()]} ${ahead.getFullYear()} ${pad(ahead.getHours())}:${pad(ahead.getMinutes())}:${pad(ahead.getSeconds())}`;
+    writeFileSync(file("a.md"), plan("12 November 2026", `First: ${stamp}.\n\n`));
+    expect(run(["first", "plans/b.md"]).status).toBe(0);
+    const ready = rows(queue(["list"]), "Ready, put first, then oldest first");
+    expect(ready.map((one) => one.trim().split(/\s+/)[0])).toEqual(["plans/b.md", "plans/a.md"]);
+    const b = firstOf(readFileSync(file("b.md"), "utf8"));
+    const a = firstOf(readFileSync(file("a.md"), "utf8"));
+    expect(b!.at - a!.at).toBe(1000);
+  });
+
+  it("a First line under a hand-over or a Planning line is still read, and undone (/code-review)", () => {
+    reset();
+    run(["first", "plans/b.md"]);
+    const marked = readFileSync(file("b.md"), "utf8");
+    // A hand-over written after the header paragraph, above the First line.
+    const handed = marked.replace(
+      "builds it.\n\n",
+      "builds it.\n\n## Handing over, 13 November 2026\n\nStep in hand: 2\n\n",
+    );
+    expect(firstOf(handed)).not.toBeNull();
+    expect(stateOf(handed)?.first).not.toBeNull();
+    writeFileSync(
+      file("x.md"),
+      `# X\n\nBrief for the planner, 13 November 2026.\n\n## Planning, 13 November 2026, session ${ids.planner}\n\nFirst: 13 November 2026 10:00:00.\n\n## What\n`,
+    );
+    expect(run(["first", "--undo", "plans/x.md"]).stdout).toBe("plans/x.md is no longer first.\n");
+    expect(readFileSync(file("x.md"), "utf8")).not.toContain("First:");
+    // Prose that starts with the word is no mark, and stays.
+    writeFileSync(
+      file("b.md"),
+      plan("13 November 2026").replace("builds it.\n", "builds it.\nFirst: the hook reads it.\n"),
+    );
+    run(["first", "plans/b.md"]);
+    run(["first", "--undo", "plans/b.md"]);
+    expect(readFileSync(file("b.md"), "utf8")).toContain("First: the hook reads it.\n");
+  });
+
+  it("a built plan is no longer first", () => {
+    reset();
+    run(["first", "plans/b.md"]);
+    writeFileSync(
+      file("b.md"),
+      `${readFileSync(file("b.md"), "utf8")}\n## Built, 13 November 2026\n\nCommit 0123abcd.\n`,
+    );
+    const listed = queue(["list"]);
+    expect(listed).toContain("\nReady, oldest first\n");
+    expect(listed).not.toContain("first since");
+  });
+
+  it("undo takes the line out", () => {
+    reset();
+    run(["first", "plans/b.md"]);
+    const before = statSync(file("b.md"));
+    expect(run(["first", "--undo", "plans/b.md"]).stdout).toBe("plans/b.md is no longer first.\n");
+    expect(readFileSync(file("b.md"), "utf8")).toBe(plan("13 November 2026"));
+    expect(Math.round(statSync(file("b.md")).mtimeMs)).toBe(Math.round(before.mtimeMs));
+    const listed = queue(["list"]);
+    expect(listed).toContain("\nReady, oldest first\n");
+    expect(listed).not.toContain("first since");
+    const again = run(["first", "--undo", "plans/b.md"]);
+    expect([again.stdout, again.status]).toEqual(["plans/b.md was not first.\n", 0]);
+  });
+
+  it("a brief put first is planned first", () => {
+    reset();
+    writeFileSync(file("x.md"), "# X\n\nBrief for the planner, 12 November 2026.\n\n## What\n");
+    writeFileSync(file("y.md"), "# Y\n\nBrief for the planner, 13 November 2026.\n\n## What\n");
+    expect(run(["first", "plans/y.md"]).status).toBe(0);
+    const briefs = rows(queue(["list"]), "Briefs, put first, then oldest first");
+    expect(briefs[0]).toMatch(/^ {2}plans\/y\.md +brief, 13 November, first since /);
+    expect(briefs[1]).toMatch(/^ {2}plans\/x\.md +brief, 12 November$/);
+    const dry = queue(["start", "--dry", "--agent", "planner"]);
+    expect(dry).toContain("Plan plans/y.md: it is a brief.");
+    expect(dry).not.toContain("plans/x.md");
+  });
+
+  it("plans first refuses what is not waiting", () => {
+    reset();
+    writeFileSync(
+      file("building.md"),
+      plan("13 November 2026").replace(
+        "# P\n\n",
+        `# P\n\n## Building, 13 November 2026, session ${ids.exec}\n\n`,
+      ),
+    );
+    writeFileSync(
+      file("built.md"),
+      `${plan("13 November 2026")}\n## Built, 13 November 2026\n\nCommit 0123abcd.\n`,
+    );
+    writeFileSync(
+      file("dropped.md"),
+      `${plan("13 November 2026")}\n## Dropped, 13 November 2026\n\nDropped on Javi's word: gone.\n`,
+    );
+    const refused = (args: string[]) => {
+      const out = run(["first", ...args], {}, [execRow]);
+      expect(out.status, args.join(" ")).toBe(1);
+      return out.stdout;
+    };
+    expect(refused(["plans/building.md"])).toBe(
+      "plans/building.md is being built by First Executor 1: nothing to put first.\n",
+    );
+    expect(refused(["plans/built.md"])).toBe("plans/built.md is built: nothing to put first.\n");
+    expect(refused(["plans/dropped.md"])).toBe(
+      "plans/dropped.md is dropped (13 November 2026): nothing to build.\n",
+    );
+    expect(refused(["plans/nowhere.md"])).toBe(
+      "plans/nowhere.md is not a plan or a brief in the queue; plans shows them.\n",
+    );
+    expect(refused([])).toBe(
+      "A path is needed: plans first plans/<x>.md; plans shows the queue.\n",
+    );
+    for (const name of ["building.md", "built.md", "dropped.md"])
+      expect(readFileSync(file(name), "utf8")).not.toContain("First:");
+  });
+
+  it("says a First line it does not read", () => {
+    reset();
+    writeFileSync(file("b.md"), plan("13 November 2026", "First: soon.\n\n"));
+    const listed = queue(["list"]);
+    expect(listed).toContain("\nFirst line not read: plans/b.md\n");
+    expect(listed).toContain("\nReady, oldest first\n");
+  });
+
+  describe("the executor", () => {
+    const line = `## Building, 13 November 2026, session ${ids.exec}`;
+    const edit = (name: string, rows: object[] | null = [execRow]) =>
+      queue(
+        ["tool"],
+        {
+          session_id: ids.exec,
+          agent_type: "workflow:executor",
+          tool_name: "Edit",
+          tool_input: {
+            file_path: file(name),
+            old_string: "# P\n",
+            new_string: `# P\n\n${line}\n`,
+          },
+        },
+        rows,
+      );
+    const denied = (out: string) =>
+      out ? JSON.parse(out).hookSpecificOutput?.permissionDecisionReason || "" : "";
+    const words = (path: string, since: string) =>
+      `plans/b.md is first (since ${since}): build it before ${path}. Only Javi's word in this chat changes the order: plans first ${path}.`;
+    const putFirst = () =>
+      writeFileSync(
+        file("b.md"),
+        plan("13 November 2026", "First: 13 November 2026 15:42:07.\n\n"),
+      );
+
+    it("the tool hook refuses a Building line out of turn", () => {
+      reset();
+      putFirst();
+      expect(denied(edit("a.md"))).toBe(words("plans/a.md", "13 November 15:42"));
+      expect(edit("b.md")).toBe("");
+      // A plan put first later than b.md is not behind it.
+      writeFileSync(file("c.md"), plan("13 November 2026", "First: 13 November 2026 16:00.\n\n"));
+      expect(edit("c.md")).toBe("");
+      // With the sessions unread it refuses nothing.
+      expect(edit("a.md", null)).toBe("");
+      // The plan put first, still asking its owner, holds nothing back.
+      rmSync(file("c.md"));
+      writeFileSync(
+        file("b.md"),
+        `${plan("13 November 2026", "First: 13 November 2026 15:42:07.\n\n")}\n## Decisions for Javi\n\n1. **One.** A (Recommended) or B.\n`,
+      );
+      writeFileSync(
+        stateFile(ids.planner),
+        JSON.stringify({
+          agent: "planner",
+          plans: ["plans/b.md"],
+          asked: { "plans/b.md": Date.now() },
+        }),
+      );
+      const planner = {
+        sessionId: ids.planner,
+        name: "First Planner 2",
+        kind: "background",
+        status: "idle",
+        state: "blocked",
+      };
+      expect(edit("a.md", [execRow, planner])).toBe("");
+    });
+
+    it("a shell command's Building line out of turn is taken out", () => {
+      reset();
+      putFirst();
+      writeFileSync(file("a.md"), plan("12 November 2026").replace("# P\n", `# P\n\n${line}\n`));
+      const out = queue(
+        ["wrote"],
+        {
+          session_id: ids.exec,
+          agent_type: "workflow:executor",
+          tool_name: "Bash",
+          tool_input: { command: "sed -i ... plans/a.md" },
+        },
+        [execRow],
+      );
+      expect(JSON.parse(out)).toEqual({
+        decision: "block",
+        reason: `${words("plans/a.md", "13 November 15:42")} Its Building line was taken out.`,
+      });
+      expect(readFileSync(file("a.md"), "utf8")).not.toContain("## Building, ");
+      // On the plan put first, it stays.
+      writeFileSync(
+        file("b.md"),
+        plan("13 November 2026", "First: 13 November 2026 15:42:07.\n\n").replace(
+          "# P\n",
+          `# P\n\n${line}\n`,
+        ),
+      );
+      rmSync(stateFile(ids.exec), { force: true });
+      expect(
+        queue(
+          ["wrote"],
+          {
+            session_id: ids.exec,
+            agent_type: "workflow:executor",
+            tool_name: "Bash",
+            tool_input: { command: "sed -i ... plans/b.md" },
+          },
+          [execRow],
+        ),
+      ).toBe("");
+      expect(readFileSync(file("b.md"), "utf8")).toContain(line);
+    });
+
+    it("a handed-over plan is resumed whatever is first (Codex C1)", () => {
+      reset();
+      putFirst();
+      writeFileSync(
+        file("a.md"),
+        plan("12 November 2026", "## Handing over, 13 November 2026\n\nStep in hand: 2\n\n"),
+      );
+      expect(edit("a.md")).toBe("");
+      writeFileSync(
+        file("a.md"),
+        plan(
+          "12 November 2026",
+          `## Resumed, 13 November 2026, session ${ids.exec}, at step 2\n\nStep in hand: 2\n\n`,
+        ),
+      );
+      expect(edit("a.md")).toBe("");
+    });
+
+    it("one shell command claiming two plans keeps only the first's (Codex C2)", () => {
+      reset();
+      putFirst();
+      writeFileSync(file("a.md"), plan("12 November 2026").replace("# P\n", `# P\n\n${line}\n`));
+      writeFileSync(
+        file("b.md"),
+        plan("13 November 2026", "First: 13 November 2026 15:42:07.\n\n").replace(
+          "# P\n",
+          `# P\n\n${line}\n`,
+        ),
+      );
+      const out = queue(
+        ["wrote"],
+        {
+          session_id: ids.exec,
+          agent_type: "workflow:executor",
+          tool_name: "Bash",
+          tool_input: { command: "sed -i ... plans/a.md plans/b.md" },
+        },
+        [execRow],
+      );
+      expect(JSON.parse(out).reason).toBe(
+        `${words("plans/a.md", "13 November 15:42")} Its Building line was taken out.`,
+      );
+      expect(readFileSync(file("a.md"), "utf8")).not.toContain("## Building, ");
+      expect(readFileSync(file("b.md"), "utf8")).toContain(line);
+    });
+
+    it("a fresh executor's prompt names the first plan first", () => {
+      reset();
+      putFirst();
+      expect(queue(["start", "--dry"])).toContain("Build plans/b.md, then plans/a.md.");
+      // A timer's start, its paths in the queue's order as it is then.
+      const timer = execFileSync(
+        "node",
+        [
+          "--input-type=module",
+          "-e",
+          `import { start } from ${JSON.stringify(join(here, "plan-queue.mjs"))};
+           console.log(start(["plans/a.md", "plans/b.md"], { dry: true, timer: true, deferral: "executor" }));`,
+        ],
+        { encoding: "utf8", env: env([]) },
+      );
+      expect(timer).toContain("Build plans/b.md, then plans/a.md.");
+      // Paths given on the command line keep the order given.
+      expect(queue(["start", "--dry", "plans/a.md", "plans/b.md"])).toContain(
+        "Build plans/a.md, then plans/b.md.",
+      );
+    });
+
+    it("the Stop hook names the first plan first", () => {
+      reset();
+      putFirst();
+      writeFileSync(stateFile(ids.exec), JSON.stringify({ agent: "executor" }));
+      const reason = JSON.parse(
+        queue(["stop"], { session_id: ids.exec, agent_type: "executor" }, [execRow]),
+      ).reason;
+      expect(reason).toContain(
+        "can take them: plans/b.md (first since 13 November 15:42), plans/a.md (",
+      );
+    });
   });
 });

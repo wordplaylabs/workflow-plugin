@@ -53,6 +53,7 @@ import {
   renameSync,
   statSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
   appendFileSync,
 } from "node:fs";
@@ -224,6 +225,8 @@ function sectionAfter(text, heading) {
  * question's window is recorded the same way (/code-review).
  */
 const ASKS_STATES = ["ready", "planned"];
+/** The states of a file that waits, whose `First` line counts (plans/priority-queue.md, part 1). */
+const WAITING_STATES = ["brief", "planning", "ready", "planned", "handed"];
 
 /** The queue's own status lines, dated, never a plan's "## Building it" section. */
 const STATUS_HEADING = /^## (?:Planning, |Building, |Resumed, |Handing over\b)/;
@@ -302,6 +305,63 @@ function headOf(text) {
 export function landsUnread(text = "") {
   return /^Lands:/m.test(headOf(text)) && !landsOf(text);
 }
+
+/**
+ * **A plan or a brief the owner put first** (plans/priority-queue.md, part 1;
+ * decisions.md#plan-put-first), its `First: 13 November 2026 15:42:07.` line,
+ * read as `landsOf` reads `Lands`: the day in either spelling `parseDay` reads,
+ * then optionally a time, `hh:mm` or `hh:mm:ss`, a comma before it or not, the
+ * full stop optional. `{ day, time, at }`, `time` as `hh:mm` or "" and `at` the
+ * day and the time in milliseconds, the order two marks are put in; null with
+ * none.
+ */
+export function firstOf(text = "") {
+  const m = new RegExp(
+    `^First:[ \\t]+(${DAY}),?(?:[ \\t]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?\\.?[ \\t]*$`,
+    "m",
+  ).exec(firstHead(text));
+  if (!m) return null;
+  const date = parseDay(m[1]);
+  if (Number.isNaN(date)) return null;
+  const [hours, minutes, seconds] = [m[2], m[3], m[4]].map((part) => Number(part || 0));
+  if (hours > 23 || minutes > 59 || seconds > 59) return null;
+  const time = m[2] ? `${String(hours).padStart(2, "0")}:${m[3]}` : "";
+  return { day: m[1], time, at: date + ((hours * 60 + minutes) * 60 + seconds) * 1000 };
+}
+
+/**
+ * **A row put first, in words** (plans/priority-queue.md, part 3): `first
+ * since 13 November 15:42`, the day without its year, the time when the line
+ * has one; "" for a plan not put first. The rows of `plans`, the Stop hook's
+ * line and the tool hook's refusal say it so.
+ */
+export function firstWords(plan) {
+  const first = plan?.first;
+  if (!first) return "";
+  const at = new Date(parseDay(first.day));
+  const day = `${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]}`;
+  return `first since ${day}${first.time ? ` ${first.time}` : ""}`;
+}
+
+/** A `First:` line where `firstOf` looks that `firstOf` does not read, said by `plans`. */
+export function firstUnread(text = "") {
+  return /^First:/m.test(firstHead(text)) && !firstOf(text);
+}
+
+/**
+ * Where a `First` line is read: the text before the first heading that is not
+ * one of the queue's status lines, outside fences, the status sections
+ * included, since a hand-over or a Planning line written under the header
+ * lands above the line (/code-review).
+ */
+function firstHead(text) {
+  const lines = text.split("\n");
+  const end = lines.findIndex((line) => /^## /.test(line) && !STATUS_HEADING.test(line));
+  return withoutFences((end < 0 ? lines : lines.slice(0, end)).join("\n"));
+}
+
+/** A `First` line `plans first` replaces: one with a day, read or not; prose that starts with the word stays. */
+const FIRST_MARK = new RegExp(`^First:[ \\t]+(?:${DAY})`);
 
 /**
  * One item of a `Related` line: `#<n>`, or `branch <name>`: a topic's name, or
@@ -504,10 +564,13 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
       issue: issueOf(text),
     };
     if (dropped) return { ...base, state: "dropped", ...dropped };
+    // **A brief put first** (plans/priority-queue.md, part 1): the mark counts
+    // while the brief waits or is planned, and the planner carries it on.
+    const first = firstOf(text);
     const planning = /^## Planning, ([^,\n]+), session ([^\s,]+)/m.exec(text);
     if (planning && (live === null || live.includes(planning[2])))
-      return { ...base, state: "planning", session: planning[2], since: planning[1] };
-    return { ...base, state: "brief", stale: Boolean(planning) };
+      return { ...base, state: "planning", session: planning[2], since: planning[1], first };
+    return { ...base, state: "brief", stale: Boolean(planning), first };
   }
   if (!header) return null;
   const plan = {
@@ -585,6 +648,7 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
     return {
       ...plan,
       state: "handed",
+      first: firstOf(text),
       stale,
       resumed,
       stuck,
@@ -599,8 +663,11 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
     !/^## Decided/m.test(text);
   // **A plan with an issue waits for Ready** (plans/plans-as-github-issues.md,
   // part 3): planned until the label or the owner's word writes the section.
-  if (plan.issue && !readyOf(text)) return { ...plan, state: "planned", stale, asks };
-  return { ...plan, state: "ready", stale, asks };
+  // **A plan put first** (plans/priority-queue.md, part 1): only while it
+  // waits; a built, dropped or building plan carries no mark, with nothing to clear.
+  const first = firstOf(text);
+  if (plan.issue && !readyOf(text)) return { ...plan, state: "planned", stale, asks, first };
+  return { ...plan, state: "ready", stale, asks, first };
 }
 
 /** The repository paths a plan names, once each. */
@@ -633,7 +700,11 @@ export function sharedTokens(text = "", seen = {}, { checkout = root } = {}) {
   return Math.round(tokens);
 }
 
-/** The plans under `plans/`, each with its path and state, the queue's order (handed over first, then oldest). */
+/**
+ * The plans under `plans/`, each with its path and state, the queue's order:
+ * handed over first, then those put first, the latest put first on top
+ * (plans/priority-queue.md, part 1), then oldest.
+ */
 export function readPlans(dir = join(root, "plans"), live = null) {
   let names = [];
   try {
@@ -658,6 +729,8 @@ export function readPlans(dir = join(root, "plans"), live = null) {
   return plans.sort(
     (a, b) =>
       Number(b.state === "handed") - Number(a.state === "handed") ||
+      Number(Boolean(b.first)) - Number(Boolean(a.first)) ||
+      (b.first?.at || 0) - (a.first?.at || 0) ||
       (a.date || 0) - (b.date || 0) ||
       a.mtime - b.mtime,
   );
@@ -1355,10 +1428,14 @@ function blockReason(lock) {
 }
 
 function annotate(plan) {
-  if (plan.state === "handed") return `${plan.path} (handed over, resume)`;
-  return plan.asks
-    ? `${plan.path} (decisions unanswered: the recommended options, "Asked once")`
-    : plan.path;
+  // A plan put first says so, with its other words in the one parenthesis
+  // (plans/priority-queue.md, part 3).
+  const words = [
+    plan.state === "handed" ? "handed over, resume" : "",
+    firstWords(plan),
+    plan.asks ? 'decisions unanswered: the recommended options, "Asked once"' : "",
+  ].filter(Boolean);
+  return words.length ? `${plan.path} (${words.join("; ")})` : plan.path;
 }
 
 /** "200k", a token count as the queue's lines say it. */
@@ -1833,6 +1910,35 @@ export function holdWords(path, held) {
 export function stillAskingWords(path, { until }) {
   const at = hhmm(until);
   return `${path} is still asking ${owner()} (its planner's until ${at}): build the other plans first, and come back to it after ${at}, or when ${owner()} says in this chat to build it now. Once he has, write his word in its "Decided" section first: that lets the plan go.`;
+}
+
+/**
+ * **A plan put first is built next** (plans/priority-queue.md, part 4): the
+ * ready plans, not asking, put first, other than `path`, that the queue puts
+ * before it: every one when `path` is not put first, else those put first
+ * later. `plans` is `withAsking(readPlans(...), live)`; `path`'s own mark is
+ * read from its text, so a plan whose Building line is written already is
+ * judged by it.
+ */
+export function firstAhead(path, plans) {
+  const own = plans.find((p) => p.path === path);
+  // **A handed-over plan is finished first** (Codex C1): resumed, it is the
+  // build in the middle, never out of turn.
+  if (own && /^## (?:Handing over\b|Resumed, )/m.test(withoutFences(own.text || ""))) return [];
+  const mine = own ? firstOf(own.text || "") : null;
+  return plans.filter(
+    (p) =>
+      p.path !== path &&
+      p.state === "ready" &&
+      !p.askingIn &&
+      p.first &&
+      (!mine || p.first.at > mine.at),
+  );
+}
+
+/** The refusal of a Building line on `path` while `ahead`, a plan put first, waits. */
+export function outOfTurnWords(path, ahead) {
+  return `${ahead.path} is first (${firstWords(ahead).replace(/^first /, "")}): build it before ${path}. Only ${owner()}'s word in this chat changes the order: plans first ${path}.`;
 }
 
 /** "plans/x.md asks Javi in Planner 3 [9b372186] until 14:32: ...", the start's refusal of a held plan. */
@@ -3288,6 +3394,130 @@ export function droppedWords(plan) {
   return `${plan.path} is dropped${plan.droppedDay ? ` (${plan.droppedDay})` : ""}: nothing to build.`;
 }
 
+/**
+ * A path as the queue writes it, so `./plans/x.md` or an absolute one is
+ * judged as `plans/x.md` (Codex, 30 October).
+ */
+function queuePath(path) {
+  const inside = relative(root, resolve(root, path));
+  return inside && !inside.startsWith("..") && !isAbsolute(inside)
+    ? inside.split(sep).join("/")
+    : path;
+}
+
+/**
+ * **`plans first <path>` and `plans first --undo <path>`** (plans/priority-
+ * queue.md, part 2; decisions.md#plan-put-first): on the owner's word, writes
+ * `First: <date> <hh:mm:ss>.` as a paragraph of its own after the header
+ * paragraph of a waiting plan or brief, in place of one already there, or
+ * takes it out; the file's times are put back, so its place among the plans
+ * of its day and its asking window stay as they were. It starts nobody.
+ * `{ said, status }`.
+ */
+export function firstCommand(args = [], { now = Date.now(), live } = {}) {
+  if (!proj().found) return { said: NO_PROJECT, status: 1 };
+  if (proj().form === "compact") return { said: COMPACT, status: 1 };
+  const undo = args.includes("--undo");
+  const given = args.find((arg) => arg !== "--undo");
+  if (!given)
+    return {
+      said: "A path is needed: plans first plans/<x>.md; plans shows the queue.",
+      status: 1,
+    };
+  const path = queuePath(given);
+  const file = join(root, path);
+  // The times as they were before the queue read the file, to be put back.
+  let stat = null;
+  try {
+    stat = statSync(file);
+  } catch {
+    // Not there: refused below as no plan of the queue.
+  }
+  live = live === undefined ? liveSessions() : live;
+  const plans = readPlans(join(root, "plans"), liveIds(live));
+  const plan = plans.find((p) => p.path === path);
+  if (!plan || !stat || plan.state === "old")
+    return { said: `${path} is not a plan or a brief in the queue; plans shows them.`, status: 1 };
+  if (plan.state === "dropped") return { said: droppedWords(plan), status: 1 };
+  if (plan.state === "built") return { said: `${path} is built: nothing to put first.`, status: 1 };
+  if (plan.state === "building") {
+    const name =
+      live?.find((row) => row.sessionId === plan.session)?.name || String(plan.session).slice(0, 8);
+    return { said: `${path} is being built by ${name}: nothing to put first.`, status: 1 };
+  }
+  const lines = withoutFirstLine(plan.text).split("\n");
+  const header = lines.findIndex((line) => HEADER_LINE.test(line));
+  if (header < 0)
+    return { said: `${path} is not a plan or a brief in the queue; plans shows them.`, status: 1 };
+  let said;
+  if (undo) {
+    if (
+      !firstHead(plan.text)
+        .split("\n")
+        .some((line) => FIRST_MARK.test(line))
+    )
+      return { said: `${path} was not first.`, status: 0 };
+    said = `${path} is no longer first.`;
+  } else {
+    // The time as written, local, read as `firstOf` reads it; a second past
+    // the latest mark of another waiting file when it is not later, so the
+    // latest put first is on top even within one second (Codex C3).
+    const local = new Date(now);
+    let at = Date.UTC(
+      local.getFullYear(),
+      local.getMonth(),
+      local.getDate(),
+      local.getHours(),
+      local.getMinutes(),
+      local.getSeconds(),
+    );
+    const latest = Math.max(
+      0,
+      ...plans.filter((p) => p.path !== path && p.first).map((p) => p.first.at),
+    );
+    if (at <= latest) at = latest + 1000;
+    const when = new Date(at);
+    const day = `${when.getUTCDate()} ${MONTHS[when.getUTCMonth()]} ${when.getUTCFullYear()}`;
+    const time = when.toISOString().slice(11, 19);
+    const line = `First: ${day} ${time}.`;
+    // After the header paragraph, as `handOverEdit` places a hand-over.
+    const end = lines.findIndex((one, i) => i > header && (one.trim() === "" || /^## /.test(one)));
+    if (end < 0) lines.push("", line);
+    else if (lines[end].trim() === "") lines.splice(end + 1, 0, line, "");
+    else lines.splice(end, 0, "", line, "");
+    said = `${path} is ${firstWords({ first: { day, time: time.slice(0, 5) } })}: plans lists it at the top, and it is taken next, after the work in hand.`;
+  }
+  writeFileSync(file, lines.join("\n"));
+  utimesSync(file, stat.atimeMs / 1000, stat.mtimeMs / 1000);
+  return { said, status: 0 };
+}
+
+/**
+ * A plan's text without the `First:` lines of its head, each with the blank
+ * line after it where one is before it too, so no paragraph is left doubled.
+ */
+function withoutFirstLine(text) {
+  const lines = text.split("\n");
+  const kept = [];
+  let fence = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (mark) fence = fence ? (mark[0] === fence[0] ? null : fence) : mark;
+    // The head ends at the first heading that is not one of the queue's status lines.
+    if (!fence && /^## /.test(line) && !STATUS_HEADING.test(line)) {
+      kept.push(...lines.slice(i));
+      break;
+    }
+    if (!fence && FIRST_MARK.test(line)) {
+      if (lines[i + 1]?.trim() === "" && (kept.length === 0 || kept.at(-1).trim() === "")) i++;
+      continue;
+    }
+    kept.push(line);
+  }
+  return kept.join("\n");
+}
+
 function startHere(
   paths,
   {
@@ -3301,14 +3531,7 @@ function startHere(
   } = {},
 ) {
   if (!proj().found) return NO_PROJECT;
-  // A path as the queue writes it, so `./plans/x.md` or an absolute one is
-  // judged as `plans/x.md` (Codex, 30 October).
-  paths = paths.map((path) => {
-    const inside = relative(root, resolve(root, path));
-    return inside && !inside.startsWith("..") && !isAbsolute(inside)
-      ? inside.split(sep).join("/")
-      : path;
-  });
+  paths = paths.map(queuePath);
   const live = liveSessions();
   // **Asked once**: a plan whose planner is asking the owner is that chat's
   // for thirty minutes, neither taken by default nor accepted by path.
@@ -3357,10 +3580,12 @@ function startHere(
     // **A timer's start takes only what is still waiting**: a plan being
     // built or built since the timer was armed, or gone, is dropped, and with
     // none left nothing starts. A plan answered and still waiting is started.
+    // In the queue's order as it is now, so a plan put first after the
+    // deferral was written is still named first (plans/priority-queue.md, part 5).
     if (timer) {
-      paths = paths.filter((path) =>
-        plans.some((p) => p.path === path && ["ready", "handed", "old"].includes(p.state)),
-      );
+      paths = plans
+        .filter((p) => paths.includes(p.path) && ["ready", "handed", "old"].includes(p.state))
+        .map((p) => p.path);
       if (!paths.length) return "Nothing is waiting in the queue.";
     }
   }
@@ -3943,7 +4168,13 @@ export function list({ all = false, live, related = true, readers = null } = {})
   };
   const group = (title, items, rest, under = () => []) => {
     if (!items.length) return;
-    out.push("", title);
+    // **A group with a row put first says so** (plans/priority-queue.md, part 3).
+    out.push(
+      "",
+      items.some((p) => p.first)
+        ? title.replace(/oldest first$/, "put first, then oldest first")
+        : title,
+    );
     for (const plan of items) out.push(row(plan.path, rest(plan)), ...under(plan));
   };
   group(
@@ -3956,9 +4187,11 @@ export function list({ all = false, live, related = true, readers = null } = {})
     briefRows,
     (p) =>
       p.state === "planning"
-        ? `${nameOf(p.session)}, since ${p.since}`
+        ? [`${nameOf(p.session)}, since ${p.since}`, firstWords(p)].filter(Boolean).join(", ")
         : [
-            `brief${p.day ? `, ${p.day.replace(/ \d{4}$/, "")}` : ""}`,
+            [`brief${p.day ? `, ${p.day.replace(/ \d{4}$/, "")}` : ""}`, firstWords(p)]
+              .filter(Boolean)
+              .join(", "),
             p.stale ? "(a Planning line from a session that is gone)" : "",
           ]
             .filter(Boolean)
@@ -3971,14 +4204,15 @@ export function list({ all = false, live, related = true, readers = null } = {})
     `Asking ${owner()}, oldest first`,
     plans.filter((p) => p.askingIn),
     (p) =>
-      `${p.kind}, ${p.day.replace(/ \d{4}$/, "")}, in ${p.askingIn.row.name || "a planner"} [${String(p.askingIn.row.sessionId).slice(0, 8)}], ${statusOf(p.askingIn.row)}, the executor decides at ${hhmm(p.askingIn.until)}`,
+      `${p.kind}, ${p.day.replace(/ \d{4}$/, "")}${p.first ? `, ${firstWords(p)}` : ""}, in ${p.askingIn.row.name || "a planner"} [${String(p.askingIn.row.sessionId).slice(0, 8)}], ${statusOf(p.askingIn.row)}, the executor decides at ${hhmm(p.askingIn.until)}`,
   );
   // **A plan with an issue waits for Ready** (plans/plans-as-github-issues.md,
   // part 3): its issue, and the day it was planned.
   group(
     "Planned, waiting on GitHub",
     plans.filter((p) => p.state === "planned" && !p.askingIn),
-    (p) => `#${p.issue}, since ${p.day.replace(/ \d{4}$/, "")}`,
+    (p) =>
+      `#${p.issue}${p.first ? `, ${firstWords(p)}` : ""}, since ${p.day.replace(/ \d{4}$/, "")}`,
   );
   // **What was opened on GitHub and nothing carries yet** (plans/github-watched.md, part 3).
   if (issues) {
@@ -4004,6 +4238,7 @@ export function list({ all = false, live, related = true, readers = null } = {})
     (p) =>
       [
         `${p.kind}, ${p.day.replace(/ \d{4}$/, "")}`,
+        firstWords(p),
         // A plan with no Lands line is a topic of its own, ready.
         byPull
           ? landsWords(p.lands || { kind: "topic", name: basename(p.path, ".md"), ready: true })
@@ -4074,12 +4309,20 @@ export function list({ all = false, live, related = true, readers = null } = {})
         )
         .map((p) => p.path)
     : [];
-  if (unread.headless.length || unread.failed.length || landsNotRead.length) out.push("");
+  // A waiting file's First line the queue does not read (plans/priority-
+  // queue.md, part 3), in either landing mode: said, so the order is not
+  // silently oldest first.
+  const firstNotRead = plans
+    .filter((p) => WAITING_STATES.includes(p.state) && !p.first && firstUnread(p.text))
+    .map((p) => p.path);
+  if (unread.headless.length || unread.failed.length || landsNotRead.length || firstNotRead.length)
+    out.push("");
   if (unread.headless.length)
     out.push(`Not read by the queue (no header found): ${unread.headless.join(", ")}`);
   if (unread.failed.length)
     out.push(`Not read by the queue (the file could not be read): ${unread.failed.join(", ")}`);
   if (landsNotRead.length) out.push(`Lands line not read: ${landsNotRead.join(", ")}`);
+  if (firstNotRead.length) out.push(`First line not read: ${firstNotRead.join(", ")}`);
   // **The label is said where the queue is read** (plans/session-names-
   // across-machines.md), while the hostname stands in for it.
   if (!here.set)
@@ -5244,6 +5487,12 @@ function buildingRefusal(input, statePath) {
   const live = liveSessions({ timeout: 4000 });
   const asking = heldFromBuilding(path, after, live, { mtime: mtimeOf(path) });
   if (asking) return holdWords(path, asking);
+  // **Not out of turn** (plans/priority-queue.md, part 4): while a free ready
+  // plan is put first ahead of this one; with no sessions read, nothing.
+  if (live) {
+    const ahead = firstAhead(path, withAsking(readPlans(join(root, "plans"), liveIds(live)), live));
+    if (ahead.length) return outOfTurnWords(path, ahead[0]);
+  }
   // Judged with the sessions in hand, the plan is not judged again by the
   // shell's check; unjudged (no sessions read), the next shell command's
   // check reads them again (Codex, 28 October).
@@ -5379,18 +5628,37 @@ function hook(mode, input) {
       if (unjudged.length) {
         const live = liveSessions({ timeout: 4000 });
         const own = new RegExp(`${building.source}[^\\n]*\\n?`, "gm");
+        // The queue with the sessions in hand, for a plan put first ahead
+        // (plans/priority-queue.md, part 4); none with no sessions read.
+        // The plans this command claimed are judged as they stood before it,
+        // so one command claiming two is not let through by its own lines (Codex C2).
+        const queued = live
+          ? withAsking(
+              readPlans(join(root, "plans"), liveIds(live)).map((p) =>
+                unjudged.some((one) => one.path === p.path)
+                  ? {
+                      ...p,
+                      ...stateOf(p.text.replace(own, ""), { mtime: p.mtime, live: liveIds(live) }),
+                    }
+                  : p,
+              ),
+              live,
+            )
+          : [];
         for (const plan of unjudged) {
           const mtime = state.plansAt?.[plan.path] || 0;
           const asking = heldFromBuilding(plan.path, plan.text, live, { mtime });
+          const ahead = asking ? [] : firstAhead(plan.path, queued);
           // No sessions read is the hook doing nothing, as when it fails:
           // judged, so a failing list is not asked again on every command.
-          if (!asking) {
+          if (!asking && !ahead.length) {
             taken.push(plan.path);
             newly.push(plan.path);
             continue;
           }
           writeFileSync(plan.file, plan.text.replace(own, ""));
-          said.push(`${holdWords(plan.path, asking)} Its Building line was taken out.`);
+          const words = asking ? holdWords(plan.path, asking) : outOfTurnWords(plan.path, ahead[0]);
+          said.push(`${words} Its Building line was taken out.`);
         }
       }
       if (String(taken) !== String(state.taken || []))
@@ -6506,6 +6774,7 @@ plans --all           with the older plans listed by path
 plans start [path...] start an executor on the waiting plans, or these
 plans start --agent planner <brief>   start a planner on a brief
 plans start --agent assistant <plan>  start an assistant chat on a built plan's follow-ups
+plans first <path> [--undo]  put a waiting plan or brief first, on the owner's word, or take that back
 plans pause | resume  stop and restart starting sessions
 plans end [id...] [--now]  end this queue's finished chats, or these; --now ends a named one whatever it is doing
 plans sync            move a clean, detached checkout to the branch
@@ -6611,6 +6880,13 @@ export function main(args = process.argv.slice(2)) {
         { immediate: rest.includes("--now") },
       )}\n`,
     );
+    return;
+  }
+  // **`plans first`** (plans/priority-queue.md, part 2).
+  if (mode === "first") {
+    const { said, status } = firstCommand(rest);
+    process.stdout.write(`${said}\n`);
+    if (status) process.exitCode = status;
     return;
   }
   if (!["sync", "pause", "resume", "start", ...HOOK_MODES].includes(mode)) {

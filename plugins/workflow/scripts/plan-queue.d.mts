@@ -22,7 +22,11 @@ export type PlanState = {
   from?: { project: string; path: string } | null;
   /** A plan's `## For <Project>: plans/<topic>.md` sections. */
   carries?: { project: string; file: string }[];
+  /** A waiting plan's or brief's `First` line (plans/priority-queue.md). */
+  first?: First | null;
 };
+/** A `First: <date> <time>.` line, read (plans/priority-queue.md, part 1). */
+export type First = { day: string; time: string; at: number };
 /** A brief a built plan owes the project it came from (plans/project-follow-ups-reach-the-project.md). */
 export type Carry = {
   path: string;
@@ -349,6 +353,23 @@ export function startPrompt(paths: string[], plans: { state: string; path: strin
 export function githubPrompt(path: string): string;
 export const PLANNER_PROMPT: RegExp;
 export function fromOf(text?: string): { project: string; path: string } | null;
+export function firstOf(text?: string): First | null;
+export function firstUnread(text?: string): boolean;
+export function firstWords(plan: { first?: First | null } | null | undefined): string;
+export function firstCommand(
+  args?: string[],
+  options?: { now?: number; live?: object[] | null },
+): { said: string; status: number };
+export function firstAhead<
+  P extends {
+    path: string;
+    state: string;
+    text?: string;
+    first?: First | null;
+    askingIn?: unknown;
+  },
+>(path: string, plans: P[]): P[];
+export function outOfTurnWords(path: string, ahead: { path: string; first?: First | null }): string;
 export function carriesOf(text?: string): { project: string; file: string }[];
 export function briefThere(
   checkout: string,

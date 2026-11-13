@@ -384,6 +384,20 @@ on the machine that planned them.
   A dropped plan is kept as the record of why, as GitHub closes an issue
   as not planned with the reason and MADR keeps a rejected record.
   plans/handed-plan-stays-in-queue.md, plans/dropped-plan-state.md.
+- `plan-put-first` **A plan or a brief the owner puts first is taken
+  next, at the point between two plans, and the mark is a line in its
+  file.** (Javi, 13 November) In a project a one-line fix that alone
+  held a pull request's merge waited behind five larger plans, and the
+  assistant's message asking for it first was recorded nowhere a fresh
+  executor reads. One mark, the latest on top, as GitHub's merge queue
+  has one "Jump the queue" and Slurm's `scontrol top` moves a job to
+  the front, rather than levels (Buildkite's numeric priority,
+  Mergify's priority rules), which ask a rank of every plan. Unlike
+  GitHub's jump, which rebuilds what is in progress, nothing under way
+  is stopped, as Buildkite's priority orders only jobs not yet
+  assigned. The line is in the file by plan-state-in-file, and the
+  hook refuses a Building line out of turn as it does on a plan still
+  asking. plans/priority-queue.md.
 - `related-line` **In pull request mode, `plans` says what each brief and
   ready plan looks related to, and the author answers with a `Related`
   line.** (Javi, 30 October) GitHub links a `#<n>` and writes a backlink

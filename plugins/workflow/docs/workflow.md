@@ -460,12 +460,13 @@ the author answers with a `Related` line.
 
 **A plan put first is built next.** On the owner's word, `plans first
 <path>` writes `First: <date> <time>.` under the header paragraph of a
-waiting plan or brief; the queue puts the files so marked ahead of the
+waiting plan or brief, or above the `## ` section that header sits under;
+the queue puts the files so marked ahead of the
 rest, the latest marked on top, then oldest first, a handed-over plan
 still before all, and `plans` says `first since` on each. The executor
 takes it at the point between two plans and never stops the one in
 hand: the tool hook refuses a Building line on another plan while a
-ready plan put first is free, and without `land: pull-request` a plan
+ready plan put first is free, one it would not refuse as still asking, and without `land: pull-request` a plan
 built as first is pushed before the rest of its batch is built. The
 planner carries a brief's line into its plan, and its tool hook
 refuses a write that drops it. The line counts only

@@ -371,9 +371,13 @@ export function firstAhead<
     state: string;
     text?: string;
     first?: First | null;
-    askingIn?: unknown;
+    mtime?: number;
   },
->(path: string, plans: P[]): P[];
+>(
+  path: string,
+  plans: P[],
+  options?: { live?: object[] | null; timeOf?: (plan: P) => number },
+): P[];
 export function outOfTurnWords(path: string, ahead: { path: string; first?: First | null }): string;
 export function carriesOf(text?: string): { project: string; file: string }[];
 export function briefThere(

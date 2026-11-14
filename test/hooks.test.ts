@@ -9218,6 +9218,38 @@ describe("a plan put first, in a project", () => {
     expect(readFileSync(file("b.md"), "utf8")).toBe(kept);
   });
 
+  it("plans first writes above a section the header sits under (plans/put-first-review-fixes-follow-up.md)", () => {
+    reset();
+    // The header on line 7, under a `## ` section of its own.
+    const under =
+      "# P\n\n## Context\n\nA note kept above the header.\n\nPlan only, 13 November 2026, for Javi; the executor builds it.\n\n## What was asked\n\nA change.\n";
+    expect(under.split("\n")[6]).toMatch(/^Plan only, /);
+    writeFileSync(file("b.md"), under);
+    expect(run(["first", "plans/b.md"]).status).toBe(0);
+    expect(readFileSync(file("b.md"), "utf8")).toMatch(
+      /^# P\n\nFirst: \d{1,2} [A-Z][a-z]+ \d{4} \d{2}:\d{2}:\d{2}\.\n\n## Context\n/,
+    );
+    const listed = queue(["list"]);
+    expect(listed).not.toContain("First line not read");
+    const ready = rows(listed, "Ready, put first, then oldest first");
+    expect(ready[0]).toMatch(/^ {2}plans\/b\.md +Plan only, 13 November, first since /);
+    expect(run(["first", "--undo", "plans/b.md"]).status).toBe(0);
+    expect(readFileSync(file("b.md"), "utf8")).toBe(under);
+    // The header on line 12, the last the queue reads it on: the two lines
+    // written above it do not push it out (Codex C1).
+    const edge = under.replace(
+      "A note kept above the header.\n",
+      "A\nnote\nkept\nabove\nthe\nheader.\n",
+    );
+    expect(edge.split("\n")[11]).toMatch(/^Plan only, /);
+    writeFileSync(file("b.md"), edge);
+    expect(run(["first", "plans/b.md"]).status).toBe(0);
+    const ready12 = rows(queue(["list"]), "Ready, put first, then oldest first");
+    expect(ready12[0]).toMatch(/^ {2}plans\/b\.md +Plan only, 13 November, first since /);
+    expect(run(["first", "--undo", "plans/b.md"]).status).toBe(0);
+    expect(readFileSync(file("b.md"), "utf8")).toBe(edge);
+  });
+
   it("a First line on a day the calendar does not have is not read", () => {
     reset();
     for (const day of ["31 February 2026 10:00", "2026-02-31"]) {
@@ -9657,6 +9689,65 @@ describe("a plan put first, in a project", () => {
       );
       expect(readFileSync(file("a.md"), "utf8")).not.toContain("## Building, ");
       expect(readFileSync(file("b.md"), "utf8")).toContain(line);
+    });
+
+    it("a plan put first still asking by the hook's time holds nothing back (plans/put-first-review-fixes-follow-up.md)", () => {
+      reset();
+      // b.md put first with a decision unanswered, its planner live, no
+      // question recorded: its window is the hook's time for it.
+      const asks = `${plan("13 November 2026", "First: 13 November 2026 15:42:07.\n\n")}\n## Decisions for Javi\n\n1. **One.** A (Recommended) or B.\n`;
+      writeFileSync(file("b.md"), asks);
+      writeFileSync(
+        stateFile(ids.planner),
+        JSON.stringify({ agent: "planner", plans: ["plans/b.md"] }),
+      );
+      const planner = {
+        sessionId: ids.planner,
+        name: "First Planner 2",
+        kind: "background",
+        status: "busy",
+        state: "working",
+      };
+      const rows = [execRow, planner];
+      const asking = /^plans\/b\.md is still asking Javi \(its planner's until \d{2}:\d{2}\)/;
+      // By Write: the hook's time is the file's, just written, so b.md asks.
+      expect(edit("a.md", rows)).toBe("");
+      expect(denied(edit("b.md", rows))).toMatch(asking);
+      // By a shell command: the hook's time is the one before the command
+      // (`plansAt`), inside the window, while the file's mtime is past it.
+      const old = (Date.now() - 40 * 60_000) / 1000;
+      utimesSync(file("b.md"), old, old);
+      writeFileSync(
+        stateFile(ids.exec),
+        JSON.stringify({ plansAt: { "plans/a.md": old * 1000, "plans/b.md": Date.now() } }),
+      );
+      writeFileSync(file("a.md"), plan("12 November 2026").replace("# P\n", `# P\n\n${line}\n`));
+      const shell = (command: string) =>
+        queue(
+          ["wrote"],
+          {
+            session_id: ids.exec,
+            agent_type: "workflow:executor",
+            tool_name: "Bash",
+            tool_input: { command },
+          },
+          rows,
+        );
+      expect(shell("sed -i ... plans/a.md")).toBe("");
+      expect(readFileSync(file("a.md"), "utf8")).toContain(line);
+      writeFileSync(file("b.md"), asks.replace("# P\n", `# P\n\n${line}\n`));
+      utimesSync(file("b.md"), old, old);
+      const out = JSON.parse(shell("sed -i ... plans/b.md"));
+      expect(out.reason).toMatch(asking);
+      expect(out.reason).toMatch(/ Its Building line was taken out\.$/);
+      expect(readFileSync(file("b.md"), "utf8")).not.toContain("## Building, ");
+      // Written during the command, not in `plansAt`: its file's time is the
+      // hook's (/code-review 1), so it is asking and holds nothing back.
+      writeFileSync(file("b.md"), asks);
+      writeFileSync(file("a.md"), plan("12 November 2026").replace("# P\n", `# P\n\n${line}\n`));
+      writeFileSync(stateFile(ids.exec), JSON.stringify({ plansAt: { "plans/a.md": old * 1000 } }));
+      expect(shell("sed -i ... plans/a.md")).toBe("");
+      expect(readFileSync(file("a.md"), "utf8")).toContain(line);
     });
 
     it("a fresh executor's prompt names the first plan first", () => {

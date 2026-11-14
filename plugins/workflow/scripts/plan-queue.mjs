@@ -361,9 +361,20 @@ export function firstUnread(text = "") {
  * plans/waiting-means-a-question-follow-up.md).
  */
 function firstHead(text) {
-  const lines = withoutFences(text).split("\n");
-  const end = lines.findIndex((line) => /^## /.test(line) && !STATUS_HEADING.test(line));
-  return (end < 0 ? lines : lines.slice(0, end)).join("\n");
+  const lines = text.split("\n");
+  const end = headEndAt(lines);
+  return withoutFences((end < 0 ? lines : lines.slice(0, end)).join("\n"));
+}
+
+/** The index of the line that ends a `First` line's text: the first heading outside fences that is not a status line; -1 with none. */
+function headEndAt(lines) {
+  let fence = null;
+  for (let i = 0; i < lines.length; i++) {
+    const inside = fence;
+    fence = fenceAfter(fence, lines[i]);
+    if (!inside && !fence && /^## /.test(lines[i]) && !STATUS_HEADING.test(lines[i])) return i;
+  }
+  return -1;
 }
 
 /** A `First` line `plans first` replaces: one with a day, read or not; prose that starts with the word stays. */
@@ -553,8 +564,11 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
   // the brief's line only at a line's start, so a plan whose first lines
   // mention the brief it replaced reads as the plan. Both are looked for past
   // the queue's own status sections, wherever an agent wrote them; the
-  // status checks below read the whole text.
-  const lines = withoutStatus(text).split("\n");
+  // status checks below read the whole text. A `First` line and its blank
+  // count for nothing, so one written above a section the header sits under
+  // does not push the header out of the twelve lines (Codex C1,
+  // plans/put-first-review-fixes-follow-up.md).
+  const lines = withoutStatus(withoutFirstLine(text)).split("\n");
   const header = new RegExp(`^(Plan only|Short plan), (${DAY})`, "m").exec(
     lines.slice(0, 12).join("\n"),
   );
@@ -1933,11 +1947,14 @@ export function stillAskingWords(path, { until }) {
  * **A plan put first is built next** (plans/priority-queue.md, part 4): the
  * ready plans, not asking, put first, other than `path`, that the queue puts
  * before it: every one when `path` is not put first, else those put first
- * later. `plans` is `withAsking(readPlans(...), live)`; `path`'s own mark is
- * read from its text, so a plan whose Building line is written already is
- * judged by it.
+ * later. `plans` is `readPlans(...)`; `path`'s own mark is read from its
+ * text, so a plan whose Building line is written already is judged by it.
+ * **Asking is the hook's own reading** (plans/put-first-review-fixes-follow-up.md):
+ * a plan put first counts only when `heldFromBuilding` does not hold it with
+ * `live` at `timeOf(plan)`, the time the calling hook judges that plan's own
+ * Building line by, so a plan refused as still asking never holds the rest.
  */
-export function firstAhead(path, plans) {
+export function firstAhead(path, plans, { live = null, timeOf = (plan) => plan.mtime } = {}) {
   const own = plans.find((p) => p.path === path);
   // **A handed-over plan is finished first** (Codex C1): resumed, it is the
   // build in the middle, never out of turn.
@@ -1947,9 +1964,9 @@ export function firstAhead(path, plans) {
     (p) =>
       p.path !== path &&
       p.state === "ready" &&
-      !p.askingIn &&
       p.first &&
-      (!mine || p.first.at > mine.at),
+      (!mine || p.first.at > mine.at) &&
+      !heldFromBuilding(p.path, p.text || "", live, { mtime: timeOf(p) }),
   );
 }
 
@@ -3560,8 +3577,16 @@ export function firstCommand(args = [], { now = Date.now(), live } = {}) {
     const day = `${when.getUTCDate()} ${MONTHS[when.getUTCMonth()]} ${when.getUTCFullYear()}`;
     const time = when.toISOString().slice(11, 19);
     const line = `First: ${day} ${time}.`;
-    // After the header paragraph, as `handOverEdit` places a hand-over.
-    if (end < 0) lines.push("", line);
+    // After the header paragraph, as `handOverEdit` places a hand-over; a
+    // header under a `## ` section of its own has it above that heading, where
+    // `firstHead` reads it (plans/put-first-review-fixes-follow-up.md), with
+    // a blank line after it only where one is before it, so --undo gives the
+    // file back byte for byte.
+    const heading = headEndAt(lines);
+    if (heading >= 0 && heading < header) {
+      if (heading === 0 || lines[heading - 1].trim() === "") lines.splice(heading, 0, line, "");
+      else lines.splice(heading, 0, line);
+    } else if (end < 0) lines.push("", line);
     else if (lines[end].trim() === "") lines.splice(end + 1, 0, line, "");
     else lines.splice(end, 0, "", line, "");
     said = `${path} is ${firstWords({ first: { day, time: time.slice(0, 5) } })}: plans lists it at the top, and it is taken next, after the work in hand.`;
@@ -5637,7 +5662,8 @@ function buildingRefusal(input, statePath) {
   // **Not out of turn** (plans/priority-queue.md, part 4): while a free ready
   // plan is put first ahead of this one; with no sessions read, nothing.
   if (live) {
-    const ahead = firstAhead(path, withAsking(readPlans(join(root, "plans"), liveIds(live)), live));
+    // Each plan's time is its file's, read by `readPlans`, as `mtimeOf` reads this one's.
+    const ahead = firstAhead(path, readPlans(join(root, "plans"), liveIds(live)), { live });
     if (ahead.length) return outOfTurnWords(path, ahead[0]);
   }
   // Judged with the sessions in hand, the plan is not judged again by the
@@ -5782,26 +5808,29 @@ function hook(mode, input) {
         // their times too: the command's write would open a plan's window
         // again, and a plan put first still asking would stop holding the
         // other back (Codex C1, plans/waiting-means-a-question-follow-up.md).
+        // One time per plan for its asking window, its own Building line's and
+        // a plan put first's alike (plans/put-first-review-fixes-follow-up.md):
+        // its time before the command; with none, a plan this command claimed
+        // has none, since the command's write would open its window again,
+        // and any other its file's, written by someone else (/code-review 1).
+        const claimed = (p) => unjudged.some((one) => one.path === p.path);
+        const hookTime = (p) => state.plansAt?.[p.path] || (claimed(p) ? 0 : p.mtime || 0);
         const queued = live
-          ? withAsking(
-              readPlans(join(root, "plans"), liveIds(live)).map((p) =>
-                unjudged.some((one) => one.path === p.path)
-                  ? {
-                      ...p,
-                      ...stateOf(p.text.replace(own, ""), {
-                        mtime: state.plansAt?.[p.path] || p.mtime,
-                        live: liveIds(live),
-                      }),
-                    }
-                  : p,
-              ),
-              live,
+          ? readPlans(join(root, "plans"), liveIds(live)).map((p) =>
+              claimed(p)
+                ? {
+                    ...p,
+                    ...stateOf(p.text.replace(own, ""), {
+                      mtime: hookTime(p),
+                      live: liveIds(live),
+                    }),
+                  }
+                : p,
             )
           : [];
         for (const plan of unjudged) {
-          const mtime = state.plansAt?.[plan.path] || 0;
-          const asking = heldFromBuilding(plan.path, plan.text, live, { mtime });
-          const ahead = asking ? [] : firstAhead(plan.path, queued);
+          const asking = heldFromBuilding(plan.path, plan.text, live, { mtime: hookTime(plan) });
+          const ahead = asking ? [] : firstAhead(plan.path, queued, { live, timeOf: hookTime });
           // No sessions read is the hook doing nothing, as when it fails:
           // judged, so a failing list is not asked again on every command.
           if (!asking && !ahead.length) {

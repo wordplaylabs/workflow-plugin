@@ -178,20 +178,24 @@ const MONTHS =
     " ",
   );
 
-/** "24 October 2026" as a UTC day, or NaN. */
+/**
+ * "24 October 2026" as a UTC day, or NaN: also for a day the calendar does
+ * not have, "31 February 2026", which `Date.UTC` would roll over into March
+ * (plans/put-first-review-fixes.md, part 2).
+ */
 export function parseDay(text) {
   // "26 October 2026", as the plans and `today()` write it, or "2026-10-26",
   // as an agent or a person may (plans/queue-reads-iso-dates.md).
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text.trim());
-  if (iso) {
-    const [year, month, day] = iso.slice(1).map(Number);
-    if (month < 1 || month > 12 || day < 1 || day > 31) return NaN;
-    return Date.UTC(year, month - 1, day);
-  }
-  const m = /^(\d{1,2}) ([A-Z][a-z]+) (\d{4})$/.exec(text.trim());
-  if (!m) return NaN;
-  const month = MONTHS.indexOf(m[2]);
-  return month < 0 ? NaN : Date.UTC(Number(m[3]), month, Number(m[1]));
+  const m = iso ? null : /^(\d{1,2}) ([A-Z][a-z]+) (\d{4})$/.exec(text.trim());
+  if (!iso && !m) return NaN;
+  const [year, month, day] = iso
+    ? [Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])]
+    : [Number(m[3]), MONTHS.indexOf(m[2]), Number(m[1])];
+  if (month < 0 || month > 11) return NaN;
+  const at = Date.UTC(year, month, day);
+  const back = new Date(at);
+  return back.getUTCMonth() === month && back.getUTCDate() === day ? at : NaN;
 }
 
 /** A plan's or brief's day in either spelling `parseDay` reads. */
@@ -711,7 +715,7 @@ export function sharedTokens(text = "", seen = {}, { checkout = root } = {}) {
  * handed over first, then those put first, the latest put first on top
  * (plans/priority-queue.md, part 1), then oldest.
  */
-export function readPlans(dir = join(root, "plans"), live = null) {
+export function readPlans(dir = join(root, "plans"), live = null, texts = {}) {
   let names = [];
   try {
     names = readdirSync(dir).filter((name) => name.endsWith(".md"));
@@ -724,7 +728,8 @@ export function readPlans(dir = join(root, "plans"), live = null) {
     let text;
     let mtime;
     try {
-      text = readFileSync(file, "utf8");
+      // A text given for the path is read in its place: a dry start's hand-over (Codex C2).
+      text = texts[`plans/${name}`] ?? readFileSync(file, "utf8");
       mtime = statSync(file).mtimeMs;
     } catch {
       continue;
@@ -2002,6 +2007,9 @@ export function mayReuse({
  * turn's text and not a prompt on screen (plans/waiting-means-a-question.md).
  */
 function finished(row) {
+  // A question or a prompt standing is never finished, whatever `state` says
+  // ("A finished chat ends an hour after it goes quiet"; plans/put-first-review-fixes.md, part 5).
+  if (statusOf(row).startsWith("waiting for input")) return false;
   return row.state === "done" || (row.state === "blocked" && statusOf(row) === "idle");
 }
 
@@ -2029,7 +2037,14 @@ export function decideEnd({
   if (!row || row.kind !== "background")
     return { end: false, why: "it is not a background session of the queue" };
   if (immediate) return on ? { end: true, on } : { end: true };
-  if (!finished(row)) return { end: false, why: `its state is ${row.state || "unknown"}` };
+  if (!finished(row))
+    return {
+      end: false,
+      why:
+        row.state === "done"
+          ? "a question or a prompt is open in it"
+          : `its state is ${row.state || "unknown"}`,
+    };
   if (on) return { end: false, why: `it has ${on} under way` };
   // With no usage known, the timer fired an hour after the Stop that armed it.
   if (!force && usage && usage.at && now - usage.at <= WARM)
@@ -2297,31 +2312,26 @@ export function canStart({
   // **A start nobody is watching** (`unwatched`, a timer's) replaces an idle
   // session whatever its warmth: no command can message a session, so the
   // work it is started for would otherwise wait on a chat nobody prompts.
+  // **An executor with no process is not alive** (plans/put-first-review-
+  // fixes.md, part 6): it takes nothing, so it is replaced, its plan handed
+  // over by `startHere`; a planner so is started beside, as before.
   const idle = (one) => /^idle\b/.test(one.status || "");
   const work = kind === "planner" ? "brief" : "plan";
-  const stale = (one) =>
-    kind === "planner" && /^waiting for input\b/.test(one.status || "")
-      ? {
-          reuse: false,
-          why: `a question or a prompt is open in its chat, and it takes nothing until ${owner()} answers it`,
-        }
-      : kind === "planner" && one.status === "not running"
-        ? { reuse: false, why: "its process is not running" }
-        : kind !== "planner" && one.on
-          ? { reuse: true }
-          : unwatched && idle(one)
-            ? {
-                reuse: false,
-                why: `idle while a ${work}'s thirty minutes ran out, and the queue cannot message it`,
-              }
-            : mayReuse({
-                usage: one.usage,
-                shared: one.shared || 0,
-                inputs,
-                now,
-                fallback,
-                kind,
-              });
+  const stale = (one) => {
+    if (kind === "planner" && /^waiting for input\b/.test(one.status || ""))
+      return {
+        reuse: false,
+        why: `a question or a prompt is open in its chat, and it takes nothing until ${owner()} answers it`,
+      };
+    if (one.status === "not running") return { reuse: false, why: "its process is not running" };
+    if (kind !== "planner" && one.on) return { reuse: true };
+    if (unwatched && idle(one))
+      return {
+        reuse: false,
+        why: `idle while a ${work}'s thirty minutes ran out, and the queue cannot message it`,
+      };
+    return mayReuse({ usage: one.usage, shared: one.shared || 0, inputs, now, fallback, kind });
+  };
   let replace = [];
   let beside = [];
   if (sessions.length && sessions.every((one) => !stale(one).reuse)) {
@@ -2342,7 +2352,10 @@ export function canStart({
       !state.startsWith("building");
     const holding = (one) =>
       kind === "planner" && (one.holds || []).some((path) => untaken(one.standing?.[path]));
-    const kept = (one) => !idle(one) || Boolean(one.on) || holding(one);
+    const kept = (one) =>
+      kind === "executor" && one.status === "not running"
+        ? false
+        : !idle(one) || Boolean(one.on) || holding(one);
     const busy = sessions.filter(kept);
     if (!busy.length || kind === "planner") {
       replace = sessions
@@ -2492,6 +2505,20 @@ export function endedEdit(text, { sessionId, by, branch = "", day = today() }) {
 }
 
 /**
+ * What a start writes into the plan of an executor it finds with no process
+ * (plans/put-first-review-fixes.md, part 6), so the fresh executor resumes it:
+ * a Handing over section in place of the Building line, as `plans end --now`
+ * writes one.
+ */
+export function goneEdit(text, { sessionId, branch = "", day = today() }) {
+  const where = branch ? `, on branch \`${branch}\`` : "";
+  return handOverEdit(
+    text,
+    `## Handing over, ${day}, by the queue\n\nStep in hand: unknown, session ${sessionId}'s process was not running when a start looked${where}. Read the branch's commits for what it did.\n`,
+  );
+}
+
+/**
  * A hand-over `section` in place of the Building line. **It goes after the
  * header paragraph**, as the executor's does
  * (plans/handed-plan-stays-in-queue.md), wherever the Building line was; with
@@ -2500,17 +2527,31 @@ export function endedEdit(text, { sessionId, by, branch = "", day = today() }) {
 function handOverEdit(text, section) {
   const building = /^## Building, [^\n]*(?:\n[ \t]*(?=\n))?\n?/m;
   const lines = text.replace(building, "").split("\n");
-  const header = lines.findIndex((line) => PLAN_HEADER.test(line));
+  const [header, at] = headerEnd(lines, PLAN_HEADER);
   if (header < 0) {
     if (building.test(text)) return text.replace(building, `${section}\n`);
     return `${text.replace(/\n*$/, "\n\n")}${section}`;
   }
-  // The header paragraph ends at a blank line, or at a heading written straight under it.
-  const at = lines.findIndex((line, i) => i > header && (line.trim() === "" || /^## /.test(line)));
   if (at < 0) lines.push("", section);
   else if (lines[at].trim() === "") lines.splice(at + 1, 0, section);
   else lines.splice(at, 0, "", section);
   return lines.join("\n");
+}
+
+/**
+ * **Where a header paragraph ends** (plans/put-first-review-fixes.md, part
+ * 1): `[header, end]`, the index of the first line matching `pattern` and
+ * the index of the blank line, or the heading written straight under it,
+ * that ends its paragraph; -1 for either with none. A hand-over and a First
+ * line both go there.
+ */
+function headerEnd(lines, pattern) {
+  const header = lines.findIndex((line) => pattern.test(line));
+  if (header < 0) return [-1, -1];
+  return [
+    header,
+    lines.findIndex((line, i) => i > header && (line.trim() === "" || /^## /.test(line))),
+  ];
 }
 
 /** When a cut-off session's window resets: the usage file's window over its threshold, else the transcript's last `resetsAt`. */
@@ -3444,7 +3485,15 @@ export function firstCommand(args = [], { now = Date.now(), live } = {}) {
   if (!proj().found) return { said: NO_PROJECT, status: 1 };
   if (proj().form === "compact") return { said: COMPACT, status: 1 };
   const undo = args.includes("--undo");
-  const given = args.find((arg) => arg !== "--undo");
+  const paths = args.filter((arg) => arg !== "--undo");
+  // One mark at a time, and no option but --undo read as a path
+  // (plans/put-first-review-fixes.md, part 3).
+  if (paths.length > 1 || paths.some((arg) => arg.startsWith("--")))
+    return {
+      said: "plans first takes one path at a time: plans first plans/<x>.md, or plans first --undo plans/<x>.md.",
+      status: 1,
+    };
+  const given = paths[0];
   if (!given)
     return {
       said: "A path is needed: plans first plans/<x>.md; plans shows the queue.",
@@ -3472,7 +3521,12 @@ export function firstCommand(args = [], { now = Date.now(), live } = {}) {
     return { said: `${path} is being built by ${name}: nothing to put first.`, status: 1 };
   }
   const lines = withoutFirstLine(plan.text).split("\n");
-  const header = lines.findIndex((line) => HEADER_LINE.test(line));
+  // Under the header `stateOf` read the file by: a plan's own, never a
+  // brief's line kept above it (plans/put-first-review-fixes.md, part 1).
+  const [header, end] = headerEnd(
+    lines,
+    plan.kind === "Brief" ? /^Brief for the planner\b/ : PLAN_HEADER,
+  );
   if (header < 0)
     return { said: `${path} is not a plan or a brief in the queue; plans shows them.`, status: 1 };
   let said;
@@ -3507,7 +3561,6 @@ export function firstCommand(args = [], { now = Date.now(), live } = {}) {
     const time = when.toISOString().slice(11, 19);
     const line = `First: ${day} ${time}.`;
     // After the header paragraph, as `handOverEdit` places a hand-over.
-    const end = lines.findIndex((one, i) => i > header && (one.trim() === "" || /^## /.test(one)));
     if (end < 0) lines.push("", line);
     else if (lines[end].trim() === "") lines.splice(end + 1, 0, line, "");
     else lines.splice(end, 0, "", line, "");
@@ -3560,9 +3613,36 @@ function startHere(
   if (!proj().found) return NO_PROJECT;
   paths = paths.map(queuePath);
   const live = liveSessions();
+  // **A start takes over from an executor with no process** (plans/put-
+  // first-review-fixes.md, part 6): each plan its Building line holds is
+  // read as handed over, so it is picked first and resumed. The hand-over is
+  // written only where the session is retired and its lock released below,
+  // with the rest `canStart` replaces, and taken back with them when the
+  // launch fails; a refused, deferred or dry start writes nothing (Codex C1,
+  // C2; /code-review).
+  const gone = {};
+  let read = readPlans(join(root, "plans"), liveIds(live));
+  if (agent === "executor" && live) {
+    for (const plan of read) {
+      const row =
+        plan.state === "building" ? live.find((one) => one.sessionId === plan.session) : null;
+      if (!row || statusOf(row) !== "not running") continue;
+      gone[plan.path] = {
+        sessionId: plan.session,
+        before: plan.text,
+        text: goneEdit(plan.text, { sessionId: plan.session, branch: branchOf(row.cwd) }),
+      };
+    }
+    if (Object.keys(gone).length)
+      read = readPlans(
+        join(root, "plans"),
+        liveIds(live),
+        Object.fromEntries(Object.entries(gone).map(([path, one]) => [path, one.text])),
+      );
+  }
   // **Asked once**: a plan whose planner is asking the owner is that chat's
   // for thirty minutes, neither taken by default nor accepted by path.
-  const plans = withAsking(readPlans(join(root, "plans"), liveIds(live)), live);
+  const plans = withAsking(read, live);
   const kind = agent === "planner" || agent === "assistant" ? agent : "executor";
   // **A planner takes one brief, the oldest** (plans/planner-queue.md); an
   // executor every plan waiting.
@@ -3824,6 +3904,10 @@ function startHere(
     writeJson(files.state(old.sessionId), { ...state, retired: true });
     if (kind === "executor") release(old.sessionId);
   }
+  const handed = Object.entries(gone).filter(([, one]) =>
+    replaced.some(({ old }) => old.sessionId === one.sessionId),
+  );
+  for (const [path, one] of handed) writeFileSync(join(root, path), one.text);
   const seen = launch(args, decision.name, kind);
   // A launch that failed keeps the deferral, and with it the timer's pid.
   if (seen !== true && seen !== "unread") {
@@ -3831,6 +3915,7 @@ function startHere(
       writeJson(files.state(old.sessionId), state);
       if (lock?.sessionId === old.sessionId) writeJson(files.lock(), lock);
     }
+    for (const [path, one] of handed) writeFileSync(join(root, path), one.before);
     // A lease's timer that failed to launch leaves its due briefs free, as a refusal does.
     if (leaseTimer) releaseLease(due);
     return seen;
@@ -5314,6 +5399,19 @@ function plannerHook(mode, input, sessionId, statePath) {
         return;
       }
     }
+    const kept = editing ? firstDropped(input) : "";
+    if (kept) {
+      process.stdout.write(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason: kept,
+          },
+        }),
+      );
+      return;
+    }
     if (!state.retired) return;
     const command = input.tool_name === "Bash" ? input.tool_input?.command || "" : null;
     if (command !== null && allowedWhileLocked(command)) return;
@@ -5490,6 +5588,28 @@ function planPath(file) {
   if (!file) return "";
   const path = relative(root, resolve(root, file));
   return /^plans\/[^/]+\.md$/.test(path) ? path : "";
+}
+
+/**
+ * **The planner keeps a waiting file's First line** (plans/put-first-review-
+ * fixes.md, part 4; decisions.md#plan-put-first): an Edit, Write or MultiEdit
+ * to any `plans/*.md` file that waits and is put first, whose new text the
+ * queue would read no First line in, is refused with the line as it stands.
+ * `plans first` keeps the file's times, so Claude Code's stale-file check
+ * does not see its write; a line changed to another day the queue reads
+ * passes. The words, or "".
+ */
+function firstDropped(input) {
+  const path = planPath(input.tool_input?.file_path);
+  if (!path) return "";
+  const before = planText(path);
+  const first = firstOf(before);
+  if (!first || !WAITING_STATES.includes(stateOf(before)?.state)) return "";
+  if (firstOf(editedText(input.tool_name, input.tool_input, before))) return "";
+  const line = firstHead(before)
+    .split("\n")
+    .find((one) => FIRST_MARK.test(one) && firstOf(one));
+  return `${path} is first (${firstWords({ first }).replace(/^first /, "")}): keep its line, ${line}, under the header paragraph. Only ${owner()}'s word takes it out: plans first --undo ${path}.`;
 }
 
 /**

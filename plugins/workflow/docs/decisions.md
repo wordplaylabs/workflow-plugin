@@ -398,6 +398,11 @@ on the machine that planned them.
   assigned. The line is in the file by plan-state-in-file, and the
   hook refuses a Building line out of turn as it does on a plan still
   asking. plans/priority-queue.md.
+  14 November: the planner's tool hook refuses a write that leaves a
+  waiting file without its First line: `plans first` keeps the file's
+  times, so Claude Code's stale-file check does not see its write, and a
+  planner that read the brief before the mark wrote its plan over it.
+  And `plans first` takes one path. plans/put-first-review-fixes.md.
 - `related-line` **In pull request mode, `plans` says what each brief and
   ready plan looks related to, and the author answers with a `Related`
   line.** (Javi, 30 October) GitHub links a `#<n>` and writes a backlink
@@ -439,6 +444,11 @@ on the machine that planned them.
   back at startup and every five minutes). The queue is a file: the stop
   is the acknowledgement, and what matters is that no plan is ignored.
   plans/executor-takes-next-ready-plan.md.
+  14 November: an executor listed with no process is not alive. It
+  refused every start, and `plans end` would not end it; a start now
+  retires it and hands its plan over, as `plans end --now` does. Retakes
+  "An executor is not touched" of plans/waiting-means-a-question.md for
+  this case. plans/put-first-review-fixes.md.
 - `starts-bounded` **Starts are bounded, as every loop over model calls
   is.** (Javi, 27 October) A queue that starts sessions on its own must
   not spend the subscription's window or loop on a session that dies.

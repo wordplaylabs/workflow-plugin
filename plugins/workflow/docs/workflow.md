@@ -467,7 +467,8 @@ takes it at the point between two plans and never stops the one in
 hand: the tool hook refuses a Building line on another plan while a
 ready plan put first is free, and without `land: pull-request` a plan
 built as first is pushed before the rest of its batch is built. The
-planner carries a brief's line into its plan. The line counts only
+planner carries a brief's line into its plan, and its tool hook
+refuses a write that drops it. The line counts only
 while its file waits; `plans first --undo <path>` takes it out.
 (decisions.md#plan-put-first)
 
@@ -484,7 +485,8 @@ executor, 160k for a planner by default) only while it has under five
 sessions of the agent, and never over 480k; a cache still warm), else
 retires it and starts the next executor, judged at every stop while
 plans wait, the plans it was named included. A plan the usage limit cuts
-off, or `plans end --now` ends, is handed over (work committed, a
+off, `plans end --now` ends, or whose executor a start finds with no
+process, is handed over (work committed, a
 "Handing over" section, stop); twice at the same step, or six times, the
 owner is asked.
 (decisions.md#one-executor, decisions.md#context-cost,
@@ -494,7 +496,8 @@ decisions.md#shared-is-what-is-held)
 named to a session that stops without taking it goes to a fresh
 executor, the session retired on every waiting plan; and a planner's
 or an assistant's Stop hook, a retired executor's, or the end timer
-that finds plans ready, no executor alive and the queue open starts
+that finds plans ready, no executor alive (one listed with no process is
+not alive) and the queue open starts
 one under "Starts are bounded", two at one moment starting one.
 `plans` says on its first line that the next hook or timer starts one,
 or why none does. (decisions.md#plans-reach-an-executor)

@@ -561,9 +561,15 @@ export function cutoffEdit(
   text: string,
   options: { sessionId: string; branch: string; day?: string },
 ): string;
+/** A start's hand-over of the plan of an executor it found with no process. */
+export function goneEdit(
+  text: string,
+  options: { sessionId: string; branch?: string; day?: string },
+): string;
 export function readPlans(
   dir?: string,
   live?: string[] | null,
+  texts?: Record<string, string>,
 ): (PlanState & { path: string; file: string; text: string })[];
 /** The `plans/*.md` the queue cannot read: no header and no brief line, or no read at all. */
 export function unreadPlans(dir?: string): { headless: string[]; failed: string[] };

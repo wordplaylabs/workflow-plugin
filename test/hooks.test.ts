@@ -69,6 +69,7 @@ import {
   cutoffEdit,
   decideEnd,
   endedEdit,
+  goneEdit,
   decideStop,
   inThisRepo,
   lockHeldByOther,
@@ -1544,6 +1545,16 @@ describe("plan-queue", () => {
         false,
       );
       expect(firstUnread(`${head}## What was asked\n`)).toBe(false);
+      // A day the calendar does not have is no day, in both spellings (plans/put-first-review-fixes.md, part 2).
+      expect(parseDay("31 February 2026")).toBeNaN();
+      expect(parseDay("2026-02-31")).toBeNaN();
+      expect(parseDay("29 February 2028")).toBe(Date.UTC(2028, 1, 29));
+      expect(of("First: 31 February 2026 10:00.")).toBeNull();
+      expect(of("First: 2026-02-31.")).toBeNull();
+      expect(firstUnread(`${head}First: 31 February 2026 10:00.\n\n## What was asked\n`)).toBe(
+        true,
+      );
+      expect(of("First: 29 February 2028 10:00.")).toMatchObject({ time: "10:00" });
     });
 
     it("stateOf, first", () => {
@@ -6202,6 +6213,14 @@ describe("a finished chat ends", () => {
       end: false,
       why: "its state is blocked",
     });
+    // plans/put-first-review-fixes.md, part 5: `done` with a prompt standing is never finished.
+    const prompted = { ...done, pid: 1, status: "waiting", waitingFor: "permission prompt" };
+    const open = { end: false, why: "a question or a prompt is open in it" };
+    expect(decideEnd({ row: prompted, usage: used(70), now })).toEqual(open);
+    expect(decideEnd({ row: prompted, usage: used(70), now, force: true })).toEqual(open);
+    expect(decideEnd({ row: prompted, usage: used(70), now, immediate: true })).toEqual({
+      end: true,
+    });
     expect(decideEnd({ row: { ...done, state: "working" }, now, force: true })).toEqual({
       end: false,
       why: "its state is working",
@@ -6348,6 +6367,43 @@ describe("a finished chat ends", () => {
     expect(canStart({ now, usage, name: "Ends", sessions: [executor] })).toMatchObject({
       refuse: true,
     });
+    // plans/put-first-review-fixes.md, part 6: an executor with no process,
+    // holding the lock with a plan under way, is not alive: the start replaces it.
+    const goneId = "e1000000-0000";
+    const lock = { sessionId: goneId, pid: 999_999, name: "Ends Executor 1" };
+    const [goneExecutor] = sessionsOf(
+      "executor",
+      [{ sessionId: goneId, name: "Ends Executor 1", kind: "background", cwd: "/x" }],
+      lock,
+      {
+        trees: [{ path: "/x", branch: "" }],
+        plans: [{ path: "plans/a.md", state: "building", session: goneId }],
+        stateFor: () => ({ agent: "executor" }),
+        usageFor: () => ({ context: 50_000, at: now - MIN }),
+      } as never,
+    );
+    expect(goneExecutor).toMatchObject({
+      status: "not running",
+      on: "plans/a.md",
+      holdsLock: true,
+    });
+    const takeOver = canStart({
+      now,
+      usage,
+      name: "Ends",
+      lock,
+      alive: () => true,
+      sessions: [goneExecutor],
+    });
+    expect(takeOver).toMatchObject({ start: true });
+    expect(takeOver.replace).toEqual([
+      expect.objectContaining({ name: "Ends Executor 1", why: "its process is not running" }),
+    ]);
+    // Beside a live executor still worth reusing, the start is refused as before.
+    const liveOne = { ...goneExecutor, sessionId: "e2000000-0000", status: "busy", on: "" };
+    expect(canStart({ now, usage, name: "Ends", sessions: [goneExecutor, liveOne] })).toMatchObject(
+      { refuse: true },
+    );
   });
 
   it("says when a chat ends, and where each plan a planner holds stands", () => {
@@ -6726,6 +6782,133 @@ describe("a finished chat ends", () => {
       });
       expect(failed).toBe("Not ended: Ends Executor 1 [e2000000], claude stop failed.\n");
       expect(readFileSync(taken, "utf8")).toBe(before);
+    });
+
+    // plans/put-first-review-fixes.md, part 6.
+    it("plans start hands a plan over from an executor with no process, and starts a fresh one on it", () => {
+      const gone = "e7000000-0000-0000-0000-000000000000";
+      const plan = join(dir, "plans", "gone.md");
+      const lockFile = join(dir, ".claude", "executor.lock");
+      const building = `# Gone\n\n## Building, 13 November 2026, session ${gone}\n\nPlan only, 13 November 2026, for Javi.\n\n## The change\n`;
+      writeFileSync(plan, building);
+      writeFileSync(stateFile(gone), JSON.stringify({ agent: "executor" }));
+      writeFileSync(
+        lockFile,
+        JSON.stringify({ sessionId: gone, pid: 999_999, name: "Ends Executor 7", at: Date.now() }),
+      );
+      const goneRows = [
+        { sessionId: gone, id: "bg-g", name: "Ends Executor 7", kind: "background", cwd: dir },
+        // A planner with no process is still started beside, not touched.
+        {
+          sessionId: lone,
+          id: "bg-l",
+          name: "Ends Planner 3",
+          kind: "background",
+          state: "blocked",
+          cwd: dir,
+        },
+      ];
+      // A stand-in for claude: `agents` lists the rows, `--bg` adds the chat it starts.
+      const rowsFile = join(dir, "gone-rows.json");
+      const script = join(dir, "gone-claude.js");
+      writeFileSync(rowsFile, JSON.stringify(goneRows));
+      writeFileSync(
+        script,
+        `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "agents") process.stdout.write(fs.readFileSync(${JSON.stringify(rowsFile)}, "utf8"));
+else if (args.includes("--bg")) {
+  const all = JSON.parse(fs.readFileSync(${JSON.stringify(rowsFile)}, "utf8"));
+  all.push({ sessionId: "gone-next", name: args[args.indexOf("--name") + 1], kind: "background", cwd: process.cwd() });
+  fs.writeFileSync(${JSON.stringify(rowsFile)}, JSON.stringify(all));
+}
+`,
+      );
+      chmodSync(script, 0o755);
+      const { WORKFLOW_LIVE: _, ...rest } = { ...process.env, ...env() };
+      try {
+        // A refused start writes nothing: the hand-over goes with the retirement (/code-review).
+        const paused = { ...rest, WORKFLOW_CLAUDE: script };
+        execFileSync("node", [join(here, "plan-queue.mjs"), "pause"], { env: paused });
+        expect(
+          execFileSync("node", [join(here, "plan-queue.mjs"), "start"], {
+            encoding: "utf8",
+            env: paused,
+          }),
+        ).toContain("The queue is paused");
+        execFileSync("node", [join(here, "plan-queue.mjs"), "resume"], { env: paused });
+        expect(readFileSync(plan, "utf8")).toBe(building);
+        // A launch that fails gives the plan back with the lock and the state (Codex C1).
+        const silent = join(dir, "gone-silent.js");
+        writeFileSync(
+          silent,
+          `#!/usr/bin/env node\nif (process.argv[2] === "agents") process.stdout.write(require("node:fs").readFileSync(${JSON.stringify(rowsFile)}, "utf8"));\n`,
+        );
+        chmodSync(silent, 0o755);
+        const failed = execFileSync("node", [join(here, "plan-queue.mjs"), "start"], {
+          encoding: "utf8",
+          env: { ...rest, WORKFLOW_CLAUDE: silent },
+        });
+        expect(failed).toContain("has not appeared in claude agents");
+        expect(readFileSync(plan, "utf8")).toBe(building);
+        expect(JSON.parse(readFileSync(lockFile, "utf8")).released).toBeFalsy();
+        expect(JSON.parse(readFileSync(stateFile(gone), "utf8")).retired).toBeFalsy();
+        rmSync(silent, { force: true });
+        // A dry start says what a real one would do, and writes nothing (Codex C2).
+        const dry = execFileSync("node", [join(here, "plan-queue.mjs"), "start", "--dry"], {
+          encoding: "utf8",
+          env: { ...rest, WORKFLOW_CLAUDE: script },
+        });
+        expect(dry).toContain("plans/gone.md");
+        expect(dry).toContain(
+          "Would retire Ends Executor 7 [e7000000]: its process is not running.",
+        );
+        expect(readFileSync(plan, "utf8")).toBe(building);
+        const started = execFileSync("node", [join(here, "plan-queue.mjs"), "start"], {
+          encoding: "utf8",
+          env: { ...rest, WORKFLOW_CLAUDE: script },
+        });
+        expect(started).not.toContain("An executor is alive");
+        expect(started).toContain(
+          "Ends Executor 7 [e7000000] was retired: its process is not running.",
+        );
+        const text = readFileSync(plan, "utf8");
+        expect(text).not.toContain("## Building");
+        expect(text).toMatch(
+          /^Plan only, 13 November 2026, for Javi\.\n\n## Handing over, [^,\n]+, by the queue\n\nStep in hand: unknown, session e7000000-0000-0000-0000-000000000000's process was not running when a start looked, on branch `[^`]+`\. Read the branch's commits for what it did\.\n/m,
+        );
+        expect(stateOf(text)).toMatchObject({ state: "handed" });
+        expect(JSON.parse(readFileSync(lockFile, "utf8")).released).toBeTruthy();
+        expect(JSON.parse(readFileSync(stateFile(gone), "utf8")).retired).toBe(true);
+        const starts = readFileSync(join(dir, ".claude", "starts.log"), "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line));
+        const last = starts.at(-1);
+        expect(last.paths[0]).toBe("plans/gone.md");
+        expect(last.why).toContain(
+          "Ends Executor 7 [e7000000] was retired: its process is not running.",
+        );
+        expect(JSON.parse(readFileSync(stateFile(lone), "utf8")).retired).toBeFalsy();
+      } finally {
+        rmSync(plan, { force: true });
+        rmSync(lockFile, { force: true });
+        rmSync(stateFile(gone), { force: true });
+        rmSync(rowsFile, { force: true });
+        rmSync(script, { force: true });
+      }
+    }, 40_000);
+
+    it("goneEdit writes the queue's hand-over in place of the Building line", () => {
+      const text =
+        "# A plan\n\n## Building, 13 November 2026, session abc\n\nShort plan, 13 November 2026, by the assistant.\n\n## The change\n";
+      expect(goneEdit(text, { sessionId: "abc", branch: "fix", day: "14 November 2026" })).toBe(
+        "# A plan\n\nShort plan, 13 November 2026, by the assistant.\n\n## Handing over, 14 November 2026, by the queue\n\nStep in hand: unknown, session abc's process was not running when a start looked, on branch `fix`. Read the branch's commits for what it did.\n\n## The change\n",
+      );
+      expect(goneEdit(text, { sessionId: "abc", branch: "", day: "14 November 2026" })).toContain(
+        "Step in hand: unknown, session abc's process was not running when a start looked. Read the branch's commits",
+      );
     });
   });
 });
@@ -9017,6 +9200,35 @@ describe("a plan put first, in a project", () => {
     expect(run(["first", "./plans/a.md"]).stdout).toMatch(/^plans\/a\.md is first since/);
   });
 
+  it("plans first writes under a plan's own header, below a brief's line kept above it", () => {
+    reset();
+    // The brief's paragraph kept above the plan's header, which is on line 11.
+    const kept =
+      "# P\n\nBrief for the planner, 12 November 2026, by Workflow Assistant 6 from\nplans/x.md, a paragraph the planner kept above its plan's header, wrapped\nover\nseven\nlines\nof\nprose.\n\nPlan only, 13 November 2026, for Javi; the executor builds it.\n\n## What was asked\n\nA change.\n";
+    expect(kept.split("\n")[10]).toMatch(/^Plan only, /);
+    writeFileSync(file("b.md"), kept);
+    expect(run(["first", "plans/b.md"]).status).toBe(0);
+    const text = readFileSync(file("b.md"), "utf8");
+    expect(text).toMatch(
+      /builds it\.\n\nFirst: \d{1,2} [A-Z][a-z]+ \d{4} \d{2}:\d{2}:\d{2}\.\n\n## What was asked/,
+    );
+    const ready = rows(queue(["list"]), "Ready, put first, then oldest first");
+    expect(ready[0]).toMatch(/^ {2}plans\/b\.md +Plan only, 13 November, first since /);
+    expect(run(["first", "--undo", "plans/b.md"]).status).toBe(0);
+    expect(readFileSync(file("b.md"), "utf8")).toBe(kept);
+  });
+
+  it("a First line on a day the calendar does not have is not read", () => {
+    reset();
+    for (const day of ["31 February 2026 10:00", "2026-02-31"]) {
+      writeFileSync(file("b.md"), plan("13 November 2026", `First: ${day}.\n\n`));
+      const listed = queue(["list"]);
+      expect(listed, day).toContain("\nFirst line not read: plans/b.md\n");
+      expect(listed, day).toContain("\nReady, oldest first\n");
+      expect(listed, day).not.toContain("first since");
+    }
+  });
+
   it("the latest put first is on top", () => {
     reset();
     writeFileSync(file("c.md"), plan("13 November 2026"));
@@ -9150,6 +9362,48 @@ describe("a plan put first, in a project", () => {
     expect(dry).not.toContain("plans/x.md");
   });
 
+  it("the planner's tool hook keeps a waiting file's First line", () => {
+    reset();
+    const mark = "First: 13 November 2026 10:00:00.";
+    const brief = `# X\n\nBrief for the planner, 13 November 2026.\n\n${mark}\n\n## What\n\nA change.\n`;
+    writeFileSync(file("x.md"), brief);
+    const hook = (tool_name: string, tool_input: object) =>
+      queue(["tool"], {
+        session_id: ids.planner,
+        agent_type: "workflow:planner",
+        tool_name,
+        tool_input: { file_path: file("x.md"), ...tool_input },
+      });
+    const denied = (out: string) =>
+      out ? JSON.parse(out).hookSpecificOutput?.permissionDecisionReason || "" : "";
+    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, under the header paragraph. Only Javi's word takes it out: plans first --undo plans/x.md.`;
+    // The plan written over the brief without the line.
+    const planText = plan("13 November 2026");
+    expect(denied(hook("Write", { content: planText }))).toBe(words);
+    // The same write with the line kept passes.
+    expect(hook("Write", { content: plan("13 November 2026", `${mark}\n\n`) })).toBe("");
+    // The line moved under a `## ` section is not read there.
+    expect(
+      denied(
+        hook("Edit", {
+          old_string: `${mark}\n\n## What\n\nA change.\n`,
+          new_string: `## What\n\nA change.\n\n${mark}\n`,
+        }),
+      ),
+    ).toBe(words);
+    // Another day the queue reads is the line still there.
+    expect(
+      hook("Edit", { old_string: mark, new_string: "First: 13 November 2026 11:00:00." }),
+    ).toBe("");
+    // An edit elsewhere in the file passes.
+    expect(hook("Edit", { old_string: "A change.", new_string: "A change, said." })).toBe("");
+    // A file not waiting, or not put first, is not held.
+    writeFileSync(file("x.md"), brief.replace(`${mark}\n\n`, ""));
+    expect(hook("Write", { content: planText })).toBe("");
+    writeFileSync(file("x.md"), `${brief}\n## Dropped, 13 November 2026\n\nGone.\n`);
+    expect(hook("Write", { content: planText })).toBe("");
+  });
+
   it("plans first refuses what is not waiting", () => {
     reset();
     writeFileSync(
@@ -9187,6 +9441,15 @@ describe("a plan put first, in a project", () => {
     );
     for (const name of ["building.md", "built.md", "dropped.md"])
       expect(readFileSync(file(name), "utf8")).not.toContain("First:");
+    // One path at a time, and no option but --undo (plans/put-first-review-fixes.md, part 3).
+    const one =
+      "plans first takes one path at a time: plans first plans/<x>.md, or plans first --undo plans/<x>.md.\n";
+    const before = ["a.md", "b.md"].map((name) => readFileSync(file(name), "utf8"));
+    expect(refused(["plans/a.md", "plans/b.md"])).toBe(one);
+    expect(refused(["--undo", "plans/a.md", "plans/b.md"])).toBe(one);
+    expect(refused(["--undo=plans/a.md"])).toBe(one);
+    expect(refused(["--now", "plans/a.md"])).toBe(one);
+    expect(["a.md", "b.md"].map((name) => readFileSync(file(name), "utf8"))).toEqual(before);
   });
 
   it("says a First line it does not read", () => {

@@ -3210,7 +3210,7 @@ describe("an executor never waits on the owner", () => {
   });
 
   // plans/executor-never-waits-follow-up.md.
-  it("the skill and the handbook let an executor research and follow a new screen, and its clean start stashes untracked files", () => {
+  it("the skill and the handbook let an executor research and follow a new screen", () => {
     const clause =
       "an executor does not ask: it researches how the product people know does it, follows it, and names it in Built";
     const skill = flat(read("skills/design-research/SKILL.md"));
@@ -3224,9 +3224,92 @@ describe("an executor never waits on the owner", () => {
         flat(read("docs/workflow.md")),
       )![0];
     expect(rule).toContain(clause);
+  });
+
+  // plans/executor-stash-only-what-blocks.md: the first stash takes tracked
+  // changes; an untracked file is stashed only when it blocks the switch.
+  const startClean = () => {
     const clean = /4\. Start clean:.*? 5\. /.exec(flat(read("agents/executor.md")))![0];
-    expect(clean).toContain("git stash push --include-untracked -m");
-    expect(clean).toContain("':(exclude)plans'");
-    expect(clean).not.toContain("leaving untracked files where they are");
+    const first = /`(git stash push -m [^`]*)`/.exec(clean)![1];
+    const clash = /`(GIT_LITERAL_PATHSPECS=1 git stash push --include-untracked -m [^`]*)`/.exec(
+      clean,
+    )![1];
+    return { clean, first, clash };
+  };
+
+  it("an executor's clean start stashes tracked changes, and an untracked file only when it blocks the switch", () => {
+    const { clean, first, clash } = startClean();
+    expect(first).not.toContain("--include-untracked");
+    expect(first).toContain("':(exclude)plans'");
+    expect(clean).toContain("leaving untracked files where they are");
+    expect(clean.match(/--include-untracked/g)).toHaveLength(1);
+    expect(clean).toContain("When the switch fails because untracked files would be overwritten");
+    expect(clash).toContain("untracked that blocked the switch");
+    expect(clash).toContain("-- <the paths git names, each quoted>");
+    expect(clean).toContain("nothing else leaves the disk");
+    expect(clean).toContain("A stash is made with the identity you commit with");
+    expect(clean).toContain("changes to tracked files outside `plans/`");
+    expect(clean).toContain("`GIT_AUTHOR_*` and `GIT_COMMITTER_*`");
+  });
+
+  it("when an executor starts with an untracked .env the branch does not track, the .env is still on disk after the switch", () => {
+    const { first, clash } = startClean();
+    const origin = dir("stash-origin-");
+    const root = dir("stash-");
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t",
+      GIT_AUTHOR_EMAIL: "t@t",
+      GIT_COMMITTER_NAME: "t",
+      GIT_COMMITTER_EMAIL: "t@t",
+      LC_ALL: "C",
+    };
+    const run = (cmd: string) => spawnSync("sh", ["-c", cmd], { cwd: root, env, encoding: "utf8" });
+    const git = (...args: string[]) =>
+      execFileSync("git", args, { cwd: root, env, encoding: "utf8" }).trim();
+    execFileSync("git", ["init", "-q", "--bare", "-b", "test"], { cwd: origin });
+    git("init", "-q", "-b", "test");
+    git("remote", "add", "origin", origin);
+    writeFileSync(join(root, "app.txt"), "one\n");
+    git("add", "app.txt");
+    git("commit", "-q", "-m", "one");
+    git("push", "-q", "origin", "test");
+    // origin/test gains notes.md and [s].md, which the checkout has
+    // untracked; s.md, which [s].md would match as a pattern, is the owner's.
+    writeFileSync(join(root, "notes.md"), "the branch's\n");
+    writeFileSync(join(root, "[s].md"), "the branch's\n");
+    git("add", "notes.md", "[s].md");
+    git("commit", "-q", "-m", "two");
+    git("push", "-q", "origin", "test");
+    git("reset", "-q", "--hard", "HEAD~1");
+    git("fetch", "-q", "origin");
+    writeFileSync(join(root, "app.txt"), "edited\n");
+    writeFileSync(join(root, ".env"), "SECRET=1\n");
+    writeFileSync(join(root, "notes.md"), "the owner's\n");
+    writeFileSync(join(root, "[s].md"), "the owner's\n");
+    writeFileSync(join(root, "s.md"), "the owner's\n");
+    const name = (cmd: string) =>
+      cmd.replace("<this session's name>", "Executor 1").replace("<topic>", "x");
+    expect(run(name(first)).status).toBe(0);
+    expect(readFileSync(join(root, "app.txt"), "utf8")).toBe("one\n");
+    expect(existsSync(join(root, ".env"))).toBe(true);
+    const blocked = run("git switch -c batch origin/test");
+    expect(blocked.status).not.toBe(0);
+    expect(blocked.stderr).toContain("untracked working tree files would be overwritten");
+    const paths = [...blocked.stderr.matchAll(/^\t(.+)$/gm)].map((m) => m[1]);
+    expect(paths.sort()).toEqual(["[s].md", "notes.md"]);
+    const quoted = paths.map((path) => `'${path}'`).join(" ");
+    expect(run(name(clash).replace("<the paths git names, each quoted>", quoted)).status).toBe(0);
+    expect(run("git switch -c batch origin/test").status).toBe(0);
+    expect(readFileSync(join(root, ".env"), "utf8")).toBe("SECRET=1\n");
+    expect(readFileSync(join(root, "s.md"), "utf8")).toBe("the owner's\n");
+    expect(readFileSync(join(root, "notes.md"), "utf8")).toBe("the branch's\n");
+    const stashes = git("stash", "list");
+    expect(stashes).toContain("Executor 1, before plans/x.md, untracked that blocked the switch");
+    expect(git("show", "--name-only", "--format=", "stash@{0}^3").split("\n").sort()).toEqual([
+      "[s].md",
+      "notes.md",
+    ]);
+    expect(git("show", "stash@{1}:app.txt")).toBe("edited");
   });
 });

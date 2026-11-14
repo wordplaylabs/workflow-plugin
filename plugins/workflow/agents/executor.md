@@ -86,15 +86,24 @@ what failed. Without the task tools, say so once in the final message.
    ${user_config.owner} could decide is decided the same way, the
    skill's question about a new screen or flow included: research and
    follow.
-4. Start clean: when `git status` shows changes, `git stash push
-   --include-untracked -m "<this session's name>, before
-   plans/<topic>.md" -- . ':(exclude)plans'`, discarding nothing, and
-   write a "Needs a decision" item sized assistant naming the stash and
-   the files. Then `git fetch origin` and `git switch
-   -c <batch> origin/<branch>`, one branch per batch named after the
-   work, resetting one an interrupted session left. With `land:
-   pull-request`, read `${CLAUDE_PLUGIN_ROOT}/docs/landing.md` now and
-   take the branch it says. Then the project file's **Before a build**.
+4. Start clean: when `git status` shows changes to tracked files
+   outside `plans/`, `git stash push -m "<this session's name>, before
+   plans/<topic>.md" -- . ':(exclude)plans'`, discarding nothing and
+   leaving untracked files where they are. Then `git fetch origin` and
+   `git switch -c <batch> origin/<branch>`, one branch per batch named
+   after the work, resetting one an interrupted session left. When the
+   switch fails because untracked files would be overwritten,
+   `GIT_LITERAL_PATHSPECS=1 git stash push --include-untracked -m
+   "<this session's name>, before plans/<topic>.md, untracked that
+   blocked the switch" -- <the paths git names, each quoted>` and switch
+   again: nothing else leaves the disk, and a file the branch tracks
+   under the same path is the branch's. A stash is made with the
+   identity you commit with, the `GIT_AUTHOR_*` and `GIT_COMMITTER_*`
+   variables the project's instructions or memory give when git has no
+   user (it says "Please tell me who you are"), and each stash gets a
+   "Needs a decision" item sized assistant naming it and its files.
+   With `land: pull-request`, read `${CLAUDE_PLUGIN_ROOT}/docs/landing.md`
+   now and take the branch it says. Then the project file's **Before a build**.
    Make no worktree; remove a leftover one whose commit is on the branch
    (`git worktree remove --force .claude/worktrees/<name>`, `git branch
    -D <its branch>`). Commit nothing straight to the branch or `main`;

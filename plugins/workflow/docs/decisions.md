@@ -409,6 +409,13 @@ on the machine that planned them.
   `## ` section, above that section; naming both had the first refused
   again for the second shape. plans/put-first-refusal-place.md,
   plans/put-first-refusal-one-place.md.
+  14 November: the line has one place for every shape of header, above
+  the first `## ` section, where the queue reads it as it reads `Lands`;
+  the rule, the refusal and the planner's file say those words. "Above
+  the section that header sits under" sent a planner to the second
+  section of a plan written by hand, where the line is not read, and the
+  place worked out per shape was wrong in three commits running.
+  plans/put-first-any-header-place.md.
 - `related-line` **In pull request mode, `plans` says what each brief and
   ready plan looks related to, and the author answers with a `Related`
   line.** (Javi, 30 October) GitHub links a `#<n>` and writes a backlink

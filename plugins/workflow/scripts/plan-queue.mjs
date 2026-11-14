@@ -565,9 +565,9 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
   // mention the brief it replaced reads as the plan. Both are looked for past
   // the queue's own status sections, wherever an agent wrote them; the
   // status checks below read the whole text. A `First` line and its blank
-  // count for nothing, so one written above a section the header sits under
-  // does not push the header out of the twelve lines (Codex C1,
-  // plans/put-first-review-fixes-follow-up.md).
+  // count for nothing, so one written above the first `## ` section, over a
+  // header under a section, does not push the header out of the twelve lines
+  // (Codex C1, plans/put-first-review-fixes-follow-up.md).
   const lines = withoutStatus(withoutFirstLine(text)).split("\n");
   const header = new RegExp(`^(Plan only|Short plan), (${DAY})`, "m").exec(
     lines.slice(0, 12).join("\n"),
@@ -3591,13 +3591,23 @@ export function firstCommand(args = [], { now = Date.now(), live } = {}) {
 /**
  * **Where `plans first` writes a file's First line** (decisions.md#plan-put-first):
  * after the header paragraph, as `handOverEdit` places a hand-over, or, with
- * `above`, when the header sits under a `## ` section, above that heading,
- * where `firstHead` reads it (plans/put-first-review-fixes-follow-up.md). The
+ * `above`, when the header sits under a `## ` section, above the first one,
+ * `heading`, where `firstHead` reads it (plans/put-first-review-fixes-follow-
+ * up.md, plans/put-first-any-header-place.md). The
  * header is the one `stateOf` read the file by, a plan's own, never a brief's
  * line kept above it (plans/put-first-review-fixes.md, part 1). `lines` are
  * the text's without its First line; `{ header, end, heading, above }`, the
- * first two as `headerEnd` gives them, `heading` as `headEndAt` does. The
- * planner's tool hook names the same place (plans/put-first-refusal-one-place.md).
+ * first two as `headerEnd` gives them, `heading` as `headEndAt` does.
+ *
+ * `headerEnd` finds the header `stateOf` read (plans/put-first-any-header-
+ * place.md, part 3): `withoutStatus` ends a status section at any line
+ * `HEADER_LINE` matches and keeps that line, so the file's first line that
+ * looks like a plan's header, or a brief's line, is the first `stateOf` sees,
+ * with or without status sections above it. Its twelve lines only decide
+ * whether the file is in the queue, and `firstCommand` calls this only for a
+ * file `stateOf` read, with the kind it gave. A header-looking line quoted in
+ * a status section is the header to both, and the line written under its
+ * paragraph is still read and still undone.
  */
 function firstPlace(lines, kind) {
   const [header, end] = headerEnd(
@@ -5634,7 +5644,10 @@ function planPath(file) {
  * queue would read no First line in, is refused with the line as it stands.
  * `plans first` keeps the file's times, so Claude Code's stale-file check
  * does not see its write; a line changed to another day the queue reads
- * passes. The words, naming the one place `firstPlace` gives, or "".
+ * passes. The words, or "". They name one place for every shape of header,
+ * above the first `## ` section: `firstHead`'s text, where `Lands` is read
+ * too, and no reading of the phrase leaves it; a place worked out per shape
+ * sent a planner where the line is not read (plans/put-first-any-header-place.md).
  */
 function firstDropped(input) {
   const path = planPath(input.tool_input?.file_path);
@@ -5648,20 +5661,7 @@ function firstDropped(input) {
   const line = firstHead(before)
     .split("\n")
     .find((one) => FIRST_MARK.test(one) && firstOf(one));
-  // The one place that works, as `plans first` writes it, in the text being
-  // written, since a plan written over a brief can have its header under a
-  // section where the brief's was not (Codex C1); the file as it stands when
-  // the new text has no header the queue reads
-  // (plans/put-first-refusal-one-place.md).
-  const placeIn = (text, kind) => {
-    const place = kind ? firstPlace(withoutFirstLine(text).split("\n"), kind) : null;
-    return place && place.header >= 0 ? place : null;
-  };
-  const { above } = placeIn(after, stateOf(after)?.kind) || placeIn(before, state.kind) || {};
-  const place = above
-    ? "above the ## section that header sits under"
-    : "under the header paragraph";
-  return `${path} is first (${firstWords({ first }).replace(/^first /, "")}): keep its line, ${line}, ${place}. Only ${owner()}'s word takes it out: plans first --undo ${path}.`;
+  return `${path} is first (${firstWords({ first }).replace(/^first /, "")}): keep its line, ${line}, above the first ## section. Only ${owner()}'s word takes it out: plans first --undo ${path}.`;
 }
 
 /**

@@ -9408,7 +9408,7 @@ describe("a plan put first, in a project", () => {
       });
     const denied = (out: string) =>
       out ? JSON.parse(out).hookSpecificOutput?.permissionDecisionReason || "" : "";
-    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, under the header paragraph. Only Javi's word takes it out: plans first --undo plans/x.md.`;
+    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, above the first ## section. Only Javi's word takes it out: plans first --undo plans/x.md.`;
     // The plan written over the brief without the line.
     const planText = plan("13 November 2026");
     expect(denied(hook("Write", { content: planText }))).toBe(words);
@@ -9436,7 +9436,7 @@ describe("a plan put first, in a project", () => {
     expect(hook("Write", { content: planText })).toBe("");
   });
 
-  it("the planner's tool hook names the place above a section the header sits under (plans/put-first-refusal-one-place.md)", () => {
+  it("the planner's tool hook names one place for a header under the first section (plans/put-first-any-header-place.md)", () => {
     reset();
     const mark = "First: 13 November 2026 10:00:00.";
     const header = "Plan only, 13 November 2026, for Javi; the executor builds it.";
@@ -9451,7 +9451,7 @@ describe("a plan put first, in a project", () => {
       });
     const denied = (out: string) =>
       out ? JSON.parse(out).hookSpecificOutput?.permissionDecisionReason || "" : "";
-    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, above the ## section that header sits under. Only Javi's word takes it out: plans first --undo plans/x.md.`;
+    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, above the first ## section. Only Javi's word takes it out: plans first --undo plans/x.md.`;
     // The line dropped.
     expect(denied(hook("Write", { content: `# P\n\n${body}` }))).toBe(words);
     // The line moved under the header paragraph, inside the section, is not read there.
@@ -9476,6 +9476,79 @@ describe("a plan put first, in a project", () => {
     );
     expect(denied(hook("Write", { content: `# P\n\n${body}` }))).toBe(words);
     expect(hook("Write", { content: `# P\n\n${mark}\n\n${body}` })).toBe("");
+  });
+
+  it("a header under a later section: the line is kept and written above the first section (plans/put-first-any-header-place.md)", () => {
+    reset();
+    const mark = "First: 13 November 2026 10:00:00.";
+    const header = "Plan only, 13 November 2026, for Javi; the executor builds it.";
+    const body = `## Context\n\nA note.\n\n## Plan\n\n${header}\n\n## What was asked\n\nA change.\n`;
+    // The header within twelve lines once the mark is taken out.
+    expect(`# P\n\n${body}`.split("\n")[8]).toBe(header);
+    const marked = `# P\n\n${mark}\n\n${body}`;
+    writeFileSync(file("x.md"), marked);
+    const hook = (tool_name: string, tool_input: object) =>
+      queue(["tool"], {
+        session_id: ids.planner,
+        agent_type: "workflow:planner",
+        tool_name,
+        tool_input: { file_path: file("x.md"), ...tool_input },
+      });
+    const denied = (out: string) =>
+      out ? JSON.parse(out).hookSpecificOutput?.permissionDecisionReason || "" : "";
+    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, above the first ## section. Only Javi's word takes it out: plans first --undo plans/x.md.`;
+    // The line dropped.
+    expect(denied(hook("Write", { content: `# P\n\n${body}` }))).toBe(words);
+    // The line straight above the section the header sits under is not read there.
+    expect(
+      denied(
+        hook("Write", { content: `# P\n\n${body.replace("## Plan\n", `${mark}\n\n## Plan\n`)}` }),
+      ),
+    ).toBe(words);
+    // The line above the first section passes, and the queue reads it there.
+    const kept = `# P\n\n${mark}\n\n${body.replace("A note.", "A note, said.")}`;
+    expect(hook("Write", { content: kept })).toBe("");
+    writeFileSync(file("x.md"), kept);
+    const listed = queue(["list"]);
+    expect(listed).not.toContain("First line not read");
+    const ready = rows(listed, "Ready, put first, then oldest first");
+    expect(ready[0]).toMatch(/^ {2}plans\/x\.md +Plan only, 13 November, first since /);
+    // plans first writes it there, and --undo gives the file back.
+    const bare = `# P\n\n${body}`;
+    writeFileSync(file("x.md"), bare);
+    expect(run(["first", "plans/x.md"]).status).toBe(0);
+    expect(readFileSync(file("x.md"), "utf8")).toMatch(
+      /^# P\n\nFirst: \d{1,2} [A-Z][a-z]+ \d{4} \d{2}:\d{2}:\d{2}\.\n\n## Context\n/,
+    );
+    expect(run(["first", "--undo", "plans/x.md"]).status).toBe(0);
+    expect(readFileSync(file("x.md"), "utf8")).toBe(bare);
+  });
+
+  it("plans first writes under the header the queue read, with a hand-over above it (plans/put-first-any-header-place.md, part 3)", () => {
+    reset();
+    const header = "Plan only, 13 November 2026, for Javi; the executor builds it.";
+    const handed = (step: string) =>
+      `# P\n\n## Handing over, 13 November 2026, by the queue\n\n${step}\n\n${header}\n\n## What was asked\n\nA change.\n`;
+    for (const [said, step, under] of [
+      ["the plan's header", "Step in hand: 2.", header],
+      [
+        "a header-looking line quoted in the hand-over",
+        "Step in hand: 2.\nPlan only, 12 November 2026, an earlier draft.",
+        "Plan only, 12 November 2026, an earlier draft.",
+      ],
+    ]) {
+      const text = handed(step);
+      writeFileSync(file("x.md"), text);
+      expect(run(["first", "plans/x.md"]).status, said).toBe(0);
+      const written = readFileSync(file("x.md"), "utf8");
+      const after = written.split(`${under}\n\n`)[1] ?? "";
+      expect(after, said).toMatch(/^First: \d{1,2} [A-Z][a-z]+ \d{4} \d{2}:\d{2}:\d{2}\.\n\n/);
+      const listed = queue(["list"]);
+      expect(listed, said).not.toContain("First line not read");
+      expect(listed, said).toMatch(/plans\/x\.md .*first since /);
+      expect(run(["first", "--undo", "plans/x.md"]).status, said).toBe(0);
+      expect(readFileSync(file("x.md"), "utf8"), said).toBe(text);
+    }
   });
 
   it("plans first refuses what is not waiting", () => {

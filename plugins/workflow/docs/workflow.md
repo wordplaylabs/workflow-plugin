@@ -459,8 +459,9 @@ the author answers with a `Related` line.
 (decisions.md#plan-state-in-file, decisions.md#related-line)
 
 **A plan put first is built next.** On the owner's word, `plans first
-<path>` writes `First: <date> <time>.` under the header paragraph of a
-waiting plan or brief, or above the `## ` section that header sits under;
+<path>` writes `First: <date> <time>.` above the first `## ` section of a
+waiting plan or brief, where the queue reads it: under the header
+paragraph, or straight above that section when the header sits under one;
 the queue puts the files so marked ahead of the
 rest, the latest marked on top, then oldest first, a handed-over plan
 still before all, and `plans` says `first since` on each. The executor

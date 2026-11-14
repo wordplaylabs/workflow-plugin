@@ -1,7 +1,7 @@
 # Installing the workflow: steps for Claude Code
 
 This file is for Claude Code. A person pasted a line like "Install the
-workflow plugin from https://github.com/JavierMNieto/workflow-plugin by
+workflow plugin from https://github.com/wordplaylabs/workflow-plugin by
 following its INSTALL.md" into Claude Code, in the folder of their
 project. Follow the steps below in order, in that chat. The person may
 not read guides: say what you are doing in a short sentence as you go,
@@ -41,7 +41,7 @@ the first option; the person can always type another. The answer is
 ## 3. Install the plugin
 
 ```
-claude plugin marketplace add JavierMNieto/workflow-plugin#main
+claude plugin marketplace add wordplaylabs/workflow-plugin#main
 claude plugin install workflow@workflow --config owner="<name>"
 ```
 
@@ -54,7 +54,7 @@ with
 `echo '{"owner":"<name>"}' | claude plugin configure workflow@workflow --values-stdin`.
 
 When `claude` was not found in step 1, ask the person to type
-`/plugin marketplace add JavierMNieto/workflow-plugin#main`, then
+`/plugin marketplace add wordplaylabs/workflow-plugin#main`, then
 `/plugin install workflow@workflow` (it asks for their name), and go on
 when they say it is done.
 
@@ -70,7 +70,7 @@ the two differ.
 {
   "extraKnownMarketplaces": {
     "workflow": {
-      "source": { "source": "github", "repo": "JavierMNieto/workflow-plugin", "ref": "main" },
+      "source": { "source": "github", "repo": "wordplaylabs/workflow-plugin", "ref": "main" },
       "autoUpdate": true
     }
   },

@@ -23,7 +23,12 @@ quote the project it came from.
 
 **Public, and names no project.** `test/public.test.ts` refuses a host
 address, a personal email, the home lab's domain or the name of the
-project the workflow was first written in, in every tracked file.
+project the workflow was first written in, in every tracked file. The
+one exception is the repository's own address,
+wordplaylabs/workflow-plugin, written exactly so (Javi, 14 November
+2026): the address shows the name to anyone who opens the repository,
+and the old address worked only by GitHub's redirect. The name in any
+other form is still refused.
 
 **Nothing from a project is in the plugin.** A project's specifics belong
 in its `.claude/workflow.md`; an agent file or a script reads them from

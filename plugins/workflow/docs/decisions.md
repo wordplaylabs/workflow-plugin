@@ -747,6 +747,20 @@ on the machine that planned them.
   Jira's linked issue created in another project, GitHub's issue
   transfer and Actions' `repository_dispatch` carry work across the same
   way. plans/project-follow-ups-reach-the-project.md.
+- `public-names-no-project` **The plugin's repository is public and
+  names no project, except in its own address.** (Javi, 27 October)
+  Every machine installs from it and anyone may read it, so no tracked
+  file holds a host's address, a personal email, the home lab's domain,
+  a token or the name of a project the workflow runs in; a project's
+  specifics are in its own project file, and `test/public.test.ts`
+  refuses each. 14 November: the repository moved to the first
+  project's organization so that a machine's token could push, and its
+  address, wordplaylabs/workflow-plugin, now holds that name. The check
+  allows the address written exactly so and refuses the name in any
+  other form (Javi): the address shows the name to anyone who opens the
+  repository, and the old address worked only by GitHub's redirect,
+  which GitHub deletes when a repository is created there.
+  plans/plugin-address-in-files.md.
 
 ## Installing
 

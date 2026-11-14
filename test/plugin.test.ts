@@ -2770,7 +2770,7 @@ describe("installing by asking Claude", () => {
   const repo = new URL("../", import.meta.url).pathname;
   const read = (path: string) => readFileSync(join(repo, path), "utf8");
   const prompt =
-    "Install the workflow plugin from https://github.com/JavierMNieto/workflow-plugin by following its INSTALL.md.";
+    "Install the workflow plugin from https://github.com/wordplaylabs/workflow-plugin by following its INSTALL.md.";
   /** The first ```json block of a Markdown text. */
   const jsonBlock = (text: string) => /```json\r?\n([\s\S]*?)\r?\n```/.exec(text)?.[1] ?? "";
   /** The first plain ``` block of a Markdown text: the commands. */
@@ -2795,7 +2795,7 @@ describe("installing by asking Claude", () => {
   });
   it("runs the two commands the docs' Installing section names", () => {
     const fromDocs = commands(installing());
-    expect(fromDocs).toContain("claude plugin marketplace add JavierMNieto/workflow-plugin#main");
+    expect(fromDocs).toContain("claude plugin marketplace add wordplaylabs/workflow-plugin#main");
     expect(fromDocs).toContain('claude plugin install workflow@workflow --config owner="<name>"');
     expect(commands(read("INSTALL.md"))).toBe(fromDocs);
   });

@@ -13,7 +13,7 @@ project this chat is in.
    when that parent is writable (`/workspaces/workflow-plugin` in a
    devcontainer whose project is under `/workspaces/`), else
    `~/workflow-plugin`. When absent, `gh repo clone
-   JavierMNieto/workflow-plugin <path>`, which uses the signed-in login.
+   wordplaylabs/workflow-plugin <path>`, which uses the signed-in login.
    When present, clean and detached, `git fetch origin && git checkout
    --detach origin/test`; when it is on a branch or has changes, leave it
    and say so (an executor is in it).

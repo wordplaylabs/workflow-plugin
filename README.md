@@ -2,7 +2,7 @@
 
 ## Install
 
-> Install the workflow plugin from https://github.com/JavierMNieto/workflow-plugin by following its INSTALL.md.
+> Install the workflow plugin from https://github.com/wordplaylabs/workflow-plugin by following its INSTALL.md.
 
 Paste that line into Claude Code, in your project's folder. Claude
 installs the plugin, asks before it adds anything to your settings, and
@@ -11,7 +11,7 @@ tells you what you now have.
 Or by hand:
 
 ```
-claude plugin marketplace add JavierMNieto/workflow-plugin#main
+claude plugin marketplace add wordplaylabs/workflow-plugin#main
 claude plugin install workflow@workflow --config owner="<your first name>"
 ```
 

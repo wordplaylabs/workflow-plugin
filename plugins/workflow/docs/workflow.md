@@ -713,15 +713,21 @@ executor writes it into that checkout's `plans/` and starts its planner,
 the Stop hook holding the first stop until the file exists.
 (decisions.md#leave-back-as-brief)
 
+**The plugin's repository is public and names no project**: no tracked
+file holds a host's address, a personal email, a token or the name of a
+project the workflow runs in, and `test/public.test.ts` refuses each.
+The one exception is the repository's own address, as "Installing"
+gives it. (decisions.md#public-names-no-project)
+
 ## Installing
 
 ```
-claude plugin marketplace add JavierMNieto/workflow-plugin#main
+claude plugin marketplace add wordplaylabs/workflow-plugin#main
 claude plugin install workflow@workflow --config owner="<name>"
 ```
 
 A newcomer pastes one line into Claude Code, "Install the workflow
-plugin from https://github.com/JavierMNieto/workflow-plugin by following
+plugin from https://github.com/wordplaylabs/workflow-plugin by following
 its INSTALL.md", and Claude runs these two commands, merges the settings
 below with the person's yes, and offers `/workflow:setup`; `INSTALL.md`'s
 JSON block is a copy of this one, and a test fails while they differ.
@@ -730,7 +736,7 @@ JSON block is a copy of this one, and a test fails while they differ.
 ```json
 "extraKnownMarketplaces": {
   "workflow": {
-    "source": { "source": "github", "repo": "JavierMNieto/workflow-plugin", "ref": "main" },
+    "source": { "source": "github", "repo": "wordplaylabs/workflow-plugin", "ref": "main" },
     "autoUpdate": true
   }
 },

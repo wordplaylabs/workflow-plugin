@@ -164,9 +164,14 @@ export type LiveRow = {
   kind?: string;
   pid?: number;
   waitingFor?: string;
-  /** `working`, `blocked`, `done`, `failed` or `stopped`, as `claude agents --json` gives it. */
+  /**
+   * `working`, `blocked`, `done`, `failed` or `stopped`, as `claude agents --json` gives it;
+   * `blocked` is Claude Code's reading of the last turn's text or a prompt standing.
+   */
   state?: string;
 };
+/** A row's status as `plans` says it: `waiting for input` only while a prompt stands, `not running` with no process. */
+export function statusOf(row: LiveRow): string;
 export type Tree = { path: string; branch: string };
 /** A live executor or planner session, as its line and `canStart` see it. */
 export type Session = {

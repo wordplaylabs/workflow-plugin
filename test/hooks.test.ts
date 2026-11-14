@@ -64,6 +64,7 @@ import {
   githubPrompt,
   PLANNER_PROMPT,
   sessionsOf,
+  statusOf,
   versionLine,
   cutoffEdit,
   decideEnd,
@@ -4375,7 +4376,10 @@ if (args[0] === "agents") {
           // where the second is gone), and c keeps its own lease.
           due("plans/b.md");
           expect(
-            timer(["plans/b.md", "plans/c.md"], [row(1, { status: "idle", state: "blocked" })]),
+            timer(
+              ["plans/b.md", "plans/c.md"],
+              [row(1, { status: "waiting", waitingFor: "input needed", state: "blocked" })],
+            ),
           ).toBe("");
           expect(readFileSync(join(dir, ".claude", "starts.log"), "utf8")).toContain(
             '"name":"Lease Planner 2 (lab)","paths":["plans/b.md"]',
@@ -5208,7 +5212,7 @@ describe("a brief reaches a free planner", () => {
   const over230 =
     "its context is 230k tokens, over the ceiling of 160k (no history yet: today's numbers)";
   const blockedWhy =
-    "it is waiting for Javi's answer to a question, and takes nothing until he answers";
+    "a question or a prompt is open in its chat, and it takes nothing until Javi answers it";
 
   it("canStart starts beside a busy planner at 230k with a brief under way and a brief that shares nothing, saying why", () => {
     const busy = planner(34, "busy", 230, { on: "plans/own.md" });
@@ -6169,7 +6173,32 @@ describe("a finished chat ends", () => {
       why: "its cache is still warm",
     });
     expect(decideEnd({ row: done, usage: used(20), now, force: true })).toEqual({ end: true });
-    expect(decideEnd({ row: { ...done, state: "blocked" }, usage: used(70), now })).toEqual({
+    // plans/waiting-means-a-question.md: a blocked chat whose turn is over
+    // with no prompt open is finished; one with a prompt open, or with no
+    // process, is kept.
+    const blocked = { ...done, state: "blocked" };
+    expect(
+      decideEnd({ row: { ...blocked, pid: 1, status: "idle" }, usage: used(70), now }),
+    ).toEqual({ end: true });
+    expect(
+      decideEnd({ row: { ...blocked, pid: 1, status: "idle" }, usage: used(20), now }),
+    ).toEqual({ end: false, why: "its cache is still warm" });
+    expect(
+      decideEnd({
+        row: { ...blocked, pid: 1, status: "waiting", waitingFor: "input needed" },
+        usage: used(70),
+        now,
+      }),
+    ).toEqual({ end: false, why: "its state is blocked" });
+    // One reading: a prompt `statusOf` reads standing keeps it, whatever `status` says.
+    expect(
+      decideEnd({
+        row: { ...blocked, pid: 1, status: "idle", waitingFor: "permission prompt" },
+        usage: used(70),
+        now,
+      }),
+    ).toEqual({ end: false, why: "its state is blocked" });
+    expect(decideEnd({ row: blocked, usage: used(70), now, force: true })).toEqual({
       end: false,
       why: "its state is blocked",
     });
@@ -6244,33 +6273,78 @@ describe("a finished chat ends", () => {
     expect(endedEdit(plan, { sessionId: "other", by: "Javi" })).toBe(plan);
   });
 
-  it("reads a blocked session as waiting for input, and never replaces it", () => {
-    const row = {
-      sessionId: "b1000000-0000",
-      name: "Ends Planner 1",
-      kind: "background",
-      state: "blocked",
-      status: "idle",
-      cwd: "/x",
-    };
-    const [one] = sessionsOf("planner", [row], null, {
-      trees: [{ path: "/x", branch: "" }],
-      stateFor: () => ({ agent: "planner", plans: [] }),
-      usageFor: () => ({ context: 300_000, at: now - MIN }),
-    } as never);
-    expect(one.status).toBe("waiting for input");
-    expect(describeSession(one)).toContain("Ends Planner 1 [b1000000], waiting for input");
+  // plans/waiting-means-a-question.md
+  it("reads a chat as waiting for input only while a prompt stands", () => {
     const usage = {
       at: now / 1000,
       five_hour: { used_percentage: 10, resets_at: now / 1000 + 3600 },
     };
-    // A planner waiting on its owner is left: a fresh one starts beside it, none is retired.
-    const planner = canStart({ kind: "planner", now, usage, name: "Ends", sessions: [one] });
-    expect(planner).toMatchObject({ start: true });
-    expect(planner).not.toHaveProperty("replace");
-    expect(planner.note).toContain("which is waiting for input with a context of 300k");
+    const base = { name: "Ends Planner 1", kind: "background", cwd: "/x" };
+    const read = (row: object, at = now - MIN, context = 300_000) =>
+      sessionsOf("planner", [{ sessionId: "b1000000-0000", ...base, ...row }], null, {
+        trees: [{ path: "/x", branch: "" }],
+        stateFor: () => ({ agent: "planner", plans: [] }),
+        usageFor: () => ({ context, at }),
+      } as never)[0];
+    const start = (one: unknown) =>
+      canStart({ kind: "planner", now, usage, name: "Ends", sessions: [one] as never });
+    // The example: its turn is over on a refused token, no question open.
+    const example = { pid: 159062, status: "idle", state: "blocked" };
+    const quiet = read(example);
+    expect(quiet.status).toBe("idle");
+    expect(describeSession(quiet)).toContain("Ends Planner 1 [b1000000], idle");
+    expect(describeSession(quiet)).not.toContain("waiting for input");
+    // Warm and under its ceiling, it is sent the brief like any idle planner.
+    const warm = start(read(example, now - MIN, 100_000));
+    expect(warm).toMatchObject({ wait: true, held: true });
+    expect(JSON.stringify(warm)).not.toMatch(/answers it|question or a prompt/);
+    // Cold and over its ceiling, it is replaced like any idle planner.
+    const cold = start(read(example, now - 130 * MIN));
+    expect(cold).toMatchObject({ start: true });
+    expect(cold.replace).toEqual([expect.objectContaining({ name: "Ends Planner 1" })]);
+    expect(JSON.stringify(cold)).not.toMatch(/answers it|question or a prompt/);
+    // A question open, and a permission prompt: waiting, started beside, never replaced.
+    const question = { pid: 1, status: "waiting", waitingFor: "input needed", state: "blocked" };
+    const permission = {
+      pid: 1,
+      status: "waiting",
+      waitingFor: "permission prompt",
+      state: "blocked",
+    };
+    for (const [row, words] of [
+      [question, "waiting for input"],
+      [permission, "waiting for input, permission prompt"],
+    ] as const) {
+      const one = read(row, now - 130 * MIN);
+      expect(one.status).toBe(words);
+      expect(describeSession(one)).toContain(`Ends Planner 1 [b1000000], ${words}`);
+      const beside = start(one);
+      expect(beside).toMatchObject({ start: true });
+      expect(beside).not.toHaveProperty("replace");
+      expect(beside.note).toContain(
+        "a question or a prompt is open in its chat, and it takes nothing until Javi answers it",
+      );
+    }
+    // An interactive chat with the question tool open reads the same.
+    expect(
+      statusOf({
+        sessionId: "i",
+        kind: "interactive",
+        pid: 2,
+        status: "waiting",
+        waitingFor: "input needed",
+      }),
+    ).toBe("waiting for input");
+    // No process: not running, started beside, never replaced.
+    const gone = read({ state: "blocked" }, now - 130 * MIN);
+    expect(gone.status).toBe("not running");
+    expect(describeSession(gone)).toContain("Ends Planner 1 [b1000000], not running");
+    const besideGone = start(gone);
+    expect(besideGone).toMatchObject({ start: true });
+    expect(besideGone).not.toHaveProperty("replace");
+    expect(besideGone.note).toContain("(its process is not running)");
     // An executor waiting on its owner refuses the start.
-    const executor = { ...one, kind: "executor" as const };
+    const executor = { ...read(question), kind: "executor" as const };
     expect(canStart({ now, usage, name: "Ends", sessions: [executor] })).toMatchObject({
       refuse: true,
     });
@@ -6395,7 +6469,8 @@ describe("a finished chat ends", () => {
         name: "Ends Planner 1",
         kind: "background",
         state: "blocked",
-        status: "idle",
+        status: "waiting",
+        waitingFor: "input needed",
       },
       {
         sessionId: planner,
@@ -6417,7 +6492,9 @@ describe("a finished chat ends", () => {
         id: "bg-l",
         name: "Ends Planner 3",
         kind: "background",
-        state: "done",
+        // Its turn is over with no prompt open, read blocked from its text
+        // (plans/waiting-means-a-question.md): a finished chat.
+        state: "blocked",
         status: "idle",
       },
     ];
@@ -6549,6 +6626,7 @@ describe("a finished chat ends", () => {
       expect(logged()).toEqual(["bg-e", "bg-p", "bg-l"]);
       expect(out).toContain("Ended Ends Executor 1 [e2000000]: done.");
       expect(out).toContain("Ended Ends Planner 2 [p3000000]: done.");
+      expect(out).toContain("Ended Ends Planner 3 [p5000000]: idle.");
       expect(out).toContain("Not ended: Ends Planner 1 [p4000000], its state is blocked.");
       expect(out).toContain(
         "Not ended: Ends Executor 2 [e6000000], it is not a background session of the queue.",
@@ -6668,7 +6746,8 @@ describe("asked once", () => {
     sessionId: ids.planner,
     name: "Asks Planner 3",
     kind: "background",
-    status: "idle",
+    status: "waiting",
+    waitingFor: "input needed",
     state: "blocked",
   };
   const ready = (path: string) => ({ path, ...stateOf(asks) });
@@ -9139,7 +9218,8 @@ describe("a plan put first, in a project", () => {
         sessionId: ids.planner,
         name: "First Planner 2",
         kind: "background",
-        status: "idle",
+        status: "waiting",
+        waitingFor: "input needed",
         state: "blocked",
       };
       expect(edit("a.md", [execRow, planner])).toBe("");

@@ -967,16 +967,21 @@ export function parseName(name) {
 }
 
 /**
- * A row's status as the queue says it: "waiting for input" when it waits on
- * the owner (a question asked, a prompt standing: `state` blocked, or
- * `waitingFor` input needed). A session that ended its turn on a question
- * reads `status: idle` with no `waitingFor`, so `state` is what says it
- * (plans/idle-chats-end.md, part 4).
+ * A row's status as the queue says it: "waiting for input" only while its
+ * process says a prompt stands (`status: waiting`, `waitingFor`), the prompt
+ * named unless it is the question tool's; "not running" with no process (no
+ * `pid`, no `status`); else the process's own status. `state` is not read:
+ * `blocked` is also Claude Code's reading of the last turn's text, an error
+ * only the owner can clear as much as a question
+ * (plans/waiting-means-a-question.md, retaking plans/idle-chats-end.md, part 4).
  */
-function statusOf(row) {
-  const status = row.status || "status unknown";
-  if (row.waitingFor === "input needed" || row.state === "blocked") return "waiting for input";
-  return row.waitingFor ? `${status}, ${row.waitingFor}` : status;
+export function statusOf(row) {
+  if (row.status === "waiting" || row.waitingFor)
+    return !row.waitingFor || row.waitingFor === "input needed"
+      ? "waiting for input"
+      : `waiting for input, ${row.waitingFor}`;
+  if (!row.pid && !row.status) return "not running";
+  return row.status || "status unknown";
 }
 
 /**
@@ -1118,7 +1123,8 @@ function heldWords(one) {
 
 /**
  * "ends at 22:49 if left quiet" while the end timer is ahead and the session
- * idle, else "": a turn under way or a question standing is not quiet.
+ * idle, else "": a turn under way or a question or a prompt standing is not
+ * quiet; a blocked state alone is.
  */
 function endsWords(one, now = Date.now()) {
   return one.endsAt > now && /^idle\b/.test(one.status || "")
@@ -1985,11 +1991,20 @@ export function mayReuse({
 }
 
 /**
+ * A row whose turn is over with no prompt open: `state` done, or `state`
+ * blocked while `statusOf` reads it `idle`, Claude Code's reading of the last
+ * turn's text and not a prompt on screen (plans/waiting-means-a-question.md).
+ */
+function finished(row) {
+  return row.state === "done" || (row.state === "blocked" && statusOf(row) === "idle");
+}
+
+/**
  * **A finished chat ends when its cache has gone cold**
  * (plans/idle-chats-end.md): a background session the queue counts as its
- * own, whose state is `done` (its turn finished; `blocked` is a question or a
- * prompt that stands, `working` a turn), whose last turn is older than the
- * cache's warm span, with no plan or brief under way (`on`). A planner's
+ * own, whose turn is over with no prompt open (`finished`: a question or a
+ * prompt standing keeps it, `working` is a turn), whose last turn is older
+ * than the cache's warm span, with no plan or brief under way (`on`). A planner's
  * plans still in the queue keep nothing: each stands alone in its file.
  * `force` (`plans end`) ends a warm one too. **`immediate` (`plans end <id>
  * --now`) ends any background session of the queue, whatever its state**
@@ -2008,7 +2023,7 @@ export function decideEnd({
   if (!row || row.kind !== "background")
     return { end: false, why: "it is not a background session of the queue" };
   if (immediate) return on ? { end: true, on } : { end: true };
-  if (row.state !== "done") return { end: false, why: `its state is ${row.state || "unknown"}` };
+  if (!finished(row)) return { end: false, why: `its state is ${row.state || "unknown"}` };
   if (on) return { end: false, why: `it has ${on} under way` };
   // With no usage known, the timer fired an hour after the Stop that armed it.
   if (!force && usage && usage.at && now - usage.at <= WARM)
@@ -2268,35 +2283,39 @@ export function canStart({
   // An executor with a plan under way (its Building line) is never stale:
   // replacing it would orphan that work.
   // **A planner is judged by what it can do now** (plans/briefs-reach-a-
-  // free-planner.md, part 1): one waiting on the owner's answer takes nothing
-  // until he answers, and one mid-brief over its ceiling for this brief would
-  // be retired at its next stop, so either gets a fresh planner beside it.
+  // free-planner.md, part 1): one with a question or a prompt open takes
+  // nothing until he answers, one with no process takes nothing at all
+  // (plans/waiting-means-a-question.md, part 2), and one mid-brief over its
+  // ceiling for this brief would be retired at its next stop, so each gets a
+  // fresh planner beside it.
   // **A start nobody is watching** (`unwatched`, a timer's) replaces an idle
   // session whatever its warmth: no command can message a session, so the
   // work it is started for would otherwise wait on a chat nobody prompts.
   const idle = (one) => /^idle\b/.test(one.status || "");
   const work = kind === "planner" ? "brief" : "plan";
   const stale = (one) =>
-    kind === "planner" && one.status === "waiting for input"
+    kind === "planner" && /^waiting for input\b/.test(one.status || "")
       ? {
           reuse: false,
-          why: `it is waiting for ${owner()}'s answer to a question, and takes nothing until he answers`,
+          why: `a question or a prompt is open in its chat, and it takes nothing until ${owner()} answers it`,
         }
-      : kind !== "planner" && one.on
-        ? { reuse: true }
-        : unwatched && idle(one)
-          ? {
-              reuse: false,
-              why: `idle while a ${work}'s thirty minutes ran out, and the queue cannot message it`,
-            }
-          : mayReuse({
-              usage: one.usage,
-              shared: one.shared || 0,
-              inputs,
-              now,
-              fallback,
-              kind,
-            });
+      : kind === "planner" && one.status === "not running"
+        ? { reuse: false, why: "its process is not running" }
+        : kind !== "planner" && one.on
+          ? { reuse: true }
+          : unwatched && idle(one)
+            ? {
+                reuse: false,
+                why: `idle while a ${work}'s thirty minutes ran out, and the queue cannot message it`,
+              }
+            : mayReuse({
+                usage: one.usage,
+                shared: one.shared || 0,
+                inputs,
+                now,
+                fallback,
+                kind,
+              });
   let replace = [];
   let beside = [];
   if (sessions.length && sessions.every((one) => !stale(one).reuse)) {
@@ -2924,7 +2943,8 @@ export function endSession(
   clearEnd(sessionId, null);
   const kind = state.agent === "planner" ? "planner" : "executor";
   const words = [
-    row.state,
+    // A blocked chat ended as finished says what its process said.
+    row.state === "blocked" && finished(row) ? "idle" : row.state,
     usageWords({ kind, usage, fallback: proj().reuse[kind], inputs: reuseNow() }),
   ].filter(Boolean);
   const line = `Ended ${who}: ${words.join(", ")}.`;

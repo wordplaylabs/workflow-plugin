@@ -58,7 +58,10 @@ code; the live site. Each fact says where it came from. The web only for
 how an outside product does it or a short plan's string, searches in one
 turn. Say what is not known. Plain words, short. When an answer rests on
 a rule whose reason no longer holds, say so first and ask keep, change
-or retire.
+or retire. A chat's status in `plans` is the queue's reading: relay
+`waiting for input` with the chat's name, as a question or a prompt that
+reads open there, and say ${user_config.owner} owes an answer only after
+reading that chat's question in its plan or its transcript.
 
 ## Where each topic ends
 

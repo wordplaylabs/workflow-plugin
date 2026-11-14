@@ -517,9 +517,15 @@ project and the machine**, `<Project> Executor 2 (lab)`.
 
 **A finished chat ends an hour after it goes quiet**, by `claude stop`,
 which keeps its conversation; a replaced one three minutes after its
-successor starts; one that asked the owner a question never. `plans end`
+successor starts; one with a question or a prompt open never. `plans end`
 ends this queue's finished chats now, `plans end <id>` one of them.
 (decisions.md#chat-ends-after-an-hour)
+
+**A chat waits for the owner only while a question or a prompt is open
+in it**: `plans` says `waiting for input` from the prompt Claude Code
+reports standing, never from its reading of the last turn; a chat whose
+turn is over reads `idle` and is a finished chat, and one with no
+process `not running`. (decisions.md#waiting-is-an-open-prompt)
 
 **`plans end <id> --now` ends a named chat whatever it is doing**, writes
 its plan a "Handing over, <date>, ended by <owner>" section, releases

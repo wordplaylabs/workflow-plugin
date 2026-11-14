@@ -459,6 +459,14 @@ on the machine that planned them.
   (observed in Claude Code 2.1.113, 27 October) The app is a window into
   the session; the process's exit is what archives the chat.
   plans/idle-chats-end.md.
+- `waiting-is-an-open-prompt` **A chat waits for the owner only while a
+  question or a prompt is open in it.** (Javi, 14 November) `plans`
+  called a planner "waiting for input" for 22 hours and the assistant
+  relayed a question owed, with none open: Claude Code marks a session
+  blocked from the text of its last turn too, "an error only you can
+  clear" by its agent view page, here a refused GitHub token. The
+  process's own `status: waiting` is the prompt on screen. Retakes part
+  4 of plans/idle-chats-end.md. plans/waiting-means-a-question.md.
 - `background-in-checkout` **A background session works in the
   checkout, one executor holding the lock.** (Javi, 27 October) A
   worktree per session made the queue lose track of what was built

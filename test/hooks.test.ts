@@ -9077,6 +9077,40 @@ describe("a plan put first, in a project", () => {
     expect(readFileSync(file("b.md"), "utf8")).toContain("First: the hook reads it.\n");
   });
 
+  it("a First line under a section holding a fenced heading is still read, and undone (Codex C2)", () => {
+    reset();
+    // A hand-over above the First line that shows a section in an example.
+    const fenced = "```markdown\n## Example\n\nA line.\n```\n\n";
+    writeFileSync(
+      file("b.md"),
+      plan(
+        "13 November 2026",
+        `## Handing over, 13 November 2026\n\nStep in hand: 2\n\n${fenced}First: 13 November 2026 10:00:00.\n\n`,
+      ),
+    );
+    expect(firstOf(readFileSync(file("b.md"), "utf8"))).not.toBeNull();
+    const listed = queue(["list"]);
+    expect(listed).not.toContain("First line not read");
+    expect(listed).toContain("first since 13 November 10:00");
+    writeFileSync(
+      file("x.md"),
+      `# X\n\nBrief for the planner, 13 November 2026.\n\n## Planning, 13 November 2026, session ${ids.planner}\n\n${fenced}First: 13 November 2026 10:00:00.\n\n## What\n`,
+    );
+    expect(run(["first", "--undo", "plans/x.md"]).stdout).toBe("plans/x.md is no longer first.\n");
+    expect(readFileSync(file("x.md"), "utf8")).not.toContain("First:");
+    expect(readFileSync(file("x.md"), "utf8")).toContain("## Example\n");
+    // A fence inside a longer one is the longer one's text: the mark under both is taken out.
+    const nested = `\`\`\`\`markdown\n${fenced}\`\`\`\`\n\n`;
+    writeFileSync(
+      file("x.md"),
+      `# X\n\nBrief for the planner, 13 November 2026.\n\n## Planning, 13 November 2026, session ${ids.planner}\n\n${nested}First: 13 November 2026 10:00:00.\n\n## What\n`,
+    );
+    expect(firstOf(readFileSync(file("x.md"), "utf8"))).not.toBeNull();
+    expect(run(["first", "--undo", "plans/x.md"]).stdout).toBe("plans/x.md is no longer first.\n");
+    expect(readFileSync(file("x.md"), "utf8")).not.toContain("First:");
+    expect(readFileSync(file("x.md"), "utf8")).toContain(nested);
+  });
+
   it("a built plan is no longer first", () => {
     reset();
     run(["first", "plans/b.md"]);
@@ -9307,6 +9341,54 @@ describe("a plan put first, in a project", () => {
         },
         [execRow],
       );
+      expect(JSON.parse(out).reason).toBe(
+        `${words("plans/a.md", "13 November 15:42")} Its Building line was taken out.`,
+      );
+      expect(readFileSync(file("a.md"), "utf8")).not.toContain("## Building, ");
+      expect(readFileSync(file("b.md"), "utf8")).toContain(line);
+    });
+
+    it("a shell command claiming the first plan, still asking, judges it by its time before (Codex C1)", () => {
+      reset();
+      // b.md put first with a decision unanswered, its planner live, no question
+      // recorded, and its window over by its time before the command.
+      writeFileSync(
+        file("b.md"),
+        `${plan("13 November 2026", "First: 13 November 2026 15:42:07.\n\n")}\n## Decisions for Javi\n\n1. **One.** A (Recommended) or B.\n`,
+      );
+      writeFileSync(
+        stateFile(ids.planner),
+        JSON.stringify({ agent: "planner", plans: ["plans/b.md"] }),
+      );
+      const planner = {
+        sessionId: ids.planner,
+        name: "First Planner 2",
+        kind: "background",
+        status: "busy",
+        state: "working",
+      };
+      const before = Date.now() - 40 * 60_000;
+      writeFileSync(
+        stateFile(ids.exec),
+        JSON.stringify({ plansAt: { "plans/a.md": before, "plans/b.md": before } }),
+      );
+      writeFileSync(file("a.md"), plan("12 November 2026").replace("# P\n", `# P\n\n${line}\n`));
+      writeFileSync(
+        file("b.md"),
+        readFileSync(file("b.md"), "utf8").replace("# P\n", `# P\n\n${line}\n`),
+      );
+      const out = queue(
+        ["wrote"],
+        {
+          session_id: ids.exec,
+          agent_type: "workflow:executor",
+          tool_name: "Bash",
+          tool_input: { command: "sed -i ... plans/a.md plans/b.md" },
+        },
+        [execRow, planner],
+      );
+      // The window is not revived by the command's own write: b.md is not
+      // asking, keeps its line, and still holds a.md back.
       expect(JSON.parse(out).reason).toBe(
         `${words("plans/a.md", "13 November 15:42")} Its Building line was taken out.`,
       );

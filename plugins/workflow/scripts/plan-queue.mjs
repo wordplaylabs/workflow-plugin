@@ -352,12 +352,14 @@ export function firstUnread(text = "") {
  * Where a `First` line is read: the text before the first heading that is not
  * one of the queue's status lines, outside fences, the status sections
  * included, since a hand-over or a Planning line written under the header
- * lands above the line (/code-review).
+ * lands above the line (/code-review). The fences go first, so a heading in
+ * an example in one of those sections does not end the text (Codex C2,
+ * plans/waiting-means-a-question-follow-up.md).
  */
 function firstHead(text) {
-  const lines = text.split("\n");
+  const lines = withoutFences(text).split("\n");
   const end = lines.findIndex((line) => /^## /.test(line) && !STATUS_HEADING.test(line));
-  return withoutFences((end < 0 ? lines : lines.slice(0, end)).join("\n"));
+  return (end < 0 ? lines : lines.slice(0, end)).join("\n");
 }
 
 /** A `First` line `plans first` replaces: one with a day, read or not; prose that starts with the word stays. */
@@ -492,24 +494,28 @@ export function withoutFences(text = "") {
   const kept = [];
   let fence = null;
   for (const line of text.split("\n")) {
-    const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-    if (fence) {
-      if (
-        mark &&
-        mark[0] === fence[0] &&
-        mark.length >= fence.length &&
-        !line.trim().slice(mark.length).trim()
-      )
-        fence = null;
-      continue;
-    }
-    if (mark) {
-      fence = mark;
-      continue;
-    }
-    kept.push(line);
+    const inside = fence;
+    fence = fenceAfter(fence, line);
+    if (!inside && !fence) kept.push(line);
   }
   return kept.join("\n");
+}
+
+/**
+ * The fence open after `line`, `fence` the one open before it, by
+ * `withoutFences`'s rules, which every reader of fences shares, so the line
+ * `plans first --undo` takes out is the one `firstOf` reads (Codex,
+ * plans/waiting-means-a-question-follow-up.md).
+ */
+function fenceAfter(fence, line) {
+  const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+  if (!fence) return mark || null;
+  const closes =
+    mark &&
+    mark[0] === fence[0] &&
+    mark.length >= fence.length &&
+    !line.trim().slice(mark.length).trim();
+  return closes ? null : fence;
 }
 
 /**
@@ -3522,14 +3528,15 @@ function withoutFirstLine(text) {
   let fence = null;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-    if (mark) fence = fence ? (mark[0] === fence[0] ? null : fence) : mark;
+    const inside = fence;
+    fence = fenceAfter(fence, line);
+    const outside = !inside && !fence;
     // The head ends at the first heading that is not one of the queue's status lines.
-    if (!fence && /^## /.test(line) && !STATUS_HEADING.test(line)) {
+    if (outside && /^## /.test(line) && !STATUS_HEADING.test(line)) {
       kept.push(...lines.slice(i));
       break;
     }
-    if (!fence && FIRST_MARK.test(line)) {
+    if (outside && FIRST_MARK.test(line)) {
       if (lines[i + 1]?.trim() === "" && (kept.length === 0 || kept.at(-1).trim() === "")) i++;
       continue;
     }
@@ -5651,14 +5658,20 @@ function hook(mode, input) {
         // The queue with the sessions in hand, for a plan put first ahead
         // (plans/priority-queue.md, part 4); none with no sessions read.
         // The plans this command claimed are judged as they stood before it,
-        // so one command claiming two is not let through by its own lines (Codex C2).
+        // so one command claiming two is not let through by its own lines (Codex C2),
+        // their times too: the command's write would open a plan's window
+        // again, and a plan put first still asking would stop holding the
+        // other back (Codex C1, plans/waiting-means-a-question-follow-up.md).
         const queued = live
           ? withAsking(
               readPlans(join(root, "plans"), liveIds(live)).map((p) =>
                 unjudged.some((one) => one.path === p.path)
                   ? {
                       ...p,
-                      ...stateOf(p.text.replace(own, ""), { mtime: p.mtime, live: liveIds(live) }),
+                      ...stateOf(p.text.replace(own, ""), {
+                        mtime: state.plansAt?.[p.path] || p.mtime,
+                        live: liveIds(live),
+                      }),
                     }
                   : p,
               ),

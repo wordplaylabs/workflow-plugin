@@ -3146,6 +3146,34 @@ describe("the scripts' type declarations", () => {
 });
 
 // plans/executor-never-waits.md: what an executor would ask the owner, it decides.
+describe("a plan's commit holds the plan's files only", () => {
+  // plans/owners-untracked-files-left-alone.md, item 2.
+  const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
+  const flat = (text: string) => text.replace(/\s+/g, " ");
+  const before = () =>
+    /## Before the push(.*?)## After/.exec(
+      flat(readFileSync(join(plugin, "agents/executor.md"), "utf8")),
+    )![1];
+
+  it("stages the plan's files by path and leaves untracked files the executor did not write", () => {
+    const step4 = /4\. Commit and push:.*? 5\. /.exec(before())![0];
+    expect(step4).toContain("Stage the plan's files by path, the ones its diff touched");
+    expect(step4).toContain("never `git add -A` or `git add .`");
+    expect(step4).toContain("`git status --porcelain`");
+    expect(step4).toContain("an untracked file you did not write stays untracked");
+  });
+
+  it("reports a failure in a file the executor did not touch as the owner's", () => {
+    const step3 = /3\. The checks and suites.*? 4\. /.exec(before())![0];
+    expect(step3).toContain(
+      "A failure in a file you did not touch and the plan does not name is the owner's",
+    );
+    expect(step3).toContain("when it fails the same at `origin/<branch>`");
+    expect(step3).toContain("not fixed");
+    expect(step3).toContain("One your change causes is yours to fix.");
+  });
+});
+
 describe("an executor never waits on the owner", () => {
   const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
   const read = (path: string) => readFileSync(join(plugin, path), "utf8");

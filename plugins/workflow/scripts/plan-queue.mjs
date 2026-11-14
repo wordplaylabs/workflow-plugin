@@ -4087,9 +4087,9 @@ function primaryCheckout() {
 }
 
 /**
- * **`plans sync`**: moves a detached checkout that is clean but for
- * untracked files under `plans/`, and not ahead of the project's branch, to
- * `origin/<branch>`, or says why not. One line either way.
+ * **`plans sync`**: moves a detached checkout whose tracked files are
+ * unchanged, and not ahead of the project's branch, to `origin/<branch>`,
+ * or says why not. One line either way.
  *
  * Always the primary checkout, the one the hooks run from, even when run
  * from inside a worktree. `fetch: false` inside a hook, which the plugin's
@@ -4126,16 +4126,15 @@ export function sync({ fetch = true } = {}) {
     }
     if (onBranch)
       return `${note}Not moved: the checkout is on branch ${onBranch}; it moves only when detached.`;
-    // **An untracked file under `plans/` never holds the checkout**
-    // (plans/executor-over-ceiling-hands-on.md, part 3): the queue's working
-    // files are there, tracked or not, and git carries an untracked file across
-    // a detach unchanged. A directory comes collapsed (`?? plans/x/`), all of
-    // `plans/` as `?? plans/` when nothing in it is tracked, a name with a
-    // space quoted (`?? "plans/my plan.md"`); a tracked plan
-    // changed (` M plans/x.md`) still holds it, a commit perhaps not made.
+    // **An untracked file never holds the checkout**
+    // (plans/executor-over-ceiling-hands-on.md, part 3, widened by
+    // plans/owners-untracked-files-left-alone.md): git carries an untracked
+    // file across a detach unchanged, the queue's working files under
+    // `plans/` and the owner's `.env` alike. A tracked file changed
+    // (` M plans/x.md`, ` M README`) still holds it, a commit perhaps not made.
     const changes = run(["status", "--porcelain"])
       .split("\n")
-      .filter((line) => line && !/^\?\? "?plans\//.test(line));
+      .filter((line) => line && !line.startsWith("?? "));
     if (changes.length)
       return `${note}Not moved: the checkout has changes; commit, stash or discard them first.`;
     const head = run(["rev-parse", "HEAD"]);
@@ -4147,7 +4146,24 @@ export function sync({ fetch = true } = {}) {
     } catch {
       return `${note}Not moved: the checkout is ahead of ${branch()}; push or drop its commits first.`;
     }
-    run(["checkout", "-q", "--detach", target]);
+    try {
+      run(["-c", "core.quotePath=false", "checkout", "-q", "--detach", target], {
+        env: { ...process.env, LC_ALL: "C" },
+      });
+    } catch (error) {
+      // An untracked file where the target tracks one, or an untracked
+      // directory's files where it tracks a file: git refuses and names each
+      // path on a line of its own, indented by a tab, as written on disk.
+      const stderr = String(error.stderr || "");
+      const refusal =
+        /untracked working tree files would be overwritten|would lose untracked files in them/;
+      if (!refusal.test(stderr)) throw error;
+      const paths = stderr
+        .split("\n")
+        .filter((line) => line.startsWith("\t"))
+        .map((line) => line.trim());
+      return `${note}Not moved: untracked files would be overwritten: ${paths.join(", ")}; move them first.`;
+    }
     return `${note}The checkout is at ${branch()}, ${tip.slice(0, 8)}.`;
   } catch (error) {
     return `${note}Not moved: ${String(error.message).split("\n")[0]}`;

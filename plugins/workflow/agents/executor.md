@@ -221,10 +221,17 @@ finding, or Codex's, is a claim to check against the code.
    or becomes an item.
 3. The checks and suites **Before the push** names, in its order, once a
    batch (once a plan with `land: pull-request`). Report counts as they
-   came, failures with their output.
+   came, failures with their output. A failure in a file you did not
+   touch and the plan does not name is the owner's when it fails the
+   same at `origin/<branch>` (`git switch --detach`, run it, switch
+   back): reported in "Built" with its output, not fixed. One your
+   change causes is yours to fix.
 4. Commit and push: one commit a plan, with the session's attribution
    (`git reset --soft` to the previous plan's commit, or to
-   `origin/<branch>` for the first); `git push origin HEAD:<branch>` as a
+   `origin/<branch>` for the first). Stage the plan's files by path, the
+   ones its diff touched, never `git add -A` or `git add .`; before
+   committing, read `git status --porcelain`: an untracked file you did
+   not write stays untracked. `git push origin HEAD:<branch>` as a
    fast-forward; refused, `git fetch origin && git rebase
    origin/<branch>` and push again. Refused for credentials ("could not
    read Username", "Authentication failed", "Permission denied") or with

@@ -548,9 +548,10 @@ owner's word. (decisions.md#end-now)
 "none"`): no executor makes a worktree, and `plans` lists any under
 `.claude/worktrees/`; `plans start` refuses while an unretired executor
 lives; an executor detaches the checkout at `origin/<branch>` after its
-batch, and `plans sync` moves a detached one that is clean but for
-untracked files under `plans/`, the queue's own, to the branch. The
-queue's files in `.claude/` and `.claude/worktrees/` are git-ignored.
+batch, and `plans sync` moves a detached one whose tracked files are
+unchanged to the branch, untracked files staying where they are, and
+names any the move would overwrite. The queue's files in `.claude/` and
+`.claude/worktrees/` are git-ignored.
 (decisions.md#background-in-checkout)
 
 **Each project's queue runs apart from every other, in parallel**: a

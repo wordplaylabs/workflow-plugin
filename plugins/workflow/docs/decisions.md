@@ -503,6 +503,10 @@ on the machine that planned them.
   5 November: an untracked file under `plans/` is the queue's and never
   holds the checkout, tracked plans or not.
   plans/executor-over-ceiling-hands-on.md.
+  14 November: no untracked file holds it, the owner's `.env` as much
+  as the queue's plans, since git carries one across a detach; one the
+  branch would overwrite is named and the checkout stays.
+  plans/owners-untracked-files-left-alone.md.
 - `queues-in-parallel` **Each project's queue runs apart from every
   other, in parallel.** (Javi, 27 October) A change to the workflow is
   never held by the project it was noticed in.

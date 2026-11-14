@@ -2038,7 +2038,7 @@ describe("plan-queue", () => {
       expect(syncIn(clone)).toBe(`Already at test, ${test.slice(0, 8)}.`);
     });
     // plans/executor-over-ceiling-hands-on.md, part 3.
-    it("moves past untracked files under plans/, and refuses any other untracked file", () => {
+    it("moves past untracked files under plans/", () => {
       const test = g(clone, "rev-parse", "origin/test");
       mkdirSync(join(clone, "plans", "x"), { recursive: true });
       writeFileSync(join(clone, "plans", "x.md"), "# X\n");
@@ -2050,13 +2050,52 @@ describe("plan-queue", () => {
         writeFileSync(join(clone, "plans", "my plan.md"), "# Mine\n");
         g(clone, "checkout", "-q", "--detach", first);
         expect(syncIn(clone)).toBe(`The checkout is at test, ${test.slice(0, 8)}.`);
-        writeFileSync(join(clone, "other.txt"), "other\n");
-        expect(syncIn(clone)).toBe(
-          "Not moved: the checkout has changes; commit, stash or discard them first.",
-        );
       } finally {
         rmSync(join(clone, "plans"), { recursive: true, force: true });
-        rmSync(join(clone, "other.txt"), { force: true });
+      }
+    });
+    // plans/owners-untracked-files-left-alone.md: git carries an untracked
+    // file across a detach unchanged, wherever it is.
+    it("when the checkout holds an untracked .env and is behind test, then sync moves it and the .env is still there", () => {
+      const test = g(clone, "rev-parse", "origin/test");
+      g(clone, "checkout", "-q", "--detach", first);
+      writeFileSync(join(clone, ".env"), "SECRET=mine\n");
+      try {
+        expect(syncIn(clone)).toBe(`The checkout is at test, ${test.slice(0, 8)}.`);
+        expect(g(clone, "rev-parse", "HEAD")).toBe(test);
+        expect(readFileSync(join(clone, ".env"), "utf8")).toBe("SECRET=mine\n");
+        expect(g(clone, "status", "--porcelain")).toBe("?? .env");
+      } finally {
+        rmSync(join(clone, ".env"), { force: true });
+      }
+    });
+    it("when an untracked file would be overwritten by the move, then sync does not move and names it", () => {
+      g(clone, "checkout", "-q", "--detach", first);
+      // test tracks scripts/hooks/x.mjs; here it is the owner's, untracked.
+      mkdirSync(join(clone, "scripts", "hooks"), { recursive: true });
+      writeFileSync(join(clone, "scripts", "hooks", "x.mjs"), "// mine\n");
+      try {
+        expect(syncIn(clone)).toBe(
+          "Not moved: untracked files would be overwritten: scripts/hooks/x.mjs; move them first.",
+        );
+        expect(g(clone, "rev-parse", "HEAD")).toBe(first);
+        expect(readFileSync(join(clone, "scripts", "hooks", "x.mjs"), "utf8")).toBe("// mine\n");
+      } finally {
+        rmSync(join(clone, "scripts"), { recursive: true, force: true });
+      }
+    });
+    it("when an untracked directory sits where the move puts a file, then sync does not move and names it", () => {
+      g(clone, "checkout", "-q", "--detach", first);
+      // test tracks the file scripts/hooks/x.mjs; here x.mjs is the owner's directory.
+      mkdirSync(join(clone, "scripts", "hooks", "x.mjs"), { recursive: true });
+      writeFileSync(join(clone, "scripts", "hooks", "x.mjs", "ü.txt"), "mine\n");
+      try {
+        expect(syncIn(clone)).toBe(
+          "Not moved: untracked files would be overwritten: scripts/hooks/x.mjs; move them first.",
+        );
+        expect(g(clone, "rev-parse", "HEAD")).toBe(first);
+      } finally {
+        rmSync(join(clone, "scripts"), { recursive: true, force: true });
       }
     });
     it("moves the primary checkout when run from a worktree, never the worktree", () => {

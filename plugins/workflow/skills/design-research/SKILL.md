@@ -22,6 +22,11 @@ order:
    - research how the product people already know does it, and follow it
      (the default to recommend);
    - they decide now.
+
+   An executor does not ask: it researches how the product people know
+   does it, follows it, and names it in Built ("An executor never waits
+   on the owner").
+
    **Any other control is researched when there is something to
    research**: a control, flow or string people know from a product (a
    date-range picker, a sign-in form, the label a known product uses for
@@ -55,7 +60,10 @@ order:
 4. **Say what you found before building a new screen or flow**: the
    product, what it does, and the plan, in a few words, and build after
    the answer. Any other control is built at once, unless the research
-   left a choice the house rules do not settle (step 2).
+   left a choice the house rules do not settle (step 2). An executor
+   builds at once and says what it found in Built; a choice the research
+   leaves it decides by its agent file's "A question is decided, not
+   asked".
 5. **Record it.** Add the entry to the catalogue file for the control's
    kind, with the tier and today's date: `(<the person's name>, 15
    October)` when they decided, `(as GitHub does, 15 October)` when you

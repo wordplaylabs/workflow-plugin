@@ -47,7 +47,7 @@ import { catalogueFiles, globToRegExp, paragraphs, tierOf } from "./turn-audit.m
 
 export { catalogueFiles, paragraphs };
 import { data } from "./plan-queue.mjs";
-import { matches, owner, project } from "./project.mjs";
+import { kindOf, matches, owner, project } from "./project.mjs";
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const MAX_RULES = 8; // rules listed in full
@@ -308,10 +308,14 @@ export function kindsFor(text, menu, ask = askClaude) {
   return { names: found, cost: answer.total_cost_usd ?? null };
 }
 
-function nothingCovers(catalogue, who) {
+// An executor never waits on the owner (plans/executor-never-waits-follow-up.md).
+function nothingCovers(catalogue, who, executor) {
+  const newScreen = executor
+    ? "for a new screen or flow, an executor does not ask: it researches how the product people know does it, follows it, and names it in Built"
+    : "a new screen or flow is asked about first, by the skill";
   return [
     `No recorded design decision covers what you are writing here (nothing in ${catalogue} matches this file, its name, or the text).`,
-    `It is free unless it carries a decision. Did ${who} say how it should work and look? Then it is their call: build it and record it under their name. A control, flow or string people know from a product is looked up (the design-research skill: name the product, match the nearest pattern this project has, keep its look) and recorded as that product's; a new screen or flow is asked about first, by the skill. Anything else, a tooltip's words, an icon among a set, spacing, a line kept or cut, is free: build it by the catalogue's everywhere rules and the nearest pattern, record nothing, ask nothing, and end the turn with the line decisions: none (free: <the rule it follows>).`,
+    `It is free unless it carries a decision. Did ${who} say how it should work and look? Then it is their call: build it and record it under their name. A control, flow or string people know from a product is looked up (the design-research skill: name the product, match the nearest pattern this project has, keep its look) and recorded as that product's; ${newScreen}. Anything else, a tooltip's words, an icon among a set, spacing, a line kept or cut, is free: build it by the catalogue's everywhere rules and the nearest pattern, record nothing, ask nothing, and end the turn with the line decisions: none (free: <the rule it follows>).`,
   ].join("\n");
 }
 
@@ -350,7 +354,14 @@ export function contextFor(
   rel,
   text,
   files,
-  { ui = [], catalogue = "", who = "the owner", shown = new Set(), kinds = [] } = {},
+  {
+    ui = [],
+    catalogue = "",
+    who = "the owner",
+    shown = new Set(),
+    kinds = [],
+    executor = false,
+  } = {},
 ) {
   const call = rel === "";
   if (!call && !ui.some((p) => p.test(rel))) return "";
@@ -420,7 +431,7 @@ export function contextFor(
     pointers.push(`${f.label} (${f.entries.length} rules; ${why})`);
     if (byPath && !hits.length && !kindEntries.length) f.entries.forEach(take);
   }
-  if (!pointers.length) return !call && draws(text) ? nothingCovers(catalogue, who) : "";
+  if (!pointers.length) return !call && draws(text) ? nothingCovers(catalogue, who, executor) : "";
   const lines = [
     `Recorded design decisions cover ${call ? "this call" : `\`${rel}\``}. Open before changing the control: ${pointers.join("; ")}.`,
   ];
@@ -570,6 +581,7 @@ function main() {
     ui,
     catalogue: proj.catalogue || proj.inherits.at(-1),
     who: owner(),
+    executor: kindOf(input) === "executor",
     shown,
     kinds,
   });

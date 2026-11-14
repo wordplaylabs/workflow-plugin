@@ -3208,4 +3208,25 @@ describe("an executor never waits on the owner", () => {
     );
     expect(text).toContain('log what was taken ("Decisions taken")');
   });
+
+  // plans/executor-never-waits-follow-up.md.
+  it("the skill and the handbook let an executor research and follow a new screen, and its clean start stashes untracked files", () => {
+    const clause =
+      "an executor does not ask: it researches how the product people know does it, follows it, and names it in Built";
+    const skill = flat(read("skills/design-research/SKILL.md"));
+    const step2 = /2\. \*\*A new screen or flow.*? 3\. \*\*/.exec(skill)![0];
+    expect(step2).toContain(`An${clause.slice(2)}`);
+    // Codex C1: step 4's "build after the answer" does not hold an executor.
+    const step4 = /4\. \*\*Say what you found.*? 5\. \*\*/.exec(skill)![0];
+    expect(step4).toContain("An executor builds at once and says what it found in Built");
+    const rule =
+      /\*\*A string rests on what produced it\.\*\*.*?\(decisions\.md#string-rests-on-source\)/.exec(
+        flat(read("docs/workflow.md")),
+      )![0];
+    expect(rule).toContain(clause);
+    const clean = /4\. Start clean:.*? 5\. /.exec(flat(read("agents/executor.md")))![0];
+    expect(clean).toContain("git stash push --include-untracked -m");
+    expect(clean).toContain("':(exclude)plans'");
+    expect(clean).not.toContain("leaving untracked files where they are");
+  });
 });

@@ -86,9 +86,9 @@ what failed. Without the task tools, say so once in the final message.
    ${user_config.owner} could decide is decided the same way, the
    skill's question about a new screen or flow included: research and
    follow.
-4. Start clean: when `git status` shows changes, `git stash push -m
-   "<this session's name>, before plans/<topic>.md" -- . ':(exclude)plans'`,
-   discarding nothing and leaving untracked files where they are, and
+4. Start clean: when `git status` shows changes, `git stash push
+   --include-untracked -m "<this session's name>, before
+   plans/<topic>.md" -- . ':(exclude)plans'`, discarding nothing, and
    write a "Needs a decision" item sized assistant naming the stash and
    the files. Then `git fetch origin` and `git switch
    -c <batch> origin/<branch>`, one branch per batch named after the

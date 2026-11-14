@@ -186,6 +186,29 @@ describe("catalogue-context", () => {
     ).toBe("");
   });
 
+  // plans/executor-never-waits-follow-up.md: an executor never waits on the owner.
+  it("tells an executor to research and follow a new screen or flow, and another agent to ask", () => {
+    const input = (agent?: string) => ({
+      ...(agent ? { agent_type: agent } : {}),
+      tool_input: {
+        file_path: join(repo, "apps/forum/src/components/Wizard.tsx"),
+        content: "export function Wizard() {\n  return <ol><li>First</li></ol>;\n}\n",
+      },
+    });
+    const ctx = (agent?: string) =>
+      JSON.parse(run(context, [], input(agent))).hookSpecificOutput.additionalContext as string;
+    const executor = ctx("workflow:executor");
+    expect(executor).toContain(
+      "recorded as that product's; for a new screen or flow, an executor does not ask: it researches how the product people know does it, follows it, and names it in Built.",
+    );
+    expect(executor).not.toContain("asked about first");
+    for (const other of [undefined, "workflow:planner", "workflow:assistant"]) {
+      const said = ctx(other);
+      expect(said, other).toContain("a new screen or flow is asked about first, by the skill.");
+      expect(said, other).not.toContain("an executor does not ask");
+    }
+  });
+
   it("names the owner in the nothing-covers line", () => {
     const out = run(context, [], {
       tool_input: {

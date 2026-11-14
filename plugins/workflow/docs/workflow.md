@@ -404,8 +404,11 @@ plan's "The words" with what produced it: an entry or house rule
 (`file#id`), a product named in Sources, a person, or free, with the
 principle it follows. Only a string that carries a decision is researched;
 only a new screen or flow is asked about first, any other control after
-the research, when it leaves a choice the house rules do not settle. The
-executor types nothing outside "The words", and the plan review checks the
+the research, when it leaves a choice the house rules do not settle. For
+a new screen or flow, an executor does not ask: it researches how the
+product people know does it, follows it, and names it in Built; a choice
+the research leaves, it decides ("An executor never waits on the owner").
+The executor types nothing outside "The words", and the plan review checks the
 diff against it. Each string's row gives its kind, the catalogue file or
 section that governs it, and what shows it, and the plan review checks the
 diff shows it so. (decisions.md#string-rests-on-source)

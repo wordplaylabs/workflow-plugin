@@ -87,6 +87,7 @@ import {
   pluginAgents,
   project,
   REUSE_DEFAULT,
+  sessionAgent,
 } from "./project.mjs";
 import { costWords, inputsOf, measure, measureFile, priceOf } from "./cost.mjs";
 import { briefPaths, noteSeen, seenIn, seenOf } from "./seen.mjs";
@@ -5742,6 +5743,44 @@ function planTimes(dir = join(root, "plans")) {
   return times;
 }
 
+/** The line a plain chat that opened before its agent's setting says (plans/agent-set-by-the-project.md, The words). */
+export function agentLine(kind) {
+  return (
+    `Chats in this project now open as the workflow's ${kind}, set in .claude/settings.local.json. ` +
+    "This one opened before that: start a new chat."
+  );
+}
+
+/**
+ * Writes the agent a plain chat here opens as (`sessionAgent`), and when it
+ * wrote, says so once in the owner's own chat: not in one the queue started
+ * (`WORKFLOW_STARTED`), nor in one opened as an agent on purpose (its
+ * `agent_type`, there when started with `--agent`, whichever agent it names:
+ * the setting changed nothing for it; /code-review 3). The line as the install
+ * check says its own: `systemMessage` for the owner, the context with the
+ * agent's step. Any failure says nothing: a session's start never fails on it.
+ */
+function sayAgent(input) {
+  try {
+    const { agent, did } = sessionAgent(root, { form: proj().form });
+    if (!did || process.env.WORKFLOW_STARTED) return;
+    if (input?.agent_type) return;
+    const kind = agent.slice(agent.lastIndexOf(":") + 1);
+    const line = agentLine(kind);
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "SessionStart",
+          additionalContext: `${line}\n\nSay this line to the owner in its own words, then go on with what was asked.`,
+        },
+        systemMessage: line,
+      }),
+    );
+  } catch {
+    // Said nothing, which is the start without it.
+  }
+}
+
 function hook(mode, input) {
   // **No agent marks a pull request ready**, in every session with the
   // plugin, whatever its project or agent (plans/no-agent-marks-ready.md).
@@ -5765,6 +5804,10 @@ function hook(mode, input) {
   // if it has any, run alone (a project moving onto the plugin keeps its old
   // queue until its file lands).
   if (!proj().found) return;
+  // **A project's chats open as its agent, from the project's own settings**
+  // (plans/agent-set-by-the-project.md, part 3): before the compact return,
+  // since a compact project needs its maker.
+  if (mode === "session") sayAgent(input);
   // **The compact form has no queue**: the maker is one chat, and the queue's
   // hooks do nothing (the catalogue's hooks run in both forms).
   if (proj().form === "compact") return;

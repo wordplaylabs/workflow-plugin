@@ -44,7 +44,6 @@ export const FILES = [
   "scripts/tool-denials.mjs",
   "scripts/turn-audit.d.mts",
   "scripts/turn-audit.mjs",
-  "settings.json",
   "skills/change/SKILL.md",
   "skills/design-research/SKILL.md",
   "skills/setup/SKILL.md",

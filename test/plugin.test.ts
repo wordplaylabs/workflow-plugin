@@ -15,6 +15,7 @@ import { hostname, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  agentLine,
   canStart,
   checkDeny,
   data,
@@ -40,6 +41,7 @@ import {
   project,
   QUEUE_IGNORES,
   QUEUE_KINDS,
+  sessionAgent,
 } from "../plugins/workflow/scripts/project.mjs";
 import {
   agentsChoice,
@@ -188,6 +190,7 @@ catalogue: docs/patterns
       ".claude/app-token.*",
       ".claude/github-*",
       ".claude/webhook.*",
+      ".claude/settings.local.json",
     ]);
     // The names plan-queue.mjs writes there: its literal files and one per kind.
     const source = readFileSync(join(scripts, "plan-queue.mjs"), "utf8");
@@ -202,6 +205,8 @@ catalogue: docs/patterns
       ...QUEUE_KINDS.flatMap((kind) => perKind.map((ext) => `${kind}${ext}`)),
       // An assistant chat's start (plans/project-follow-ups-reach-the-project.md).
       "assistant.started",
+      // The agent a plain chat opens as (plans/agent-set-by-the-project.md).
+      "settings.local.json",
     ];
     const root = dir("ignores-");
     gitIn(root)("init", "-q");
@@ -221,7 +226,7 @@ catalogue: docs/patterns
     gitIn(root)("init", "-q");
     writeFileSync(join(root, ".gitignore"), ".claude/executor.*\n.claude/planner.*\n");
     expect(ignoreQueueFiles(root)).toBe(
-      "Added .claude/asking.*, .claude/handed.*, .claude/assistant.*, .claude/worktrees/, .claude/app-token.*, .claude/github-*, .claude/webhook.* to .git/info/exclude.",
+      "Added .claude/asking.*, .claude/handed.*, .claude/assistant.*, .claude/worktrees/, .claude/app-token.*, .claude/github-*, .claude/webhook.*, .claude/settings.local.json to .git/info/exclude.",
     );
     expect(ignoreQueueFiles(root)).toBe("");
     writeFileSync(join(root, ".gitignore"), "!.claude/**\n");
@@ -240,7 +245,7 @@ catalogue: docs/patterns
     writeFileSync(join(root, ".gitignore"), ".claude/worktrees\n");
     init(root);
     expect(readFileSync(join(root, ".gitignore"), "utf8")).toBe(
-      ".claude/worktrees\n.claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n",
+      ".claude/worktrees\n.claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/settings.local.json\n",
     );
   });
 
@@ -265,7 +270,7 @@ catalogue: docs/patterns
     expect(project(root).found).toBe(true);
     expect(init(root)).toBe(".claude/workflow.md exists already; edit it instead.");
     expect(readFileSync(join(root, ".gitignore"), "utf8")).toBe(
-      ".claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/worktrees/\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n",
+      ".claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/worktrees/\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/settings.local.json\n",
     );
     expect(text).toContain(
       "# deny:                  MCP tools an agent here may never call, by agent (regular expressions)",
@@ -3044,7 +3049,7 @@ describe("the install check", () => {
     expect(plansRun.stderr).toContain("The fix: git -C");
   });
   it("When one file is missing, then the line says it is", () => {
-    const root = copy("settings.json");
+    const root = copy("docs/landing.md");
     expect(check(root)).toContain(`1 of its ${FILES.length} files is missing from ${root}`);
   });
   it("When a copy lacks the check itself, then the manifest and plans decide as the check does", () => {
@@ -3339,5 +3344,229 @@ describe("an executor never waits on the owner", () => {
       "notes.md",
     ]);
     expect(git("show", "stash@{1}:app.txt")).toBe("edited");
+  });
+});
+
+// plans/agent-set-by-the-project.md: the plugin sets no agent; a project's own local settings do.
+describe("the agent a project's chats open as", () => {
+  const local = (root: string) => join(root, ".claude", "settings.local.json");
+  const readLocal = (root: string) => readFileSync(local(root), "utf8");
+  const project = (form = "") => {
+    const root = dir("agent-");
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    mkdirSync(join(root, ".claude"));
+    writeFileSync(
+      join(root, ".claude", "workflow.md"),
+      `---\nname: A\nbranch: main\n${form ? `form: ${form}\n` : ""}---\n`,
+    );
+    return root;
+  };
+  const user = (settings?: object) => {
+    const file = join(dir("agent-user-"), "settings.json");
+    if (settings) writeFileSync(file, JSON.stringify(settings));
+    return file;
+  };
+  const hookIn = (root: string, input: object, env: Record<string, string> = {}) => {
+    const {
+      WORKFLOW_ROOT: _r,
+      WORKFLOW_STARTED: _s,
+      CLAUDE_PROJECT_DIR: _p,
+      ...rest
+    } = process.env;
+    const home = dir("agent-home-");
+    return execFileSync("node", [join(scripts, "plan-queue.mjs"), "session"], {
+      cwd: root,
+      env: { ...rest, HOME: home, WORKFLOW_DATA: dir("agent-data-"), WORKFLOW_LIVE: "[]", ...env },
+      input: JSON.stringify(input),
+      encoding: "utf8",
+    });
+  };
+
+  it("writes the assistant where no settings file names an agent", () => {
+    const root = project();
+    expect(sessionAgent(root, { userSettings: user() })).toEqual({
+      agent: "workflow:assistant",
+      did: "set",
+    });
+    expect(readLocal(root)).toBe('{\n  "agent": "workflow:assistant"\n}\n');
+    expect(
+      execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+        cwd: root,
+        encoding: "utf8",
+      }),
+    ).toBe("?? .claude/workflow.md\n");
+    expect(sessionAgent(root, { userSettings: user() }).did).toBe("");
+  });
+
+  it("writes the maker in a compact project", () => {
+    const root = project("compact");
+    expect(sessionAgent(root, { form: "compact", userSettings: user() })).toEqual({
+      agent: "workflow:maker",
+      did: "set",
+    });
+    expect(JSON.parse(readLocal(root)).agent).toBe("workflow:maker");
+  });
+
+  it("keeps the local file's other keys", () => {
+    const root = project();
+    writeFileSync(
+      local(root),
+      JSON.stringify({ permissions: { deny: ["mcp__x__.*"] }, env: { A: "1" } }),
+    );
+    expect(sessionAgent(root, { userSettings: user() }).did).toBe("set");
+    const kept = JSON.parse(readLocal(root));
+    expect(Object.keys(kept)).toEqual(["permissions", "env", "agent"]);
+    expect(kept).toEqual({
+      permissions: { deny: ["mcp__x__.*"] },
+      env: { A: "1" },
+      agent: "workflow:assistant",
+    });
+  });
+
+  it("writes over a key with no name in it", () => {
+    for (const empty of ['""', "null"]) {
+      const root = project();
+      writeFileSync(local(root), `{ "env": {}, "agent": ${empty} }\n`);
+      expect(sessionAgent(root, { userSettings: user() }).did).toBe("set");
+      expect(Object.entries(JSON.parse(readLocal(root)))).toEqual([
+        ["env", {}],
+        ["agent", "workflow:assistant"],
+      ]);
+    }
+  });
+
+  it("moves the key when the form changed", () => {
+    const root = project();
+    writeFileSync(local(root), JSON.stringify({ agent: "workflow:maker", env: { A: "1" } }));
+    expect(sessionAgent(root, { userSettings: user() }).did).toBe("moved");
+    expect(Object.entries(JSON.parse(readLocal(root)))).toEqual([
+      ["agent", "workflow:assistant"],
+      ["env", { A: "1" }],
+    ]);
+    expect(sessionAgent(root, { form: "compact", userSettings: user() }).did).toBe("moved");
+    expect(JSON.parse(readLocal(root)).agent).toBe("workflow:maker");
+  });
+
+  it("leaves an agent somebody else named", () => {
+    const other = project();
+    writeFileSync(local(other), JSON.stringify({ agent: "mine:helper" }));
+    expect(sessionAgent(other, { userSettings: user() }).did).toBe("");
+    expect(JSON.parse(readLocal(other)).agent).toBe("mine:helper");
+    const shared = project();
+    writeFileSync(
+      join(shared, ".claude", "settings.json"),
+      JSON.stringify({ agent: "mine:helper" }),
+    );
+    expect(sessionAgent(shared, { userSettings: user() }).did).toBe("");
+    expect(existsSync(local(shared))).toBe(false);
+    const personal = project();
+    writeFileSync(local(personal), JSON.stringify({ env: { A: "1" } }));
+    expect(sessionAgent(personal, { userSettings: user({ agent: "mine:helper" }) }).did).toBe("");
+    expect(JSON.parse(readLocal(personal))).toEqual({ env: { A: "1" } });
+  });
+
+  it("writes the maker over the plugin's assistant named in the shared file or the user settings", () => {
+    const personal = project("compact");
+    const settings = user({ agent: "workflow:assistant" });
+    expect(sessionAgent(personal, { form: "compact", userSettings: settings }).did).toBe("set");
+    expect(JSON.parse(readLocal(personal)).agent).toBe("workflow:maker");
+    const shared = project("compact");
+    writeFileSync(
+      join(shared, ".claude", "settings.json"),
+      JSON.stringify({ agent: "workflow:assistant" }),
+    );
+    expect(sessionAgent(shared, { form: "compact", userSettings: user() }).did).toBe("set");
+    expect(JSON.parse(readLocal(shared)).agent).toBe("workflow:maker");
+    const full = project();
+    expect(sessionAgent(full, { userSettings: settings }).did).toBe("");
+    expect(existsSync(local(full))).toBe(false);
+    const outranked = project("compact");
+    writeFileSync(
+      join(outranked, ".claude", "settings.json"),
+      JSON.stringify({ agent: "mine:helper" }),
+    );
+    expect(sessionAgent(outranked, { form: "compact", userSettings: settings }).did).toBe("");
+    expect(existsSync(local(outranked))).toBe(false);
+  });
+
+  it("leaves a local file it cannot read as JSON, and one git tracks", () => {
+    const broken = project();
+    writeFileSync(local(broken), "{ not json");
+    expect(sessionAgent(broken, { userSettings: user() }).did).toBe("");
+    expect(readLocal(broken)).toBe("{ not json");
+    const list = project();
+    writeFileSync(local(list), "[]\n");
+    expect(sessionAgent(list, { userSettings: user() }).did).toBe("");
+    expect(readLocal(list)).toBe("[]\n");
+    const tracked = project();
+    writeFileSync(local(tracked), '{ "env": {} }\n');
+    execFileSync("git", ["add", "-f", ".claude/settings.local.json"], { cwd: tracked });
+    expect(sessionAgent(tracked, { userSettings: user() }).did).toBe("");
+    expect(readLocal(tracked)).toBe('{ "env": {} }\n');
+  });
+
+  it("writes nothing where the project's own rule keeps git from ignoring the file", () => {
+    const root = project();
+    writeFileSync(join(root, ".gitignore"), "!.claude/**\n");
+    expect(sessionAgent(root, { userSettings: user() }).did).toBe("");
+    expect(existsSync(local(root))).toBe(false);
+  });
+
+  it("says the line in the owner's chat alone", () => {
+    const line = agentLine("assistant");
+    expect(line).toBe(
+      "Chats in this project now open as the workflow's assistant, set in .claude/settings.local.json. This one opened before that: start a new chat.",
+    );
+    const owners = project();
+    const said = JSON.parse(hookIn(owners, { session_id: "s1" }));
+    expect(said.systemMessage).toBe(line);
+    expect(said.hookSpecificOutput).toEqual({
+      hookEventName: "SessionStart",
+      additionalContext: `${line}\n\nSay this line to the owner in its own words, then go on with what was asked.`,
+    });
+    expect(JSON.parse(readLocal(owners)).agent).toBe("workflow:assistant");
+    expect(hookIn(owners, { session_id: "s2" })).toBe("");
+    const queues = project();
+    expect(hookIn(queues, { session_id: "s3" }, { WORKFLOW_STARTED: "planner" })).toBe("");
+    expect(JSON.parse(readLocal(queues)).agent).toBe("workflow:assistant");
+    const opened = project();
+    expect(hookIn(opened, { session_id: "s4", agent_type: "workflow:assistant" })).toBe("");
+    const planner = project();
+    expect(hookIn(planner, { session_id: "s7", agent_type: "workflow:planner" })).toBe("");
+    expect(JSON.parse(readLocal(planner)).agent).toBe("workflow:assistant");
+    expect(JSON.parse(readLocal(opened)).agent).toBe("workflow:assistant");
+    const compact = project("compact");
+    expect(JSON.parse(hookIn(compact, { session_id: "s5" })).systemMessage).toBe(
+      agentLine("maker"),
+    );
+    expect(JSON.parse(readLocal(compact)).agent).toBe("workflow:maker");
+  });
+
+  it("does nothing in a folder with no project file", () => {
+    const root = dir("agent-none-");
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    expect(hookIn(root, { session_id: "s6" })).toBe("");
+    expect(existsSync(local(root))).toBe(false);
+  });
+
+  it("has the setup skill write the agent a plain chat opens as", () => {
+    const text = readFileSync(
+      new URL("../plugins/workflow/skills/setup/SKILL.md", import.meta.url),
+      "utf8",
+    ).replace(/\s+/g, " ");
+    expect(text).toContain(
+      '**The agent a plain chat opens as**, the `agent` key of `.claude/settings.local.json`, merged into what is there with every other key kept: `workflow:maker` when the project file says `form: compact`, else `workflow:assistant` (the workflow docs, "A project\'s chats open as its agent").',
+    );
+    expect(text).toContain(
+      "`Opens as: the assistant, in every plain chat here (agent in .claude/settings.local.json, this machine's; another machine writes it at its first chat).`",
+    );
+    expect(text).toContain("`Opens as: <agent>, named in <file>; left as it is.`");
+    expect(text).toContain(
+      "`For a restructuring or a full copy edit, the full queue: remove form: compact, then claude --agent workflow:assistant and a brief for the planner.`",
+    );
+  });
+
+  it("sets no agent itself", () => {
+    expect(existsSync(new URL("../plugins/workflow/settings.json", import.meta.url))).toBe(false);
   });
 });

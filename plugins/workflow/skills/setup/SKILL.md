@@ -9,12 +9,14 @@ effort: high
 
 You write the project's files and nothing else: its
 `.claude/workflow.md`, the `enabledPlugins` key of its
-`.claude/settings.json`, and the whole-connector entries of
-`permissions.deny` in that file or in `.claude/settings.local.json`
-(step 5 says which), with the `.gitignore` lines `plans init` adds for
-the queue's own files and Claude Code's worktrees when it runs, and the one for
-`.claude/settings.local.json` when you write it, and the `GH_TOKEN`
-line of `.devcontainer/devcontainer.json`'s `containerEnv` (step 6).
+`.claude/settings.json`, the `agent` key of its
+`.claude/settings.local.json` (step 5), and the whole-connector entries
+of `permissions.deny` in `.claude/settings.json` or
+`.claude/settings.local.json` (step 5 says which), with the `.gitignore`
+lines `plans init` adds for the queue's own files and Claude Code's
+worktrees when it runs, and the one for `.claude/settings.local.json`
+whenever git does not ignore it, and the `GH_TOKEN` line of
+`.devcontainer/devcontainer.json`'s `containerEnv` (step 6).
 Never the user settings, `.mcp.json` or a catalogue; never a commit,
 which is the owner's. The defaults for each kind of project are in
 [kinds.md](kinds.md); the rules the keys follow are in the workflow
@@ -29,6 +31,9 @@ plugin's docs, "The project file" and "Decisions".
   whether someone besides the owner builds here.
 - `.github/workflows/*.yml`, for a `run`.
 - `.mcp.json` and `.claude/`, for what is there.
+- The `agent` key of `.claude/settings.local.json`,
+  `.claude/settings.json` and the user settings, for an agent already
+  named.
 - `claude plugin list --json`, for the plugins on here.
 - The connectors: those this session has, from its tool names
   (`mcp__claude_ai_<connector>__<tool>`: the part between
@@ -149,6 +154,17 @@ what is there with every other key kept:
   the user settings is off here; a plugin a chosen review needs stays on.
 
 Never write `workflow@workflow`: it is the user settings'.
+
+**The agent a plain chat opens as**, the `agent` key of
+`.claude/settings.local.json`, merged into what is there with every
+other key kept: `workflow:maker` when the project file says `form:
+compact`, else `workflow:assistant` (the workflow docs, "A project's
+chats open as its agent"). Write it when no settings file of the
+project or of the person names an `agent`, or when the one that applies
+(the local file's, else `.claude/settings.json`'s, else the user
+settings') is the other of the two. An `agent` anyone else named, any
+but those two, there, in `.claude/settings.json` or in the user
+settings, stays, and step 7 says whose it is.
 
 `permissions.deny`, when the connectors were asked, in one of two
 files. **`.claude/settings.local.json`**, per person and git-ignored,
@@ -330,6 +346,11 @@ One line each, from the counts you can take (each plugin's `skills/` and
 - `codex: on; 1 skill, 1 agent; the review runs once per plan.`
 - `<plugin>: off here (it was on in your user settings).`
 - `MCP: <server> from <config>, in every chat here.`
+- `Opens as: the assistant, in every plain chat here (agent in
+  .claude/settings.local.json, this machine's; another machine writes it
+  at its first chat).`, `the maker` for a compact project; or `Opens as:
+  <agent>, named in <file>; left as it is.` when someone else named an
+  agent.
 - `Connectors: <chosen> on here; <denied> off (permissions.deny).`,
   naming the file it is in.
 - One `GitHub:` line, from step 1's look:
@@ -374,14 +395,15 @@ Then: `/context in a chat here shows the numbers.`
 
 From the kind's row of the table, in a line: for a paper set to the
 maker, `For a restructuring or a full copy edit, the full queue: remove
-form: compact, then claude (the assistant) and a brief for the
-planner.`; for a web project, `For a quick fix in one chat, plans chat
+form: compact, then claude --agent workflow:assistant and a brief for
+the planner.`; for a web project, `For a quick fix in one chat, plans chat
 with form: compact set for the day.`
 
 ## 9. The final message
 
-The two files' paths (and the devcontainer file's, when step 6 wrote
-it), the keys set, the plugins on and off with their
+The paths of the files written, `.claude/workflow.md`,
+`.claude/settings.json` and `.claude/settings.local.json` (and the
+devcontainer file's, when step 6 wrote it), the keys set, the plugins on and off with their
 cost lines, the connectors on and off (and that a connector added to
 the account later is on here until the setup runs again), and the line
 to reach the rest. Nothing is committed.

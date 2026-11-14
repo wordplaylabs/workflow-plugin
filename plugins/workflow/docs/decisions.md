@@ -130,6 +130,24 @@ on the machine that planned them.
   small and many does not pay for a queue; the two forms share the
   catalogue, the headings and the branch, so a project moves between
   them by one line. plans/sizes-and-decisions.md.
+- `chats-open-as-the-agent` **A project's chats open as its agent, set
+  in the project's own local settings, never by the plugin.** (per
+  Claude Code's changelog, 2.1.323, 14 November) Claude Code deprecated
+  a plugin's `agent` setting and says to set `agent` in your own
+  settings or pass `--agent`; a setting of one's own opens the agent
+  with no warning, and one naming an agent that is not installed opens
+  Claude Code's default (tried on 2.1.325). The local file, since
+  whether a person has the plugin is theirs, a tracked file changed at
+  a session's start would dirty the checkout, and Claude Code gives
+  that file to one person's overrides for one project. The form picks
+  the agent as `plans chat` does; only a project with a project file
+  gets one, as "A project with no project file is not the workflow's"
+  has it. A project set up earlier gets the key at its next session's
+  start, as it gets a new ignore line. Any other agent named in any
+  settings file is somebody's own and stays; the plugin's own two named
+  in the shared or user settings are its default copied there after the
+  notice, so the form still picks (the assistant's check, 14 November).
+  plans/agent-set-by-the-project.md.
 - `land-by-pull-request` **With `land: pull-request`, a plan lands by its
   `Lands` line: a topic's pull request, the day's fixes or straight to
   the branch.** (Javi, 30 October) A pull request per topic when the
@@ -280,6 +298,8 @@ on the machine that planned them.
   7 November: the agents read issues as on only with pull requests;
   setup's final message names a Pull requests heading it took out.
   plans/related-plans-share-a-pull-request-follow-up-6.md.
+  14 November: setup writes the agent a plain chat opens as.
+  plans/agent-set-by-the-project.md.
 - `connectors-off` **A project turns off the claude.ai connectors it does
   not use, whole, in its own settings.** (Javi, 27 October) The account's
   connectors otherwise reach every chat in every project; a project

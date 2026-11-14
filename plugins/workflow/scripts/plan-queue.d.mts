@@ -141,6 +141,8 @@ export function launchEnv(
   kind: string,
   env?: Record<string, string | undefined>,
 ): Record<string, string | undefined>;
+/** The line a plain chat that opened before its agent's setting says, for `assistant` or `maker`. */
+export function agentLine(kind: string): string;
 export function takeLock(
   sessionId: string,
   live: LiveRow[] | null,

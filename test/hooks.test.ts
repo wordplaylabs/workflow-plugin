@@ -2116,7 +2116,7 @@ describe("plan-queue", () => {
       g(clone, "checkout", "-q", "--detach", "origin/test");
       writeFileSync(
         join(clone, ".gitignore"),
-        ".claude/executor.*\n.claude/planner.*\n.claude/worktrees/\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n",
+        ".claude/executor.*\n.claude/planner.*\n.claude/worktrees/\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/settings.local.json\n",
       );
       g(clone, "commit", "-q", "-am", "two kinds");
       const behind = g(clone, "rev-parse", "HEAD");
@@ -2150,7 +2150,7 @@ describe("plan-queue", () => {
       g(clone, "checkout", "-q", "--detach", "origin/test");
       writeFileSync(
         join(clone, ".gitignore"),
-        ".claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n",
+        ".claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/settings.local.json\n",
       );
       g(clone, "commit", "-q", "-am", "three kinds");
       const behind = g(clone, "rev-parse", "HEAD");

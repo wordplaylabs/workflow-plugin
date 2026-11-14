@@ -4,7 +4,15 @@
 // scalar, a list of strings, a map of lists, a comment after `#`), parsed by
 // hand so the plugin needs no dependency.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync,
+} from "node:fs";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -530,6 +538,9 @@ export const QUEUE_IGNORES = [
   // What GitHub's webhook brought, and its listener (plans/github-watched.md).
   ".claude/github-*",
   ".claude/webhook.*",
+  // The agent a plain chat opens as (`sessionAgent`): Claude Code keeps the
+  // file out of git only when it creates it itself.
+  ".claude/settings.local.json",
 ];
 
 /**
@@ -613,4 +624,98 @@ export function init(root) {
       `${text}${text && !text.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`,
     );
   return `Wrote ${PROJECT_FILE}: fill in each heading for this project.`;
+}
+
+/** The project's own local settings, each person's and git-ignored, where `sessionAgent` writes. */
+export const LOCAL_SETTINGS = join(".claude", "settings.local.json");
+
+/**
+ * **A project's chats open as its agent, from the project's own settings**
+ * (docs/workflow.md, "The project file"; decisions.md#chats-open-as-the-agent):
+ * the plugin sets none, since Claude Code deprecated a plugin's `agent`
+ * setting (2.1.323). The agent wanted is `<plugin>:maker` with `form:
+ * compact`, else `<plugin>:assistant`, as `plans chat` picks it. Read from the
+ * top-level `agent` of the project's local settings, its shared settings and
+ * the user settings, each absent or unreadable counting as none:
+ *
+ * - the local file names the other of the plugin's two: rewritten ("moved");
+ * - it names any other agent, or none while the shared file or else the user
+ *   settings name an agent that is not the plugin's: left alone, since that
+ *   agent is somebody's own and outranked the plugin's default before;
+ * - it names none, and the shared file or else the user settings name the
+ *   one wanted: left alone, since that one applies already;
+ * - otherwise, no file naming one or the one that applies being the
+ *   plugin's other (copied there by hand after Claude Code's deprecation
+ *   notice, the plugin's default and no choice of somebody's): written into
+ *   the local file, which outranks both ("set").
+ *
+ * The local file's other keys stay in their order, `agent` added last or
+ * changed in place, written beside it and renamed. One there that is no JSON
+ * object, or one git tracks, is left as it is: a write would dirty the
+ * checkout under an executor. `ignoreQueueFiles` runs before the write, and
+ * nothing is written where git still would not ignore the file, so it is
+ * never an untracked one of the checkout. `{ agent, did }`, `did`
+ * "", "set" or "moved"; the path taken at nearly every start, the key already
+ * right, reads files and starts no process.
+ */
+export function sessionAgent(
+  root,
+  { form = "full", userSettings = USER_SETTINGS, plugin = PLUGIN } = {},
+) {
+  const agent = `${plugin}:${form === "compact" ? "maker" : "assistant"}`;
+  const ours = [`${plugin}:assistant`, `${plugin}:maker`];
+  const read = (file) => {
+    try {
+      return { there: true, value: JSON.parse(readFileSync(file, "utf8")) };
+    } catch (error) {
+      return { there: error?.code !== "ENOENT", value: undefined };
+    }
+  };
+  const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const named = (value) =>
+    isObject(value) && typeof value.agent === "string" && value.agent ? value.agent : "";
+  const file = join(root, LOCAL_SETTINGS);
+  const local = read(file);
+  if (local.there && !isObject(local.value)) return { agent, did: "" };
+  const settings = local.value ?? {};
+  const now = named(settings);
+  if (now === agent) return { agent, did: "" };
+  // An agent named that is neither of the plugin's two is somebody's own; a
+  // key with no name in it (`""`, `null`) names none (/code-review 5).
+  if (now && !ours.includes(now)) return { agent, did: "" };
+  // The shared file outranks the user settings, as in Claude Code
+  // (plans/agent-set-by-the-project.md, decision checked by the assistant).
+  const applies =
+    now ||
+    named(read(join(root, ".claude", "settings.json")).value) ||
+    named(read(userSettings).value);
+  if (applies === agent || (applies && !ours.includes(applies))) return { agent, did: "" };
+  const tracked = spawnSync("git", ["ls-files", "--error-unmatch", "--", LOCAL_SETTINGS], {
+    cwd: root,
+    stdio: "ignore",
+    timeout: 10_000,
+  });
+  if (tracked.status === 0) return { agent, did: "" };
+  ignoreQueueFiles(root);
+  // A project rule that overrides the exclude line (`!.claude/**`), or an
+  // exclude file that cannot be written, leaves the file unignored: no write,
+  // or it is an untracked file anyone's `git add .` takes (Codex C1). Outside
+  // a repository (128) there is no checkout to dirty.
+  const ignored = spawnSync("git", ["check-ignore", "-q", "--no-index", "--", LOCAL_SETTINGS], {
+    cwd: root,
+    stdio: "ignore",
+    timeout: 10_000,
+  });
+  if (ignored.status === 1) return { agent, did: "" };
+  mkdirSync(dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify({ ...settings, agent }, null, 2)}\n`);
+    renameSync(temporary, file);
+  } catch (error) {
+    // No temporary file is left in the checkout, where nothing ignores it (/code-review 2).
+    rmSync(temporary, { force: true });
+    throw error;
+  }
+  return { agent, did: now ? "moved" : "set" };
 }

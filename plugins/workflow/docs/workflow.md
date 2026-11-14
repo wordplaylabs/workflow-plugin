@@ -14,8 +14,8 @@ context. Each agent runs as the whole session, since a subagent cannot use
 the question tool: `workflow:planner` (Fable, effort high) writes the
 plan; `workflow:executor` (Opus, `--effort high`, which outranks a
 settings file's effort) builds it through the checks, three reviews and
-the push; `workflow:assistant` (Opus, effort medium, the default agent)
-answers and routes; `workflow:maker` (Opus, effort high) is the compact
+the push; `workflow:assistant` (Opus, effort medium, the agent a project's plain
+chats open as) answers and routes; `workflow:maker` (Opus, effort high) is the compact
 form's one chat, which decides, builds and records.
 (decisions.md#plan-then-build)
 
@@ -236,6 +236,19 @@ reply: \javi              # the command the author answers notes with
 decides and builds, and the queue's hooks do nothing. A project moves
 between the forms by this line alone; `branch` may be omitted, and the
 maker then commits nothing; it reads no `land`. (decisions.md#compact-form)
+
+**A project's chats open as its agent, from the project's own
+settings.** A plain `claude` in a project with a project file opens as
+`workflow:assistant`, or as `workflow:maker` with `form: compact`, by
+the `agent` key of its `.claude/settings.local.json`, each person's
+own and git-ignored. `/workflow:setup` writes it; the session-start
+hook writes it where no settings file of the project or the person
+names an agent, or the one that applies is the other of the two, moves
+it when the form changed, and says in the owner's own chat that the
+next one opens as it. An agent anyone else named, any but the two, is
+left alone. The plugin sets none itself, and a folder with no
+project file opens as Claude Code's own.
+(decisions.md#chats-open-as-the-agent)
 
 **`land: pull-request` lands by pull request.** A plan's author writes
 where it lands in a `Lands` line under its header paragraph; absent the

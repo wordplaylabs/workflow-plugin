@@ -467,6 +467,19 @@ on the machine that planned them.
   6 November: a session named plans that stops without taking them is
   retired on every waiting plan, whatever its context
   (plans-reach-an-executor). plans/executor-takes-next-ready-plan.md.
+  14 November: the hold is on a project's `run`, and on a pull request's
+  failed checks only where no webhook brings them (`push-not-waited-on`).
+- `push-not-waited-on` **The executor runs the checks once, before the
+  push, and waits on no pull request's run of them; a failed run
+  reaches the assistant by the webhook.** (Javi, 14 November) The pull
+  request's run repeated what "Before the push" had just run, four
+  minutes a plan in the project that asked; GitHub tells a person of
+  the runs they set off and lets them hear of the failed ones only;
+  the assistant reruns once what the diff does not explain, since a
+  hosted runner fails on its own some days. What CI alone can do is
+  the project's `run`. plans/executor-never-watches-ci.md.
+  - ~~The checks are watched after every push and fixed before the
+    next plan.~~ (Javi, 28 October)
 - `plans-reach-an-executor` **Ready plans never wait with no executor: a
   plan named to a session that stops without taking it goes to a fresh
   executor, and a hook or timer that finds plans ready and none alive
@@ -651,6 +664,8 @@ on the machine that planned them.
   starts, and `plans webhook` exits 1 when none comes up (Javi, 12
   November): the record outlives a container's reboot, where its pid can
   name another process. plans/webhook-stale-record.md.
+  14 November: a failed run on the queue's own pull request is an event
+  too, `failed`, with issues on or off. plans/executor-never-watches-ci.md.
 - `days-fixes` **The day's fixes are one pull request, `Small fixes, <d
   Month yyyy>`, never two in a day.** (Javi, 30 October) A daily pull
   request for the small fixes rather than a message for the group, which

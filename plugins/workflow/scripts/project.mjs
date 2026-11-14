@@ -464,7 +464,7 @@ export function starter(root) {
   return `---
 name: ${basename(root)}
 branch: ${defaultBranch(root, { checkedOut: true })}
-# run: checks.yml        the Actions workflow read after a push; omit for none
+# run: checks.yml        the workflow that does what the local checks cannot (a deploy), read after a push straight to the branch; omit when CI only repeats them
 # land: pull-request    a pull request per topic and one a day for small fixes; omit to push everything
 # ui:                    paths a user sees, for the turn audit; omit for none
 #   - "src/components/**"

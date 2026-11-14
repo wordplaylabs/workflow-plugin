@@ -65,6 +65,7 @@ import { agentsChoice, shellWrites, untiered } from "./turn-audit.mjs";
 import { catalogueFiles, locations, paragraphs } from "./catalogue-context.mjs";
 import { appSlug, installationToken, repoOfRemote } from "./github-app.mjs";
 import {
+  FAILED_CONCLUSIONS,
   NOTHING_SEEN,
   githubEvents,
   itemsOfDelivery,
@@ -2098,7 +2099,8 @@ export function decideStop({
   carry = [],
 }) {
   if (retired) return null;
-  // **A red or unfinished run refuses the first stop of every turn**. On a
+  // **A red or unfinished run refuses the first stop of every turn**; a pull
+  // request's checks only red, as `pullChecks` gives them. On a
   // stop the turn reached by continuing after a stop hook (`stop_hook_active`,
   // `continuing`), only a run other than the one last refused (`refusedRun`):
   // that is the loop guard, with Claude Code's own cap, and a new push's run
@@ -2108,17 +2110,20 @@ export function decideStop({
     run &&
     !askedAlready &&
     run.onHead &&
-    !(run.status === "completed" && run.conclusion === "success")
+    !(run.status === "completed" && run.conclusion === "success") &&
+    !(run.pull && run.status !== "completed")
   ) {
     const how = run.status === "completed" ? "failed" : "in progress";
-    // **A pull request's checks, in the pull request mode** (`land:
-    // pull-request`): the same rule, read off the pull request.
+    // **A pull request's failed checks, in the pull request mode** (`land:
+    // pull-request`) with no webhook to bring them to the assistant; running
+    // ones are never waited on (plans/executor-never-watches-ci.md, part 4).
     if (run.pull) {
       const n = run.pull.number;
+      const also = run.pull.also || [];
       return {
         refuse: true,
         runId: run.id,
-        reason: `The checks on pull request #${n} (${run.pull.url}) are ${run.status === "completed" ? "failing" : "still running"}. Read them before you stop: \`gh pr checks ${n} --watch --fail-fast\`, then on a failure the job's log (\`gh run view <run id> --log-failed\`, the id from \`gh pr checks ${n} --json link\`), fix it, push the branch, and read the new checks.${run.pull.also?.length ? ` ${run.pull.also.length === 1 ? "Pull request" : "Pull requests"} ${andList(run.pull.also.map((m) => `#${m}`))} ${run.pull.also.length === 1 ? "is" : "are"} not green either.` : ""}${run.pull.run ? ` The ${run.pull.run.workflow || "Actions"} run on your push (${run.pull.run.id}) is ${run.pull.run.status === "completed" ? "failed" : "in progress"} too: \`gh run watch ${run.pull.run.id} --exit-status\`.` : ""} An open pull request is not done until its checks are green.`,
+        reason: `The checks on pull request #${n} (${run.pull.url}) have failed, and no webhook brings that to the assistant here. Read the failed job's log (\`gh run view <run id> --log-failed\`, the id from \`gh pr checks ${n} --json link\`), fix it and push the branch; the new checks are not waited on.${also.length ? ` ${also.length === 1 ? "Pull request" : "Pull requests"} ${andList(also.map((m) => `#${m}`))} ${also.length === 1 ? "has" : "have"} failed checks too.` : ""}${run.pull.run ? ` The ${run.pull.run.workflow || "Actions"} run on your push (${run.pull.run.id}) is ${run.pull.run.status === "completed" ? "failed" : "in progress"} too: \`gh run watch ${run.pull.run.id} --exit-status\`.` : ""}`,
       };
     }
     return {
@@ -4288,9 +4293,15 @@ export function list({ all = false, live, related = true, readers = null } = {})
   if (assistants.length) out.push(sessionsLine("assistant", assistants));
   const versions = versionLine(live);
   if (versions) out.push(versions);
-  // **The webhook's line**, in a project with issues (plans/github-watched.md).
+  // **The webhook's line**, in a project with issues (plans/github-watched.md),
+  // or with pull requests and the webhook's secret (plans/executor-never-
+  // watches-ci.md, part 2).
   const issues = proj().found && hasIssues();
-  if (issues) out.push(webhookLine());
+  if (
+    issues ||
+    (proj().found && proj().land === "pull-request" && secret("WORKFLOW_WEBHOOK_SECRET"))
+  )
+    out.push(webhookLine());
   // **Leftover worktrees are seen** (plans/queue-sees-worktree-executor.md):
   // a background executor works in one, and a retired one leaves it behind.
   const under = join(root, ".claude", "worktrees") + "/";
@@ -4612,12 +4623,13 @@ export function checksVerdict(rollup = []) {
 }
 
 /**
- * **The checks on this checkout's pull requests** (`land: pull-request`): the
- * open pull requests whose head branch is a local branch here at the same
- * commit, from one `gh pr list`; the first whose checks are not green, in the
- * run's shape (`id` its number and commit, so a push is asked about again),
- * for `decideStop`. Null when all are green, none is this checkout's, or `gh`
- * cannot be read.
+ * **The failed checks on this checkout's pull requests** (`land:
+ * pull-request`): the open pull requests whose head branch is a local branch
+ * here at the same commit, from one `gh pr list`; the first whose checks are
+ * red, in the run's shape (`id` its number and commit, so a push is asked
+ * about again), for `decideStop`. Running checks are not waited on
+ * (plans/executor-never-watches-ci.md, part 4). Null when none is red, none
+ * is this checkout's, or `gh` cannot be read.
  */
 function pullChecks() {
   try {
@@ -4649,15 +4661,15 @@ function pullChecks() {
     const open = JSON.parse(out)
       .filter((pull) => local.get(pull.headRefName) === pull.headRefOid)
       .map((pull) => ({ ...pull, verdict: checksVerdict(pull.statusCheckRollup) }))
-      .filter((pull) => pull.verdict !== "green");
+      .filter((pull) => pull.verdict === "red");
     if (!open.length) return null;
     const [first, ...rest] = open;
     return {
-      // Every pull request not green is in the id, so the loop guard lets a
+      // Every pull request red is in the id, so the loop guard lets a
       // continued stop pass only once all of them were named.
       id: open.map((pull) => `${pull.number}@${pull.headRefOid}`).join(","),
-      status: first.verdict === "red" ? "completed" : "in_progress",
-      conclusion: first.verdict === "red" ? "failure" : null,
+      status: "completed",
+      conclusion: "failure",
       onHead: true,
       pull: { number: first.number, url: first.url, also: rest.map((pull) => pull.number) },
     };
@@ -6068,12 +6080,16 @@ function hook(mode, input) {
       current: plans.find((p) => p.state === "building" && p.session === sessionId) || null,
       waiting,
       handed,
-      // The pull request mode reads its pull requests' checks, then the run a
-      // fix pushed straight sets off; the push mode its run.
+      // The pull request mode reads its pull requests' failed checks where no
+      // webhook brings them to the assistant (two fixes would cross): no
+      // secret, or no listener alive (/code-review); then the run a fix
+      // pushed straight sets off. The push mode reads its run. `webhookAlive`
+      // is the pid alone, no port's wait in a Stop hook: a record a reboot
+      // left can read as alive until the next session's start drops it.
       run:
         proj().land === "pull-request"
           ? pullThenRun(
-              pullChecks(),
+              secret("WORKFLOW_WEBHOOK_SECRET") && webhookAlive() ? null : pullChecks(),
               imageRun({
                 only: plans.filter((p) => p.state === "built" && p.fix && p.sha).map((p) => p.sha),
               }),
@@ -6420,12 +6436,15 @@ export function webhookLine(record = webhookAlive()) {
 }
 
 /**
- * **The listener is armed where it can listen**: in a project with issues
- * and the secret set, when none is alive, a detached `plans webhook
- * --serve`. `plans start` and the session's start call it; it says nothing.
+ * **The listener is armed where it can listen**: in a project with `land:
+ * pull-request` and the secret set, issues on or off, since a failed run on
+ * a pull request reaches the assistant by it (plans/executor-never-watches-
+ * ci.md, part 2), when none is alive, a detached `plans webhook --serve`.
+ * `plans start` and the session's start call it; it says nothing.
  */
 export async function armWebhook(env = process.env) {
-  if (!proj().found || !hasIssues() || !secret("WORKFLOW_WEBHOOK_SECRET", env)) return 0;
+  if (!proj().found || proj().land !== "pull-request" || !secret("WORKFLOW_WEBHOOK_SECRET", env))
+    return 0;
   const seen = readJson(files.webhook());
   if (await webhookListening()) return 0;
   dropWebhookRecord(seen);
@@ -6561,7 +6580,11 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
       appendFileSync(file, noteFor(event, { first: !existsSync(file) }));
     }
     noted.push({ path: `plans/github/${event.number}.md`, line: said.length });
-    said.push(`GitHub: #${event.number} ${event.kind} by ${event.by}, noted.`);
+    said.push(
+      event.kind === "failed"
+        ? `GitHub: #${event.number} ${event.by} run failed, noted.`
+        : `GitHub: #${event.number} ${event.kind} by ${event.by}, noted.`,
+    );
   }
   if (noted.length) {
     // The oldest note with an event not handled; one chat at a time.
@@ -6592,7 +6615,7 @@ export function notesWaiting(dir = join(root, "plans", "github")) {
   } catch {
     return [];
   }
-  const event = /^(?:plan|mention|comment|review|ready), /;
+  const event = /^(?:plan|mention|comment|review|ready|failed), /;
   return names
     .map((name) => {
       const file = join(dir, name);
@@ -6617,13 +6640,41 @@ function readSeen() {
   return { ...NOTHING_SEEN, ...readJson(files.githubSeen()) };
 }
 
-/** Items and the seen file through `githubEvents`, the permissions read first, then handled. */
+/**
+ * Items and the seen file through `githubEvents`, the permissions read first,
+ * then handled. With issues off only failed runs make events
+ * (`failedOnly`); a failed run whose pull request GitHub left out is given
+ * the open one of its head branch (plans/executor-never-watches-ci.md, part 1).
+ */
 async function act(items, { deadline = Date.now() + 25_000, dry = false } = {}) {
+  const issues = hasIssues();
+  items = items.map((item) => {
+    if (item.kind !== "failed" || item.number || !item.head || Date.now() >= deadline) return item;
+    let number = 0;
+    try {
+      const out = ghRead(
+        ["pr", "list", "--head", item.head, "--state", "open", "--limit", "1", "--json", "number"],
+        left(deadline, 10_000),
+      );
+      number = JSON.parse(out || "[]")[0]?.number || 0;
+    } catch {
+      // Unread: no event is made of it.
+    }
+    return { ...item, number };
+  });
   let seen = readSeen();
   seen.slug = await slugOf(seen);
   const repo = repoHere(spawnSync, process.env, false);
-  if (repo) seen = withPermissions(seen, items, repo, deadline);
-  const context = { ...githubContext(), slug: seen.slug };
+  // A run is nobody's writing, and with issues off nothing else is acted on:
+  // no permission is read for either.
+  if (repo && issues)
+    seen = withPermissions(
+      seen,
+      items.filter((item) => item.kind !== "failed"),
+      repo,
+      deadline,
+    );
+  const context = { ...githubContext(), slug: seen.slug, failedOnly: !issues };
   const { events, seen: next } = githubEvents(seen, items, context);
   const { said, seen: kept } = await handleEvents(events, next, { dry });
   // A dry run changes nothing on disk, so the real one still sees it all (/code-review).
@@ -6686,10 +6737,12 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
   const seen = readSeen();
   const since = seen.readAt || "";
   const items = [];
-  // The listener's handling: the inbox alone, no read; nothing once issues
-  // are off, so a listener left running acts on no delivery
-  // (plans/related-plans-share-a-pull-request-follow-up-5.md, Codex).
-  if (inbox && !hasIssues()) return ["GitHub: nothing new."];
+  // The listener's handling: the inbox alone, no read; nothing once pull
+  // requests are off, so a listener left running acts on no delivery
+  // (plans/related-plans-share-a-pull-request-follow-up-5.md, Codex); with
+  // issues off, `act` takes the failed runs alone
+  // (plans/executor-never-watches-ci.md, part 2).
+  if (inbox && proj().land !== "pull-request") return ["GitHub: nothing new."];
   if (inbox) {
     const said = await act(inboxItems(seen), { deadline, dry });
     return said.length ? said : ["GitHub: nothing new."];
@@ -6697,22 +6750,27 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
   const newer = (at) => !since || (at && at > since);
   // What changed since the last read, not the newest fifty (/code-review).
   const searched = (what) => (since ? ["--search", `${what}:>=${since.slice(0, 19)}Z`] : []);
-  const issues = JSON.parse(
-    ghRead(
-      [
-        "issue",
-        "list",
-        "--state",
-        "open",
-        "--limit",
-        "100",
-        ...searched("updated"),
-        "--json",
-        "number,title,labels,author,createdAt,updatedAt,url,body,comments",
-      ],
-      left(deadline, 10_000),
-    ) || "[]",
-  );
+  // With issues off, the queue's own pull requests' failed runs alone
+  // (plans/executor-never-watches-ci.md, part 2).
+  const issuesOn = hasIssues();
+  const issues = !issuesOn
+    ? []
+    : JSON.parse(
+        ghRead(
+          [
+            "issue",
+            "list",
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            ...searched("updated"),
+            "--json",
+            "number,title,labels,author,createdAt,updatedAt,url,body,comments",
+          ],
+          left(deadline, 10_000),
+        ) || "[]",
+      );
   const plans = readPlans(join(root, "plans"));
   const context = githubContext(plans);
   for (const issue of issues) {
@@ -6764,7 +6822,7 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
         "--limit",
         "50",
         "--json",
-        "number,title,url,headRefName,comments,reviews",
+        "number,title,url,headRefName,headRefOid,statusCheckRollup,comments,reviews",
       ],
       left(deadline, 10_000),
     ) || "[]",
@@ -6780,6 +6838,8 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
       pull: true,
       head: pull.headRefName,
     };
+    items.push(...failedRunsOf(pull, base, newer, (id) => failedAttempt(id, deadline)));
+    if (!issuesOn) continue;
     for (const comment of pull.comments || [])
       if (newer(comment.createdAt))
         items.push({
@@ -6817,22 +6877,24 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
           });
     }
   }
-  const merged = JSON.parse(
-    ghRead(
-      [
-        "pr",
-        "list",
-        "--state",
-        "merged",
-        "--limit",
-        "100",
-        ...searched("merged"),
-        "--json",
-        "number,title,url,body,mergedAt,mergedBy,headRefName",
-      ],
-      left(deadline, 10_000),
-    ) || "[]",
-  );
+  const merged = !issuesOn
+    ? []
+    : JSON.parse(
+        ghRead(
+          [
+            "pr",
+            "list",
+            "--state",
+            "merged",
+            "--limit",
+            "100",
+            ...searched("merged"),
+            "--json",
+            "number,title,url,body,mergedAt,mergedBy,headRefName",
+          ],
+          left(deadline, 10_000),
+        ) || "[]",
+      );
   for (const pull of merged)
     if (newer(pull.mergedAt))
       items.push({
@@ -6852,6 +6914,71 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
   const said = await act([...items, ...inboxItems(seen)], { deadline, dry });
   if (!dry && !inbox) writeJson(files.githubSeen(), { ...readSeen(), readAt: began });
   return said.length ? said : ["GitHub: nothing new."];
+}
+
+/**
+ * **A pull request's failed runs, as read** (plans/executor-never-watches-ci.md,
+ * part 2): from its `statusCheckRollup`, grouped by the run in each check's
+ * `detailsUrl`, one `failed` item per run whose checks have all completed,
+ * one of them failed (`FAILED_CONCLUSIONS`), and whose last completion is
+ * `newer` than the last read, so a run still going is read once it ends
+ * (Codex). `attempt(id)` gives the run's attempt, 0 when it cannot be read or
+ * the run is not failed and done; such a run is no item. `at` is its last
+ * completion, `sha` the pull request's head.
+ */
+export function failedRunsOf(pull, base, newer = () => true, attempt = () => 1) {
+  const runs = new Map();
+  for (const check of pull.statusCheckRollup || []) {
+    const id = Number(/\/actions\/runs\/(\d+)/.exec(check?.detailsUrl || "")?.[1] || 0);
+    if (!id) continue;
+    const run = runs.get(id) || { id, failed: false, done: true, at: "", workflow: "" };
+    run.workflow ||= check.workflowName || "";
+    if (String(check.status || "").toUpperCase() !== "COMPLETED") run.done = false;
+    if (FAILED_CONCLUSIONS.includes(String(check.conclusion || "").toLowerCase()))
+      run.failed = true;
+    if (check.completedAt && check.completedAt > run.at) run.at = check.completedAt;
+    runs.set(id, run);
+  }
+  const items = [];
+  for (const run of runs.values()) {
+    if (!run.failed || !run.done || !newer(run.at)) continue;
+    const tried = attempt(run.id);
+    if (!tried) continue;
+    items.push({
+      ...base,
+      kind: "failed",
+      author: "",
+      text: "",
+      url: `${String(pull.url || "").replace(/\/pull\/\d+$/, "")}/actions/runs/${run.id}`,
+      workflow: run.workflow,
+      run: run.id,
+      attempt: tried,
+      sha: String(pull.headRefOid || "").slice(0, 8),
+      at: run.at,
+    });
+  }
+  return items;
+}
+
+/**
+ * A run's attempt by `gh run view`, when it is completed and failed; 0 when
+ * it is not, or cannot be read in time.
+ */
+function failedAttempt(id, deadline) {
+  if (Date.now() >= deadline) return 0;
+  try {
+    const run = JSON.parse(
+      ghRead(
+        ["run", "view", String(id), "--json", "attempt,status,conclusion"],
+        left(deadline, 5000),
+      ) || "{}",
+    );
+    return run.status === "completed" && FAILED_CONCLUSIONS.includes(run.conclusion)
+      ? run.attempt || 1
+      : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**

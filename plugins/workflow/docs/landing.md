@@ -117,7 +117,7 @@ retried as for a merge. Then, by the topic:
   ```
 
   one `--attach` per screenshot the body names. "Built" opens
-  with `Pull request #<n> (<url>) to <branch> from branch <name>, commit <sha>; draft, checks green.`, and each earlier plan of the topic gets,
+  with `Pull request #<n> (<url>) to <branch> from branch <name>, commit <sha>; draft.`, and each earlier plan of the topic gets,
   after its "Built" section's first line,
   `Pull request #<n> (<url>) opened <date> with plans/<x>.md.`
 - **A pull request already open**: the description written again from
@@ -136,7 +136,7 @@ retried as for a merge. Then, by the topic:
   open already.
   No comment: the description is the record
   (decisions.md#joined-pull-request). "Built" opens with
-  `Pull request #<n> (<url>) joined, commit <sha>; draft, checks green.`
+  `Pull request #<n> (<url>) joined, commit <sha>; draft.`
 
 **A fix**, `Lands: fix.`, is built on the day's branch,
 `fixes-<yyyy-mm-dd>`, the day of its push (decisions.md#days-fixes),
@@ -159,7 +159,7 @@ way on `fixes-<the next day's yyyy-mm-dd>`, pushed, no pull request;
 by the same command, each of its plans' "Built" getting
 `Pull request #<n> (<url>) opened <date> with plans/<x>.md.` A local `fixes-` branch with commits the remote lacks is taken as is. Pushes are plain, retried as a merge's. The squash goes back to the
 tip the day's branch had once taken and merged. "Built" opens with
-`Pull request #<n> (<url>) of the day's fixes, commit <sha>; open, checks green.`
+`Pull request #<n> (<url>) of the day's fixes, commit <sha>; open.`
 
 **A fix wanted now**, `Lands: fix, now.`: a branch of its own off
 `origin/<branch>`; one commit; `git push origin HEAD:<branch>` as a
@@ -189,11 +189,13 @@ line: `Screenshots: sent in the executor's chat; attaching them needs gh
 (the plugin's docs, "Installing").` "Built" and the final message say
 the same.
 
-**The checks are watched**: `gh pr checks <n> --watch --fail-fast` (exit
-8 is pending), a failed job's log by `gh run view <run id> --log-failed`
-(the id from `gh pr checks <n> --json link`), fixed and pushed before
-the next plan. The project's `run` is read only for a fix pushed
-straight.
+**The checks are not waited on** ("A push is not waited on"): after
+the push and the pull request's create or edit, start the next plan;
+run no `gh pr checks` and no `gh run watch` on a pull request. A run
+that fails there reaches the assistant by the app's webhook and comes
+back as a short plan landing in it; with no webhook, the Stop hook
+names checks that have already failed, fixed and pushed before the
+next plan. The project's `run` is read only for a fix pushed straight.
 
 **After the batch's last plan**, `git checkout --detach
 origin/<branch>`; keep the local branches, the hook's match for pull

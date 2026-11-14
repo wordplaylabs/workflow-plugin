@@ -32,9 +32,10 @@ export const labelsOf = (thing) =>
  * **A delivery as the queue's items**, one shape for a delivery and for
  * `plans github`'s read: `{ deliveryId, kind, number, title, labels,
  * author, at, text, url, merged, pull, label, head }`, `kind` one of `opened`
- * (an issue), `labeled`, `comment`, `review` and `closed` (a pull request),
- * `pull` true on a pull request. An event the queue takes nothing from is
- * no item.
+ * (an issue), `labeled`, `comment`, `review`, `closed` (a pull request) and
+ * `failed` (a run that failed on a pull request, with `workflow`, `run` and
+ * `sha`), `pull` true on a pull request. An event the queue takes nothing
+ * from is no item.
  */
 export function itemsOfDelivery(event, payload = {}, deliveryId = "") {
   const issue = payload.issue;
@@ -99,6 +100,41 @@ export function itemsOfDelivery(event, payload = {}, deliveryId = "") {
       },
     ];
   }
+  // **A failed run is an item** (plans/executor-never-watches-ci.md, part 1):
+  // `completed` comes whatever the outcome, so only the failing conclusions,
+  // on a pull request from this repository; a cancelled run was superseded by
+  // a later push, and a fork's branch may share a name.
+  if (event === "workflow_run" && payload.action === "completed") {
+    const run = payload.workflow_run;
+    if (
+      !run ||
+      run.event !== "pull_request" ||
+      !FAILED_CONCLUSIONS.includes(run.conclusion) ||
+      !run.head_repository?.full_name ||
+      run.head_repository.full_name !== payload.repository?.full_name
+    )
+      return [];
+    return [
+      {
+        deliveryId,
+        kind: "failed",
+        pull: true,
+        // Empty on some runs: the queue fills it from the head branch.
+        number: run.pull_requests?.[0]?.number || 0,
+        head: run.head_branch || "",
+        title: run.display_title || "",
+        labels: [],
+        url: run.html_url || "",
+        at: run.updated_at || "",
+        text: "",
+        author: run.triggering_actor?.login || run.actor?.login || "",
+        workflow: run.name || "",
+        run: run.id,
+        attempt: run.run_attempt || 1,
+        sha: String(run.head_sha || "").slice(0, 8),
+      },
+    ];
+  }
   if (event === "pull_request" && payload.action === "closed" && pr)
     return [
       {
@@ -114,6 +150,9 @@ export function itemsOfDelivery(event, payload = {}, deliveryId = "") {
   return [];
 }
 
+/** A run's conclusions that make it failed: `cancelled` is a later push's doing. */
+export const FAILED_CONCLUSIONS = ["failure", "timed_out", "startup_failure"];
+
 /** The issue a pull request is for, from its `For #<n>.` line; 0 with none. */
 export function forOf(text = "") {
   return Number(/^For #(\d+)\.?[ \t]*$/m.exec(text)?.[1] || 0);
@@ -126,6 +165,7 @@ export const NOTHING_SEEN = Object.freeze({
   pulls: {},
   permissions: {},
   labeled: [],
+  runs: [],
   readAt: "",
 });
 
@@ -138,16 +178,20 @@ const DELIVERIES_KEPT = 500;
  * url, title, permission, pull }`, in the items' order. `context` says
  * what the checkout's plans hold: `carried` (the issues a plan or a brief
  * carries), `planned` (a planned plan's issues), `own` (the queue's own
- * pull requests) and `slug` (the app's). Kinds: `issue` (an issue opened,
+ * pull requests), `slug` (the app's) and `failedOnly` (issues off: every
+ * delivery is marked seen, and only failed runs are events). Kinds: `issue` (an issue opened,
  * unlabelled), `plan` (`status: planning` set on an issue nothing carries),
  * `mention` (`@<slug>` in a comment), `comment` (on an issue a plan
  * carries), `review` (a review, a review comment or a comment on the
  * queue's own pull request), `ready` (`status: ready` on a planned plan's
  * issue), `merged` (a pull request with a `For #<n>` line merged; its
- * number the issue's, `pull` the pull request's). A reader's item, one
- * whose author's permission is not write or admin in `seen.permissions`,
- * and the app's own are never events; a delivery seen is skipped, and so
- * is an item from a read no newer than what was seen of its issue.
+ * number the issue's, `pull` the pull request's), `failed` (a run that
+ * failed on the queue's own pull request, `by` its workflow, with `run` and
+ * `sha`). A reader's item, one whose author's permission is not write or
+ * admin in `seen.permissions`, and the app's own are never events, but a
+ * failed run is nobody's writing and is judged by its pull request alone; a
+ * delivery seen is skipped, and so is an item from a read no newer than what
+ * was seen of its issue.
  */
 export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
   const carried = new Set(context.carried || []);
@@ -162,13 +206,41 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
     pulls: { ...(seen.pulls || {}) },
     permissions: { ...(seen.permissions || {}) },
     labeled: [...(seen.labeled || [])],
+    runs: [...(seen.runs || [])],
   };
   const events = [];
   for (const item of items) {
     if (item.deliveryId) {
       if (next.deliveries.includes(item.deliveryId)) continue;
       next.deliveries.push(item.deliveryId);
-    } else {
+    }
+    // With issues off (`failedOnly`), a delivery is still marked seen, so
+    // turning issues on later replays none of it (/code-review).
+    if (context.failedOnly && item.kind !== "failed") continue;
+    if (item.kind === "failed") {
+      // **A run is told once, by its id and attempt**, whether a delivery or
+      // a read brought it, and touches no pull request's time, so no comment
+      // and no other run of the same second is hidden by it (Codex,
+      // /code-review). The app's own pull request is set off by the app: no
+      // author gate; one whose number is unknown is nobody's.
+      const key = `${item.run}:${item.attempt || 1}`;
+      if (next.runs.includes(key) || !item.number) continue;
+      if (!own.has(item.number) && !(item.head && own.has(item.head))) continue;
+      next.runs.push(key);
+      events.push({
+        kind: "failed",
+        number: item.number,
+        by: item.workflow || "",
+        at: item.at || "",
+        text: "",
+        url: item.url || "",
+        title: item.title || "",
+        run: item.run,
+        sha: item.sha || "",
+      });
+      continue;
+    }
+    if (!item.deliveryId) {
       // A read's item: only what is newer than this issue's last item seen.
       const map = item.pull ? next.pulls : next.issues;
       const last = map[item.number];
@@ -220,6 +292,7 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
     }
   }
   next.deliveries = next.deliveries.slice(-DELIVERIES_KEPT);
+  next.runs = next.runs.slice(-DELIVERIES_KEPT);
   return { events, seen: next };
 }
 
@@ -249,6 +322,9 @@ export function noteFor(event, { first = false } = {}) {
     .map((line) => (line.trim() ? `    ${line}` : ""))
     .join("\n")
     .replace(/\n+$/, "");
+  // A failed run's line names its workflow, run and commit; nobody wrote it.
+  if (event.kind === "failed")
+    return `${head}failed, ${noteTime(event.at)}, ${event.by} run ${event.run} on ${event.sha}: ${event.url}\n\n`;
   return `${head}${event.kind}, ${noteTime(event.at)}, by ${event.by} (${event.permission}): ${event.url}\n${text ? `${text}\n` : ""}\n`;
 }
 

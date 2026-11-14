@@ -242,12 +242,16 @@ finding, or Codex's, is a claim to check against the code.
    is read through `curl -s
    https://api.github.com/repos/<owner>/<repo>/actions/runs?branch=<branch>&per_page=1`;
    a private one's is unread, and "Built" says so.
-5. With a `run`, note its id (`gh run list --branch <branch> --workflow
+5. Push and go on ("A push is not waited on"): watch no pull request's
+   checks, which repeat what you just ran; one that fails comes back as
+   a short plan. Only a `run`, the workflow the project file names for
+   what the local checks cannot do, is read, after a push straight to
+   the branch: note its id (`gh run list --branch <branch> --workflow
    <run> --limit 1`) and read it before your next push and at the
    batch's end (`gh run watch <id> --exit-status`, a failed job's log by
-   `gh api repos/{owner}/{repo}/actions/jobs/<id>/logs`). A failed run is
-   fixed before anything else is pushed. Then **After the push**. After
-   the batch's last push, `git checkout --detach origin/<branch>`.
+   `gh api repos/{owner}/{repo}/actions/jobs/<id>/logs`). A failed `run`
+   is fixed before anything else is pushed. Then **After the push**.
+   After the batch's last push, `git checkout --detach origin/<branch>`.
 
 With `land: pull-request`, "push" means the landing
 `${CLAUDE_PLUGIN_ROOT}/docs/landing.md` says.

@@ -209,7 +209,7 @@ default, or the branch checked out. (decisions.md#project-file)
 ---
 name: Docs                # the project's name in session names
 branch: test              # the branch the executor pushes, fast-forward
-run: checks.yml           # the Actions workflow read after a push; omit for none
+run: checks.yml           # the workflow that does what the local checks cannot (a deploy), read after a push straight to the branch; omit when CI only repeats them
 land: pull-request        # a pull request per topic and one a day for small fixes; omit to push everything
 ui:                       # paths a user sees, for the turn audit and the edit-time hook; a one-file catalogue with no paths governs them all
   - "src/components/**"
@@ -493,8 +493,9 @@ while its file waits; `plans first --undo <path>` takes it out.
 
 **One checkout has one executor**, which holds `.claude/executor.lock`;
 another's edits are refused. Its Stop hook holds the stop on a red or
-unfinished run of its push, or pull request of the checkout, whose fix
-is pushed where the red one was, before anything else, then names
+unfinished `run` of its push, or, with no webhook, a pull request of the
+checkout whose checks have failed, whose fix is pushed where the red one
+was, before anything else, then names
 the waiting plans to a session it may reuse (a context under the
 ceiling the queue works out for this project and agent: the wash of
 "context-cost" from inputs measured in its transcripts, raised by what
@@ -510,6 +511,22 @@ process, is handed over (work committed, a
 is written "Built" with the item and handed to the assistant.
 (decisions.md#one-executor, decisions.md#context-cost,
 decisions.md#shared-is-what-is-held)
+
+**A push is not waited on.** The executor runs the project's checks
+once, under **Before the push**, pushes and starts the next plan: it
+watches no pull request's checks, which repeat them. A run that fails
+on a pull request of the queue's own reaches the assistant by the
+app's webhook, as `failed` in `plans/github/<n>.md`: it reads the
+failed log and the diff, reruns the failed jobs once when the diff
+does not explain the failure, and writes the fix's short plan,
+landing in that pull request, when it does or the rerun fails too.
+What CI does that the local checks cannot (a deploy, a check that
+needs the hosted machine or a secret) is the project file's `run`,
+read after a push straight to the branch, and nothing else is. With
+no webhook listening (no secret, or its listener down), the executor's
+Stop hook names a pull request's checks that have already failed, never
+ones still running.
+(decisions.md#push-not-waited-on)
 
 **Ready plans never wait with no executor**: a plan the Stop hook
 named to a session that stops without taking it goes to a fresh
@@ -671,7 +688,9 @@ stage is one `status:` label, `planning`, `planned`, `ready`, `building`.
 app's webhook**: `plans webhook` listens on the container behind the
 host's reverse proxy, checks each delivery's signature, notes each event in
 `plans/github/`, starts the assistant on it, and closes an issue when its
-pull request merges; `plans github` reads what was missed; the assistant
+pull request merges; a run that failed on the queue's own pull request
+arrives the same way, in any project with `land: pull-request`; `plans
+github` reads what was missed; the assistant
 answers as the app, writes the brief, or writes Ready and starts the
 build. (decisions.md#github-webhook)
 
@@ -803,7 +822,8 @@ expires. A project with issues carries its app's id and private key the
 same way, `WORKFLOW_APP_ID` and `WORKFLOW_APP_KEY` (the PEM's text),
 from which `plans gh` mints the app's token, and its webhook's secret
 and port, `WORKFLOW_WEBHOOK_SECRET` and `WORKFLOW_WEBHOOK_PORT` (8789
-when unset). Any of these left out of the environment is read, when the queue
+when unset). A failed run reaches the queue when the app has Actions
+read and write and is subscribed to the Workflow run event. Any of these left out of the environment is read, when the queue
 uses it, from the private dotenv file that `WORKFLOW_SECRETS_FILE`
 names (a relative path from the checkout's root), and never put into
 the environment, so the key stays out of every other program's

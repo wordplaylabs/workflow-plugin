@@ -273,8 +273,18 @@ guess, saying so when they do not say (`plans gh issue comment <n>
 line when the plan is planned and it is the commenter's call, else the
 question tool to ${user_config.owner}; `plan`, a brief started as exit
 4; `ready`, the Ready step, first line `Ready on GitHub, <d Month>.`;
-`review`, a short plan for a fix or an answer on the pull request. Then
-write `## Handled, <date>, session <id>` with a line of what you did.
+`review`, a short plan for a fix or an answer on the pull request;
+`failed`, a run that failed on the queue's own pull request: `gh run
+view <id> --json attempt,headSha` and `gh pr view <n> --json
+state,headRefOid,headRefName`; a pull request closed or past that
+commit gets nothing. Else read `gh run view <id> --log-failed | tail -n
+200` and `gh pr diff <n>`. A failure the diff does not explain, on
+attempt 1, is rerun once, `plans gh run rerun <id> --failed`; one it
+explains, a rerun's, or a rerun refused, is a short plan for the fix,
+`Lands: topic <the head branch>, waiting; lands in #<n>.` (`Lands:
+fix.` on the day's fixes), started at once. Then write `## Handled,
+<date>, session <id>` with a line of what you did, for `failed` which of
+the three.
 
 ## What crosses chats
 

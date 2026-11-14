@@ -1,0 +1,28 @@
+{
+  "action": "completed",
+  "workflow_run": {
+    "id": 19283746501,
+    "name": "Checks",
+    "event": "pull_request",
+    "status": "completed",
+    "conclusion": "failure",
+    "head_branch": "series-order",
+    "head_sha": "4f1c2b9a7e3d5c8b0a1f2e3d4c5b6a7980716253",
+    "display_title": "Series keep their order",
+    "run_attempt": 1,
+    "html_url": "https://github.com/o/r/actions/runs/19283746501",
+    "updated_at": "2026-11-14T21:04:00Z",
+    "pull_requests": [
+      {
+        "number": 40,
+        "head": { "ref": "series-order", "sha": "4f1c2b9a7e3d5c8b0a1f2e3d4c5b6a7980716253" },
+        "base": { "ref": "test", "sha": "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567" }
+      }
+    ],
+    "actor": { "login": "docs-claude[bot]" },
+    "triggering_actor": { "login": "docs-claude[bot]" },
+    "head_repository": { "full_name": "o/r" }
+  },
+  "repository": { "full_name": "o/r" },
+  "sender": { "login": "docs-claude[bot]" }
+}

@@ -266,7 +266,15 @@ decided: an executor may build it meanwhile by the recommended option,
 the relayed one, and a differing answer is a change to a taken plan. Record the answer in "Decided",
 `<The decision> (${user_config.owner}, <d Month>, said in the assistant's
 chat, confirmed here).` A plan with a Building line gets a follow-up plan
-instead. Report any other message, not acted on.
+instead.
+`Decision to check: plans/<x>.md.` is an executor's, on a plan you
+wrote, taking a decision rather than ask ${user_config.owner} ("An
+executor never waits on the owner"): judge its options by the plan's
+research, the catalogue and the docs, and answer at once with one
+`SendMessage` to that executor, `Checked: plans/<x>.md.`, then the
+option and why in a clause, its option unless another it listed is
+better grounded; ask ${user_config.owner} nothing about it and change
+nothing in the plan. Report any other message, not acted on.
 
 **A message for another person only when asked.** A plan that touches
 another person's part says whose and what in a line. When

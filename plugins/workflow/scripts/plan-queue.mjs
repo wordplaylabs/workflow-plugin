@@ -766,8 +766,11 @@ export function readPlans(dir = join(root, "plans"), live = null, texts = {}) {
  * (plans/handed-plan-stays-in-queue.md): the `plans/*.md` with neither a
  * plan's header nor a brief's line where `stateOf` looks (`headless`), and
  * those that could not be read at all (`failed`, Codex, 28 October), by path.
- * One gone between the listing and the read is gone, not failed.
+ * One gone between the listing and the read is gone, not failed. The log of
+ * decisions taken for the owner (`TAKEN_LOG`) is the assistant's, not a plan.
  */
+export const TAKEN_LOG = "plans/decisions-taken.md";
+
 export function unreadPlans(dir = join(root, "plans")) {
   const unread = { headless: [], failed: [] };
   let names = [];
@@ -784,7 +787,7 @@ export function unreadPlans(dir = join(root, "plans")) {
       if (error.code !== "ENOENT") unread.failed.push(`plans/${name}`);
       continue;
     }
-    if (!stateOf(text)) unread.headless.push(`plans/${name}`);
+    if (!stateOf(text) && `plans/${name}` !== TAKEN_LOG) unread.headless.push(`plans/${name}`);
   }
   return unread;
 }
@@ -2145,7 +2148,7 @@ export function decideStop({
         ? `this plan has been handed over ${stuck.resumed.length} times`
         : `this plan was handed over twice at step ${stuck.resumed.at(-1)}; it is stuck there`;
     return {
-      context: `${stuck.path} is not handed over again: ${why}. Write its "Built" section with "Needs a decision: ${why}", and ask ${owner()} through the question tool what to do with it.`,
+      context: `${stuck.path} is not handed over again: ${why}. Write its "Built" section with "Needs a decision: ${why}", sized planner, and hand it to the assistant as the agent file's "The final message" says; ${owner()} is not asked.`,
       told: [stuck.path],
     };
   }
@@ -2638,13 +2641,20 @@ export function assistantPrompt(path) {
 }
 
 /**
- * The newest brief or waiting plan: what an assistant writes, its progress
- * for the quick-death rule. A built plan is not one: the executor writes its
- * "Built" just before it starts an assistant (/code-review).
+ * The newest brief or waiting plan, or the log of decisions taken: what an
+ * assistant writes, its progress for the quick-death rule. A built plan is
+ * not one: the executor writes its "Built" just before it starts an
+ * assistant (/code-review). An assistant handed only a decision to log
+ * writes the log alone (plans/executor-never-waits.md, /code-review).
  */
-function writtenAt(plans) {
+export function writtenAt(plans, log = join(root, TAKEN_LOG)) {
+  let logged = 0;
+  try {
+    logged = statSync(log).mtimeMs;
+  } catch {}
   return Math.max(
     0,
+    logged,
     ...plans
       .filter((plan) => ["brief", "planning", "ready"].includes(plan.state))
       .map((plan) => plan.mtime || 0),
@@ -4405,7 +4415,7 @@ export function list({ all = false, live, related = true, readers = null } = {})
         byPull && p.relatedTo ? `related: ${relatedWords(p.relatedTo)}` : "",
         p.state === "handed" ? "handed over, resume" : "",
         p.asks ? "unanswered, the executor decides" : "",
-        p.stuck ? `stuck, asks ${owner()}` : "",
+        p.stuck ? "stuck, the assistant takes it" : "",
         p.stale ? "(a Building line from a session that is gone)" : "",
       ]
         .filter(Boolean)
@@ -5794,8 +5804,9 @@ function hook(mode, input) {
     return;
   }
   if (!executor) return;
-  // The question tool reaches the tool hook for the planner's sake; the lock
-  // never refuses an executor's question.
+  // The question tool reaches the tool hook for the planner's sake. An
+  // executor has none (its agent file's `disallowedTools`, "An executor never
+  // waits on the owner"); a session run as one another way is let through.
   if (mode === "tool" && input.tool_name === "AskUserQuestion") return;
   if (mode === "wrote") {
     // **The Building line takes the plan from its planner**: a retired

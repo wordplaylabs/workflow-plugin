@@ -575,6 +575,10 @@ export function readPlans(
   live?: string[] | null,
   texts?: Record<string, string>,
 ): (PlanState & { path: string; file: string; text: string })[];
+/** The assistant's log of the decisions executors took for the owner; never a plan. */
+export const TAKEN_LOG: string;
+/** An assistant's progress: the newest brief or waiting plan, or the log's last write. */
+export function writtenAt(plans: { state: string; mtime?: number }[], log?: string): number;
 /** The `plans/*.md` the queue cannot read: no header and no brief line, or no read at all. */
 export function unreadPlans(dir?: string): { headless: string[]; failed: string[] };
 export function resetTime(usage: Partial<Usage> | null, transcriptText?: string): number;

@@ -1168,6 +1168,7 @@ describe("the handbook holds every rule the plugin cites", () => {
     "A string rests on what produced it",
     "A topic's pull request opens as a draft and stays one until its owner has reviewed it himself",
     "After the push",
+    "An executor never waits on the owner",
     "Asked in plain words",
     "Asked once",
     "Before a build",
@@ -3142,4 +3143,69 @@ describe("the scripts' type declarations", () => {
       expect(declared.filter((name) => !exported.includes(name))).toEqual([]);
     });
   }
+});
+
+// plans/executor-never-waits.md: what an executor would ask the owner, it decides.
+describe("an executor never waits on the owner", () => {
+  const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
+  const read = (path: string) => readFileSync(join(plugin, path), "utf8");
+  const flat = (text: string) => text.replace(/\s+/g, " ");
+
+  it("the handbook and the catalogue hold the rule", () => {
+    const handbook = flat(read("docs/workflow.md"));
+    const rule = /\*\*An executor never waits on the owner\.\*\*.*?\(decisions\.md#[\w-]+\)/.exec(
+      handbook,
+    )![0];
+    expect(rule.endsWith("(decisions.md#executor-never-waits)")).toBe(true);
+    expect(rule).toContain("`Decision to check: plans/<x>.md.`");
+    expect(rule).toContain("`Checked: plans/<x>.md.`");
+    expect(rule).toContain("`plans/decisions-taken.md`");
+    const asked = /\*\*Asked once\.\*\*.*?\(decisions\.md#asked-once\)/.exec(handbook)![0];
+    expect(asked).not.toContain("is asked in the executor's session");
+    const one = /\*\*One checkout has one executor\*\*.*?\(decisions\.md#one-executor/.exec(
+      handbook,
+    )![0];
+    expect(one).not.toContain("the owner is asked");
+    expect(one).toContain("handed to the assistant");
+    expect(read("docs/decisions.md")).toContain(
+      "- `executor-never-waits` **An executor never asks the owner and never",
+    );
+  });
+
+  it("the executor has no question tool and decides what it would ask", () => {
+    const file = read("agents/executor.md");
+    const front = /^---\n([\s\S]*?)\n---/.exec(file)![1];
+    const disallowed = /^disallowedTools: (.*)$/m.exec(front)![1].split(/,\s*/);
+    expect(disallowed).toContain("AskUserQuestion");
+    expect(file).toContain("\n## A question is decided, not asked\n");
+    const text = flat(file);
+    expect(text).toContain("Decision to check: plans/<x>.md.");
+    expect(text).toContain("Checked: plans/<x>.md.");
+    expect(text).toContain("Taken on ${user_config.owner}'s standing word:");
+    expect(text).not.toContain("**ask**");
+    expect(text).not.toContain("asked once");
+    expect(text).not.toContain("is asked");
+    expect(text.split("question tool").length - 1).toBe(1);
+    expect(text).toContain("You have no question tool");
+  });
+
+  it("the planner and the assistant answer a check at once", () => {
+    for (const agent of ["planner", "assistant"]) {
+      const text = flat(read(`agents/${agent}.md`));
+      expect(text, agent).toContain("Decision to check: plans/<x>.md.");
+      expect(text, agent).toContain("Checked: plans/<x>.md.");
+      expect(text, agent).toContain("answer at once with one `SendMessage` to that executor");
+      expect(text, agent).toMatch(/ask \$\{user_config\.owner\} nothing about it/i);
+    }
+  });
+
+  it("the assistant keeps the log", () => {
+    const text = flat(read("agents/assistant.md"));
+    expect(text).toContain('`plans/decisions-taken.md` ("Decisions taken")');
+    expect(text).toContain("`# Decisions taken for ${user_config.owner}, for his review`");
+    expect(text).toContain(
+      "`- plans/<x>.md, <the executor's name>: <the question>. Taken: <the option>. Checked with <chat's name>:",
+    );
+    expect(text).toContain('log what was taken ("Decisions taken")');
+  });
 });

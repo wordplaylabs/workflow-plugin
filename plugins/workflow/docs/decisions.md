@@ -109,6 +109,9 @@ on the machine that planned them.
   none.** (Javi, 31 October) Four follow-ups and several decisions went
   into a final message nobody acted on once the to-do page was gone.
   plans/agents-pass-messages-directly.md.
+  14 November: the ask size is gone, and a plan with a decision taken is
+  handed on like one with items (executor-never-waits).
+  plans/executor-never-waits.md.
 - `asked-in-plain-words` **A question to the owner is written for a
   reader on a phone with none of the chat in front of him.** (Javi, 28
   October) Apple's alerts (a title that says what it is about, buttons
@@ -462,6 +465,9 @@ on the machine that planned them.
   retires it and hands its plan over, as `plans end --now` does. Retakes
   "An executor is not touched" of plans/waiting-means-a-question.md for
   this case. plans/put-first-review-fixes.md.
+  14 November: a plan handed over too often goes to the assistant, and
+  the owner is not asked by the executor (executor-never-waits).
+  plans/executor-never-waits.md.
 - `starts-bounded` **Starts are bounded, as every loop over model calls
   is.** (Javi, 27 October) A queue that starts sessions on its own must
   not spend the subscription's window or loop on a session that dies.
@@ -558,6 +564,21 @@ on the machine that planned them.
   asked in two rounds keeps its hold until the last.
   plans/owner-questions-plain-and-once.md, plans/asking-window-ends.md,
   plans/asking-plan-held-by-path.md, plans/asking-plan-guarded.md.
+  14 November (Javi): a question the plan did not foresee is decided by
+  the executor, not asked in its session (executor-never-waits).
+  plans/executor-never-waits.md.
+- `executor-never-waits` **An executor never asks the owner and never
+  waits on him: what it would ask it decides by the recommended option,
+  checked with the plan's planner or the assistant, and logged for
+  him.** (Javi, 14 November) One checkout has one executor, so one open
+  question held every plan behind it, and a night's executors waited on
+  him for hours. Anthropic's prompting guidance has an agent take local,
+  reversible actions on its own and not the hard to reverse or shared
+  ones, here the four it never takes, and not discard unfamiliar files,
+  hence the stash. The consent is his standing word, not the peer's
+  answer, which only grounds a choice among the plan's own options. The
+  tool is taken away in the agent file, since an instruction is
+  advisory. plans/executor-never-waits.md.
 - `group-message` **A change to another person's part is built as any
   plan, marked `Touches <name>'s part`; no agent drafts a message for
   another person unless the owner asks for one.** (Javi, 2 November) He

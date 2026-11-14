@@ -263,7 +263,8 @@ to a Claude session left out>
   so in its sentence, `replacing <name>'s call`, and goes first
   (decisions.md#decision-has-a-name). A decision taken after thirty
   minutes unanswered says `taken for <the owner>, unanswered` in its
-  sentence. Then, last, a line per commit on the topic's branch that this
+  sentence, and one taken in place of a question (a `Taken on` line of
+  "Built") says `taken for <the owner>`. Then, last, a line per commit on the topic's branch that this
   checkout's plans do not account for (`git log
   origin/<base>..origin/<name> --format='%H%x09%an%x09%s'` after the
   push), as `- <the commit's title> (<author>)`, another person's merge

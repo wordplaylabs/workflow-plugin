@@ -112,6 +112,8 @@ import {
   stateOf,
   today,
   unreadPlans,
+  TAKEN_LOG,
+  writtenAt,
   withoutStatus,
   noAppWords,
   noSecretWords,
@@ -1166,15 +1168,22 @@ describe("plan-queue", () => {
       });
     });
 
-    it("starts a handed plan whatever the count, and asks about a stuck one instead", () => {
+    it("starts a handed plan whatever the count, and hands a stuck one to the assistant instead", () => {
       const handed = { path: "plans/h.md", stuck: false, resumed: [] };
       expect(decideStop({ handed: [handed], waiting: [plan("plans/a.md")] })).toEqual({
         handover: handed,
       });
       const stuck = { path: "plans/h.md", stuck: true, resumed: ["3", "3"] };
-      expect(decideStop({ handed: [stuck] })!.context).toContain("handed over twice at step 3");
+      const twice = decideStop({ handed: [stuck] })!.context!;
+      expect(twice).toContain("handed over twice at step 3");
       const six = { ...stuck, resumed: ["1", "2", "3", "4", "5", "6"] };
-      expect(decideStop({ handed: [six] })!.context).toContain("handed over 6 times");
+      const often = decideStop({ handed: [six] })!.context!;
+      expect(often).toContain("handed over 6 times");
+      // plans/executor-never-waits.md: no executor asks the owner.
+      for (const context of [twice, often]) {
+        expect(context).not.toContain("question tool");
+        expect(context).toContain("hand it to the assistant");
+      }
     });
 
     it("neither hands more nor retires a session with a plan of its own still being built", () => {
@@ -1699,6 +1708,43 @@ describe("plan-queue", () => {
     } finally {
       rmSync(join(repo, "plans", "x.md"));
       rmSync(join(repo, "plans", "y.md"), { recursive: true });
+    }
+  }, 30_000);
+
+  // plans/executor-never-waits.md: the assistant's log of decisions taken is not a plan.
+  it("leaves the log of decisions taken out of the files it cannot read", () => {
+    mkdirSync(join(repo, "plans"), { recursive: true });
+    writeFileSync(join(repo, "plans", "x.md"), "# Notes\n\nSome notes, no header.\n");
+    writeFileSync(
+      join(repo, "plans", "decisions-taken.md"),
+      "# Decisions taken for Javi, for his review\n\nKept by the assistant.\n",
+    );
+    // A plan stuck at one step is the assistant's, not a question to the owner (Codex C3).
+    writeFileSync(
+      join(repo, "plans", "stuck.md"),
+      `${header("24 October 2026")}## Handing over, 24 October 2026\n\nStep in hand: 3\n\n` +
+        "## Resumed, 24 October 2026, session s1, at step 3\n## Resumed, 24 October 2026, session s2, at step 3\n",
+    );
+    try {
+      const said = execFileSync("node", [join(here, "plan-queue.mjs"), "list"], {
+        encoding: "utf8",
+        env: { ...process.env, CLAUDE_PROJECT_DIR: repo },
+      });
+      expect(said).toMatch(/^Not read by the queue \(no header found\): plans\/x\.md$/m);
+      expect(said).not.toContain("decisions-taken");
+      expect(TAKEN_LOG).toBe("plans/decisions-taken.md");
+      expect(unreadPlans(join(repo, "plans")).headless).toEqual(["plans/x.md"]);
+      // An assistant that only logs a decision has written something (/code-review).
+      const log = join(repo, TAKEN_LOG);
+      expect(writtenAt([], log)).toBe(statSync(log).mtimeMs);
+      expect(writtenAt([{ state: "built", mtime: 1 }], join(repo, "plans", "none.md"))).toBe(0);
+      expect(writtenAt([{ state: "ready", mtime: 2 ** 50 }], log)).toBe(2 ** 50);
+      expect(said).toMatch(/plans\/stuck\.md .*stuck, the assistant takes it/);
+      expect(said).not.toContain("stuck, asks");
+    } finally {
+      rmSync(join(repo, "plans", "stuck.md"));
+      rmSync(join(repo, "plans", "x.md"));
+      rmSync(join(repo, "plans", "decisions-taken.md"));
     }
   }, 30_000);
 

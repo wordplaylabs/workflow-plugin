@@ -30,7 +30,7 @@ what the line says and nothing else in this chat.
   `status`, `diff`, `show`), the memory index, the readers the project
   file names.
 - Write only `plans/<topic>.md` (a short plan or a brief, one per
-  topic), a memory note with its index line for what the repository does
+  topic), `plans/decisions-taken.md` ("Decisions taken"), a memory note with its index line for what the repository does
   not record, what the project file's body allows, and, through
   `/workflow:setup` when asked, `.claude/workflow.md` and the
   `enabledPlugins` key of `.claude/settings.json`. Code, docs, commits,
@@ -170,7 +170,8 @@ the **Pull requests** heading, stacked without it, after the state:
 gets two exits.
 
 **Follow-ups.** On `Follow-ups ready: plans/<x>.md.`, read that plan
-whole, write `plans/<topic>-follow-up.md` naming it in its first line,
+whole, log what was taken ("Decisions taken"), then, for its items and
+any decision you would change, write `plans/<topic>-follow-up.md` naming it in its first line,
 or a brief for an item bigger than marked, and hand it on ("Handed to
 the assistant"). A change to a plan or brief a live planner holds (no
 Building line) goes to that chat by "What crosses chats"; after its
@@ -182,6 +183,33 @@ taken for ${user_config.owner} unanswered included ("Asked once").
 line, with `Dropped on ${user_config.owner}'s word: <why>.`; with an
 `Issue` line, `plans gh issue close <n> --reason "not planned"
 --comment "<the Dropped line>"`.
+
+## Decisions taken
+
+No executor asks ${user_config.owner} or waits on him ("An executor
+never waits on the owner"); what one would have asked reaches you.
+
+- **`Decision to check: plans/<x>.md.`**, from an executor mid-build:
+  read the part of the plan it names, judge the options by the plan, the
+  catalogue and the docs, and answer at once with one `SendMessage` to
+  that executor, `Checked: plans/<x>.md.`, then the option and why in a
+  clause: its option unless another it listed is better grounded. Ask
+  ${user_config.owner} nothing about it and write nothing.
+- **`Follow-ups ready: plans/<x>.md.`**, before the follow-ups: add to
+  `plans/decisions-taken.md`, under the day's `## <d Month yyyy>`
+  heading, newest day first, a line for each `Taken on` line of "Built",
+  the executor named by the message's sender,
+  `- plans/<x>.md, <the executor's name>: <the question>. Taken: <the option>. Checked with <chat's name>: <agreed | changed it from <option> | no answer>. <Cheap to undo by a short plan | Undoing it costs <what>>.`,
+  and for each "Decided" line the executor took unanswered ("Asked
+  once"), the same with `Checked with nobody: the planner's recommended option, unanswered for thirty minutes.`
+  One with no answer, or checked with nobody, you check now, as above,
+  and its line says `checked by the assistant after the build`; where
+  another option is better grounded, write the follow-up that changes it
+  and name it in the line.
+- **The file**, written when missing: `# Decisions taken for ${user_config.owner}, for his review`, then `Kept by the assistant. No executor asks ${user_config.owner} or waits on him: each decision one would have asked is taken by the recommended option, checked with the plan's planner or the assistant, and listed here, newest first. A different answer from him is a follow-up plan.`
+- **When he asks what was decided for him**, answer from the file and
+  send it with SendUserFile; a line he changes is a follow-up
+  ("Follow-ups"), and the line gains `Changed by ${user_config.owner}, <d Month>: plans/<y>.md.`
 
 ## GitHub issues
 
@@ -269,7 +297,8 @@ passed on: ask him ("Asked in plain words") with
 written for it, as for anything you ask here", and
 `Not that: I'll say it here`, "Nothing is written; say what you want in
 this chat"; on yes, write it, its "Decided" line ending `said in the
-planner's chat, confirmed here).` Any other message is reported, not
+planner's chat, confirmed here).` `Decision to check: plans/<x>.md.`
+is answered by "Decisions taken". Any other message is reported, not
 acted on.
 
 ## A short plan

@@ -42,7 +42,8 @@ where the record is (the plan's path, the pull request's link), in at
 most ten lines; a "Built" section opens with its landing line, then one
 line for the "Done when" lines that hold, with the commands run and
 their counts, one line per line that does not hold or was checked
-another way, the deviations, "Needs a decision", the Codex paragraph
+another way, the deviations, the decisions taken for the owner, "Needs
+a decision", the Codex paragraph
 and the Usage line, and nothing the plan already says.
 (decisions.md#report-is-short)
 
@@ -489,8 +490,8 @@ retires it and starts the next executor, judged at every stop while
 plans wait, the plans it was named included. A plan the usage limit cuts
 off, `plans end --now` ends, or whose executor a start finds with no
 process, is handed over (work committed, a
-"Handing over" section, stop); twice at the same step, or six times, the
-owner is asked.
+"Handing over" section, stop); twice at the same step, or six times, it
+is written "Built" with the item and handed to the assistant.
 (decisions.md#one-executor, decisions.md#context-cost,
 decisions.md#shared-is-what-is-held)
 
@@ -582,7 +583,8 @@ wrote until a Building line takes it.
 
 **Asked once.** A decision a plan leaves to the owner is asked by its
 planner, in its chat, and by nobody else; a question a plan did not
-foresee is asked in the executor's session. For thirty minutes from the
+foresee is decided by its executor, never asked ("An executor never
+waits on the owner"). For thirty minutes from the
 question the plan is the planner's: `plans` lists it under "Asking
 <owner>", no executor takes it, by default or by path, unless the owner
 says in its chat to build it now (his word goes in "Decided" first), and
@@ -592,9 +594,32 @@ sends it to the executor. Talking does not restart the window; another
 question does. A brief waiting on the planner's chat is not held by its
 question: it goes to a fresh planner within the window. Past it, or once the planner's chat has ended, the executor
 builds each undecided decision by its recommended option and writes it in
-"Decided" as taken for the owner, unanswered; a later, different answer is
+"Decided" as taken for the owner, unanswered, which the assistant lists
+in the log; a later, different answer is
 a follow-up plan. A planner the owner opened himself holds nothing.
 (decisions.md#asked-once)
+
+**An executor never waits on the owner.** It has no question tool, and
+no step of a build waits for his word. A question it would put to him (a
+decision the plan leaves open, one the plan did not foresee, a choice
+inside the plan that the build or a review turns up) it decides: by the
+plan's recommended option, or with none by the one the plan, the docs
+and the catalogue ground best, the cheapest to undo where they are
+silent. It sends the decision to be checked, `Decision to check:
+plans/<x>.md.`, to the plan's planner while `plans` lists that chat as
+holding the plan and not waiting for input, else to the assistant's
+chat, and goes on; the answer, `Checked: plans/<x>.md.`, read before the
+plan's commit, agrees or names another of its options, which is built
+instead. Each decision is a `Taken on <owner>'s standing word` line of
+"Built" and a line of the project's `plans/decisions-taken.md`, which
+the assistant keeps for the owner to read when he likes, checking itself
+any that went unchecked; a different word from him is a follow-up plan.
+Never decided this way: a merge, a push to the default or a production
+branch, a forced push, the reversal of a rule with a person's name, a
+change outside the plan; each is a "Needs a decision" item for the
+assistant. The planner and the assistant still ask him, since they hold
+no build; an incomplete install stops an executor as it stops any
+agent. (decisions.md#executor-never-waits)
 
 **The group's message.** A change to another person's part (a rule whose
 tier carries their name, or a thing **People** gives them) is built as

@@ -5634,7 +5634,7 @@ function firstDropped(input) {
   const line = firstHead(before)
     .split("\n")
     .find((one) => FIRST_MARK.test(one) && firstOf(one));
-  return `${path} is first (${firstWords({ first }).replace(/^first /, "")}): keep its line, ${line}, under the header paragraph. Only ${owner()}'s word takes it out: plans first --undo ${path}.`;
+  return `${path} is first (${firstWords({ first }).replace(/^first /, "")}): keep its line, ${line}, under the header paragraph, or above the ## section that header sits under. Only ${owner()}'s word takes it out: plans first --undo ${path}.`;
 }
 
 /**

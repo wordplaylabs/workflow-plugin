@@ -403,6 +403,9 @@ on the machine that planned them.
   times, so Claude Code's stale-file check does not see its write, and a
   planner that read the brief before the mark wrote its plan over it.
   And `plans first` takes one path. plans/put-first-review-fixes.md.
+  14 November: the refusal names where the queue reads the line, in the
+  rule's own words: under the header paragraph, or above the `## `
+  section that header sits under. plans/put-first-refusal-place.md.
 - `related-line` **In pull request mode, `plans` says what each brief and
   ready plan looks related to, and the author answers with a `Related`
   line.** (Javi, 30 October) GitHub links a `#<n>` and writes a backlink

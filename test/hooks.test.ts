@@ -9408,7 +9408,7 @@ describe("a plan put first, in a project", () => {
       });
     const denied = (out: string) =>
       out ? JSON.parse(out).hookSpecificOutput?.permissionDecisionReason || "" : "";
-    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, under the header paragraph. Only Javi's word takes it out: plans first --undo plans/x.md.`;
+    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, under the header paragraph, or above the ## section that header sits under. Only Javi's word takes it out: plans first --undo plans/x.md.`;
     // The plan written over the brief without the line.
     const planText = plan("13 November 2026");
     expect(denied(hook("Write", { content: planText }))).toBe(words);
@@ -9434,6 +9434,40 @@ describe("a plan put first, in a project", () => {
     expect(hook("Write", { content: planText })).toBe("");
     writeFileSync(file("x.md"), `${brief}\n## Dropped, 13 November 2026\n\nGone.\n`);
     expect(hook("Write", { content: planText })).toBe("");
+  });
+
+  it("the planner's tool hook names the place above a section the header sits under (plans/put-first-refusal-place.md)", () => {
+    reset();
+    const mark = "First: 13 November 2026 10:00:00.";
+    const header = "Plan only, 13 November 2026, for Javi; the executor builds it.";
+    const body = `## Context\n\nA note kept above the header.\n\n${header}\n\n## What was asked\n\nA change.\n`;
+    writeFileSync(file("x.md"), `# P\n\n${mark}\n\n${body}`);
+    const hook = (tool_name: string, tool_input: object) =>
+      queue(["tool"], {
+        session_id: ids.planner,
+        agent_type: "workflow:planner",
+        tool_name,
+        tool_input: { file_path: file("x.md"), ...tool_input },
+      });
+    const denied = (out: string) =>
+      out ? JSON.parse(out).hookSpecificOutput?.permissionDecisionReason || "" : "";
+    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, under the header paragraph, or above the ## section that header sits under. Only Javi's word takes it out: plans first --undo plans/x.md.`;
+    // The line dropped.
+    expect(denied(hook("Write", { content: `# P\n\n${body}` }))).toBe(words);
+    // The line moved under the header paragraph, inside the section, is not read there.
+    expect(
+      denied(
+        hook("Write", {
+          content: `# P\n\n${body.replace(`${header}\n`, `${header}\n\n${mark}\n`)}`,
+        }),
+      ),
+    ).toBe(words);
+    // The line put back above that section passes.
+    expect(
+      hook("Write", {
+        content: `# P\n\n${mark}\n\n${body.replace("A change.", "A change, said.")}`,
+      }),
+    ).toBe("");
   });
 
   it("plans first refuses what is not waiting", () => {

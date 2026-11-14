@@ -3538,12 +3538,7 @@ export function firstCommand(args = [], { now = Date.now(), live } = {}) {
     return { said: `${path} is being built by ${name}: nothing to put first.`, status: 1 };
   }
   const lines = withoutFirstLine(plan.text).split("\n");
-  // Under the header `stateOf` read the file by: a plan's own, never a
-  // brief's line kept above it (plans/put-first-review-fixes.md, part 1).
-  const [header, end] = headerEnd(
-    lines,
-    plan.kind === "Brief" ? /^Brief for the planner\b/ : PLAN_HEADER,
-  );
+  const { header, end, heading, above } = firstPlace(lines, plan.kind);
   if (header < 0)
     return { said: `${path} is not a plan or a brief in the queue; plans shows them.`, status: 1 };
   let said;
@@ -3577,13 +3572,10 @@ export function firstCommand(args = [], { now = Date.now(), live } = {}) {
     const day = `${when.getUTCDate()} ${MONTHS[when.getUTCMonth()]} ${when.getUTCFullYear()}`;
     const time = when.toISOString().slice(11, 19);
     const line = `First: ${day} ${time}.`;
-    // After the header paragraph, as `handOverEdit` places a hand-over; a
-    // header under a `## ` section of its own has it above that heading, where
-    // `firstHead` reads it (plans/put-first-review-fixes-follow-up.md), with
-    // a blank line after it only where one is before it, so --undo gives the
-    // file back byte for byte.
-    const heading = headEndAt(lines);
-    if (heading >= 0 && heading < header) {
+    // Where `firstPlace` says, with a blank line after it above a section
+    // only where one is before it, so --undo gives the file back byte for
+    // byte.
+    if (above) {
       if (heading === 0 || lines[heading - 1].trim() === "") lines.splice(heading, 0, line, "");
       else lines.splice(heading, 0, line);
     } else if (end < 0) lines.push("", line);
@@ -3594,6 +3586,26 @@ export function firstCommand(args = [], { now = Date.now(), live } = {}) {
   writeFileSync(file, lines.join("\n"));
   utimesSync(file, stat.atimeMs / 1000, stat.mtimeMs / 1000);
   return { said, status: 0 };
+}
+
+/**
+ * **Where `plans first` writes a file's First line** (decisions.md#plan-put-first):
+ * after the header paragraph, as `handOverEdit` places a hand-over, or, with
+ * `above`, when the header sits under a `## ` section, above that heading,
+ * where `firstHead` reads it (plans/put-first-review-fixes-follow-up.md). The
+ * header is the one `stateOf` read the file by, a plan's own, never a brief's
+ * line kept above it (plans/put-first-review-fixes.md, part 1). `lines` are
+ * the text's without its First line; `{ header, end, heading, above }`, the
+ * first two as `headerEnd` gives them, `heading` as `headEndAt` does. The
+ * planner's tool hook names the same place (plans/put-first-refusal-one-place.md).
+ */
+function firstPlace(lines, kind) {
+  const [header, end] = headerEnd(
+    lines,
+    kind === "Brief" ? /^Brief for the planner\b/ : PLAN_HEADER,
+  );
+  const heading = headEndAt(lines);
+  return { header, end, heading, above: heading >= 0 && heading < header };
 }
 
 /**
@@ -5622,19 +5634,34 @@ function planPath(file) {
  * queue would read no First line in, is refused with the line as it stands.
  * `plans first` keeps the file's times, so Claude Code's stale-file check
  * does not see its write; a line changed to another day the queue reads
- * passes. The words, or "".
+ * passes. The words, naming the one place `firstPlace` gives, or "".
  */
 function firstDropped(input) {
   const path = planPath(input.tool_input?.file_path);
   if (!path) return "";
   const before = planText(path);
   const first = firstOf(before);
-  if (!first || !WAITING_STATES.includes(stateOf(before)?.state)) return "";
-  if (firstOf(editedText(input.tool_name, input.tool_input, before))) return "";
+  const state = stateOf(before);
+  if (!first || !WAITING_STATES.includes(state?.state)) return "";
+  const after = editedText(input.tool_name, input.tool_input, before);
+  if (firstOf(after)) return "";
   const line = firstHead(before)
     .split("\n")
     .find((one) => FIRST_MARK.test(one) && firstOf(one));
-  return `${path} is first (${firstWords({ first }).replace(/^first /, "")}): keep its line, ${line}, under the header paragraph, or above the ## section that header sits under. Only ${owner()}'s word takes it out: plans first --undo ${path}.`;
+  // The one place that works, as `plans first` writes it, in the text being
+  // written, since a plan written over a brief can have its header under a
+  // section where the brief's was not (Codex C1); the file as it stands when
+  // the new text has no header the queue reads
+  // (plans/put-first-refusal-one-place.md).
+  const placeIn = (text, kind) => {
+    const place = kind ? firstPlace(withoutFirstLine(text).split("\n"), kind) : null;
+    return place && place.header >= 0 ? place : null;
+  };
+  const { above } = placeIn(after, stateOf(after)?.kind) || placeIn(before, state.kind) || {};
+  const place = above
+    ? "above the ## section that header sits under"
+    : "under the header paragraph";
+  return `${path} is first (${firstWords({ first }).replace(/^first /, "")}): keep its line, ${line}, ${place}. Only ${owner()}'s word takes it out: plans first --undo ${path}.`;
 }
 
 /**

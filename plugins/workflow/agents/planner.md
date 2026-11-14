@@ -125,7 +125,8 @@ Sources as its "Where to look".
      pull request or branch the brief or the context names that is a
      different thing on the same files.
    - The brief's `From: <Project>, <path>.` and `Issue: #<n>.` lines,
-     and its `First:` line, as it stands.
+     and its `First:` line, as it stands, under the header paragraph, or
+     above the `## ` section the header sits under.
    - `Touches <name>'s part (<what>).` at the head of "What was asked".
    When another person's open pull request already decides what the
    brief asks, ask once: build it as its own pull request (recommended),

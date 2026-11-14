@@ -9408,7 +9408,7 @@ describe("a plan put first, in a project", () => {
       });
     const denied = (out: string) =>
       out ? JSON.parse(out).hookSpecificOutput?.permissionDecisionReason || "" : "";
-    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, under the header paragraph, or above the ## section that header sits under. Only Javi's word takes it out: plans first --undo plans/x.md.`;
+    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, under the header paragraph. Only Javi's word takes it out: plans first --undo plans/x.md.`;
     // The plan written over the brief without the line.
     const planText = plan("13 November 2026");
     expect(denied(hook("Write", { content: planText }))).toBe(words);
@@ -9436,7 +9436,7 @@ describe("a plan put first, in a project", () => {
     expect(hook("Write", { content: planText })).toBe("");
   });
 
-  it("the planner's tool hook names the place above a section the header sits under (plans/put-first-refusal-place.md)", () => {
+  it("the planner's tool hook names the place above a section the header sits under (plans/put-first-refusal-one-place.md)", () => {
     reset();
     const mark = "First: 13 November 2026 10:00:00.";
     const header = "Plan only, 13 November 2026, for Javi; the executor builds it.";
@@ -9451,7 +9451,7 @@ describe("a plan put first, in a project", () => {
       });
     const denied = (out: string) =>
       out ? JSON.parse(out).hookSpecificOutput?.permissionDecisionReason || "" : "";
-    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, under the header paragraph, or above the ## section that header sits under. Only Javi's word takes it out: plans first --undo plans/x.md.`;
+    const words = `plans/x.md is first (since 13 November 10:00): keep its line, ${mark}, above the ## section that header sits under. Only Javi's word takes it out: plans first --undo plans/x.md.`;
     // The line dropped.
     expect(denied(hook("Write", { content: `# P\n\n${body}` }))).toBe(words);
     // The line moved under the header paragraph, inside the section, is not read there.
@@ -9468,6 +9468,14 @@ describe("a plan put first, in a project", () => {
         content: `# P\n\n${mark}\n\n${body.replace("A change.", "A change, said.")}`,
       }),
     ).toBe("");
+    // A plan with this shape written over a brief whose header is at the top
+    // is told the place in the plan it writes (Codex C1).
+    writeFileSync(
+      file("x.md"),
+      `# P\n\nBrief for the planner, 13 November 2026.\n\n${mark}\n\n## What\n\nA change.\n`,
+    );
+    expect(denied(hook("Write", { content: `# P\n\n${body}` }))).toBe(words);
+    expect(hook("Write", { content: `# P\n\n${mark}\n\n${body}` })).toBe("");
   });
 
   it("plans first refuses what is not waiting", () => {

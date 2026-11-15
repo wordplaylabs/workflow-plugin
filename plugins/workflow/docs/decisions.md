@@ -499,6 +499,13 @@ on the machine that planned them.
   project that asked runs its checks in about four, and its token
   cannot read a pull request's checks, so the Stop hook's read would
   bring nothing there. plans/app-old-registration-said.md.
+  15 November, later still: the Stop hook's read of checks falls to the
+  app's token when GitHub refuses the person's, since in the project
+  that asked the app could read them and the token could not; the
+  person's is tried first, because an app registered by the plugin's
+  line has no Checks and the handbook's token does. Refused by both, it
+  is said in `plans`, as `gh` names what a token lacks.
+  plans/checks-read-with-the-app.md.
   - ~~The checks are watched after every push and fixed before the
     next plan.~~ (Javi, 28 October)
 - `plans-reach-an-executor` **Ready plans never wait with no executor: a
@@ -691,6 +698,12 @@ on the machine that planned them.
   plans/failed-runs-the-webhook-misses.md.
   15 November: the listener reads what its app can send and, lacking
   failed runs, reads them itself. plans/app-old-registration-said.md.
+  15 November: a list `plans github` could not read is said and its
+  line held, where it was read as empty and passed; and a listener
+  started by an older copy is replaced by a newer one's start, as
+  Bazel's client stops a server of another version, since a listener
+  alive since before an update ran the old code for nine hours in the
+  project that asked. plans/checks-read-with-the-app.md.
 - `days-fixes` **The day's fixes are one pull request, `Small fixes, <d
   Month yyyy>`, never two in a day.** (Javi, 30 October) A daily pull
   request for the small fixes rather than a message for the group, which

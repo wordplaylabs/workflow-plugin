@@ -51,6 +51,8 @@ import {
   ghCommand,
   appLine,
   webhookLine,
+  unreadLines,
+  listenerOlder,
   secret,
   notesWaiting,
   marksReady,
@@ -4192,6 +4194,67 @@ describe("the queue's faults, closed", () => {
     writeFileSync(join(dir, "README"), "two\n");
     g(dir, "commit", "-q", "-am", "two");
     expect(stop(false)).toBe("");
+  });
+
+  // plans/checks-read-with-the-app.md, part 1: when GitHub refuses the person's token a pull
+  // request's checks and the project has an app that can read them, then the stop is refused as
+  // it is today; with no app, the refusal is written down and plans says it.
+  it("reads a pull request's checks with the app's token when the person's is refused", () => {
+    const dir = fixture("Checks", "land: pull-request\nrun: checks.yml\n");
+    writeFileSync(join(dir, "README"), "one\n");
+    g(dir, "add", ".");
+    g(dir, "commit", "-q", "-m", "one");
+    g(dir, "branch", "land-x");
+    g(dir, "remote", "add", "origin", "https://github.com/o/r.git");
+    const sha = g(dir, "rev-parse", "land-x");
+    const bin = temp("queue-gh-app-");
+    const answer = (refuse: boolean) =>
+      writeFileSync(
+        join(bin, "gh"),
+        `#!/bin/sh\ncase "$*" in *statusCheckRollup*) ${refuse ? `if [ "$GH_TOKEN" != "app-tok" ]; then echo "GraphQL: Resource not accessible by personal access token (repository.pullRequests.nodes.0)" >&2; exit 1; fi;; ` : ";;"} esac\nif [ "$1 $2" = "pr list" ]; then echo '[{"number":21,"url":"https://github.com/o/r/pull/21","headRefName":"land-x","headRefOid":"${sha}","statusCheckRollup":[{"__typename":"CheckRun","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/o/r/actions/runs/7/job/8"}]}]'; else echo '[]'; fi\n`,
+      );
+    answer(true);
+    chmodSync(join(bin, "gh"), 0o755);
+    writeFileSync(
+      join(dir, ".claude", "app-token.json"),
+      JSON.stringify({
+        token: "app-tok",
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        repo: "o/r",
+        app: "12",
+      }),
+    );
+    const env = {
+      PATH: `${bin}:${process.env.PATH}`,
+      GH_TOKEN: "person-tok",
+      WORKFLOW_GH: "",
+      WORKFLOW_SECRETS_FILE: "",
+      WORKFLOW_WEBHOOK_SECRET: "",
+    };
+    const app = { ...env, WORKFLOW_APP_ID: "12", WORKFLOW_APP_KEY: "key" };
+    const bare = { ...env, WORKFLOW_APP_ID: "", WORKFLOW_APP_KEY: "" };
+    const stop = (extra: Record<string, string>, id: string) =>
+      runIn(dir, ["stop"], extra, { session_id: `${id}-${process.pid}`, agent_type: "executor" });
+    const seenFile = join(dir, ".claude", "github-seen.json");
+    const seen = () => (existsSync(seenFile) ? JSON.parse(readFileSync(seenFile, "utf8")) : {});
+    const refused = stop(app, "checks-app");
+    expect(refused).toContain('"decision":"block"');
+    expect(refused).toContain("pull request #21");
+    expect(refused).toContain("have failed, and no webhook brings that to the assistant here.");
+    expect(seen().checksUnread).toBeUndefined();
+    // No app: the stop passes, and the refusal is written down and said.
+    expect(stop(bare, "checks-bare")).toBe("");
+    expect(seen().checksUnread.why).toBe(
+      "GraphQL: Resource not accessible by personal access token",
+    );
+    expect(runIn(dir, ["list"], bare)).toMatch(
+      /\nGitHub: the pull requests' checks could not be read at \d\d:\d\d \(GraphQL: Resource not accessible by personal access token\), so the Stop hook names no failed check; GH_TOKEN needs Checks and Commit statuses read\.\n/,
+    );
+    // A later stop whose token is answered takes it away.
+    answer(false);
+    expect(stop(bare, "checks-later")).toContain("pull request #21");
+    expect(seen().checksUnread).toBeUndefined();
+    expect(runIn(dir, ["list"], bare)).not.toContain("could not be read");
   });
 
   describe("the lock", () => {
@@ -9034,6 +9097,7 @@ else if (args[0] === "run" && args[1] === "list") {
     workflowName: "Checks", updatedAt: "2026-11-14T21:04:00Z", url: "https://github.com/o/r/actions/runs/5" }]);
 }
 else if (args[0] === "api" && /collaborators/.test(args[1])) process.stdout.write("write");
+else if (args[0] === "api" && args[1].endsWith("pulls/40/comments") && process.env.NOTES_FAIL) process.exit(1);
 else say([]);
 `,
             );
@@ -9054,6 +9118,11 @@ else say([]);
                   ...extra,
                 },
               }).stdout;
+            // Its review comments unread, the pull request's comment waits with them, so the
+            // next read does not pass a review comment older than it (/code-review).
+            const notes = github({ NOTES_FAIL: "1", RUNS_FAIL: "1" });
+            expect(notes).not.toContain("by anton");
+            expect(notes).toContain("GitHub: could not read the review comments of #40 (");
             // A run list that fails reads the comment and does not pass the run it missed (Codex).
             const unread = github({ RUNS_FAIL: "1" });
             expect(unread).toMatch(/GitHub: #40 \w+ by anton, noted/);
@@ -9069,6 +9138,111 @@ else say([]);
             const calls = readFileSync(asked, "utf8");
             expect(calls).toContain(`run list --branch series-order --commit ${sha}`);
             expect(calls).not.toContain("statusCheckRollup");
+          } finally {
+            rmSync(read, { recursive: true, force: true });
+          }
+        },
+      );
+
+      // plans/checks-read-with-the-app.md, part 2: when a read of plans github fails, then plans
+      // github and plans say which list and why, and the read's lines hold.
+      it(
+        "plans github says a list GitHub refused, and holds its lines",
+        { timeout: 60_000 },
+        () => {
+          const read = mkdtempSync(join(tmpdir(), "unread-"));
+          try {
+            execFileSync("git", ["init", "-q"], { cwd: read });
+            execFileSync("git", ["remote", "add", "origin", "https://github.com/o/r.git"], {
+              cwd: read,
+            });
+            mkdirSync(join(read, ".claude"));
+            mkdirSync(join(read, "plans"));
+            writeFileSync(
+              join(read, ".claude", "workflow.md"),
+              "---\nname: Runs\nbranch: test\nland: pull-request\n---\n\n# Runs\n",
+            );
+            writeFileSync(
+              join(read, "plans", "series-order.md"),
+              "# Series\n\nPlan only, 14 November 2026, for Javi.\n\n## Built, 14 November 2026\n\nPull request #40 (https://github.com/o/r/pull/40) to test from branch series-order, commit 4f1c2b9a; draft.\n",
+            );
+            const gh = join(stubDir, "gh-unread");
+            writeFileSync(
+              gh,
+              `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const say = (value) => process.stdout.write(JSON.stringify(value));
+if (args[0] === "pr" && args[1] === "list") {
+  if (process.env.REFUSE_PR) {
+    process.stderr.write("GraphQL: Resource not accessible by personal access token (repository.pullRequests)\\n");
+    process.exit(1);
+  }
+  say([{ number: 40, title: "Series", url: "https://github.com/o/r/pull/40",
+    headRefName: "series-order", headRefOid: "4f1c2b9a", comments: [], reviews: [] }]);
+} else if (args[0] === "run" && args[1] === "list") {
+  if (process.env.REFUSE_RUN) {
+    process.stderr.write("HTTP 403: Resource not accessible by integration (https://api.github.com/x)\\n");
+    process.exit(1);
+  }
+  say([]);
+} else say([]);
+`,
+            );
+            chmodSync(gh, 0o755);
+            const seenFile = join(read, ".claude", "github-seen.json");
+            const before = {
+              readAt: "2026-11-14T00:00:00.000Z",
+              runsReadAt: "2026-11-13T00:00:00.000Z",
+            };
+            writeFileSync(seenFile, JSON.stringify(before));
+            const run = (args: string[], extra: Record<string, string> = {}) =>
+              spawnSync("node", [join(here, "plan-queue.mjs"), ...args], {
+                encoding: "utf8",
+                env: {
+                  ...env(),
+                  WORKFLOW_ROOT: read,
+                  CLAUDE_PROJECT_DIR: read,
+                  WORKFLOW_GH: gh,
+                  WORKFLOW_WEBHOOK_SECRET: "",
+                  WORKFLOW_SECRETS_FILE: "",
+                  ...extra,
+                },
+              }).stdout;
+            const seenNow = () => JSON.parse(readFileSync(seenFile, "utf8"));
+            const refusedLine =
+              "GitHub: could not read the open pull requests (GraphQL: Resource not accessible by personal access token).";
+            // A dry read says it and writes nothing.
+            const dry = run(["github", "--dry"], { REFUSE_PR: "1" });
+            expect(dry).toContain(refusedLine);
+            expect(dry).not.toContain("nothing new");
+            expect(seenNow()).toEqual(before);
+            const refused = run(["github"], { REFUSE_PR: "1" });
+            expect(refused.trim()).toBe(refusedLine);
+            let seen = seenNow();
+            expect(seen.readAt).toBe(before.readAt);
+            expect(seen.runsReadAt).toBe(before.runsReadAt);
+            expect(seen.unread.said).toEqual([
+              "the open pull requests (GraphQL: Resource not accessible by personal access token)",
+            ]);
+            expect(run(["list"])).toMatch(
+              /\nGitHub: the read at \d\d:\d\d could not read the open pull requests \(GraphQL: Resource not accessible by personal access token\); plans github reads again\.\n/,
+            );
+            // The pull requests read, a run list refused: today's held runs' line, now said.
+            const runs = run(["github"], { REFUSE_RUN: "1" });
+            expect(runs.trim()).toBe(
+              "GitHub: could not read the runs of #40 (HTTP 403: Resource not accessible by integration).",
+            );
+            seen = seenNow();
+            expect(seen.readAt > before.readAt).toBe(true);
+            expect(seen.runsReadAt).toBe(before.runsReadAt);
+            expect(run(["list"])).toContain("could not read the runs of #40 (HTTP 403");
+            // Everything read: nothing unread, both lines moved, nothing said of it.
+            expect(run(["github"]).trim()).toBe("GitHub: nothing new.");
+            seen = seenNow();
+            expect(seen.unread).toBeUndefined();
+            expect(seen.runsReadAt > before.runsReadAt).toBe(true);
+            expect(seen.readAt).toBe(seen.runsReadAt);
+            expect(run(["list"])).not.toContain("could not read");
           } finally {
             rmSync(read, { recursive: true, force: true });
           }
@@ -9239,6 +9413,45 @@ else say([]);
       expect(plans("webhook", "--stop").stdout.trim()).toBe("The webhook: stopped.");
     });
 
+    // plans/checks-read-with-the-app.md, part 3: when a chat starts in a project whose listener
+    // was started by an older copy, then that listener is stopped and this copy's takes its place.
+    it("listenerOlder is true for no code or a lower one, false for an equal or higher", () => {
+      expect(listenerOlder({ pid: 1, port: 1 }, 100)).toBe(true);
+      expect(listenerOlder({ pid: 1, port: 1, code: 99 }, 100)).toBe(true);
+      expect(listenerOlder({ pid: 1, port: 1, code: 100 }, 100)).toBe(false);
+      expect(listenerOlder({ pid: 1, port: 1, code: 101 }, 100)).toBe(false);
+    });
+
+    it("replaces a listener an older copy started, and leaves one of its own copy", async () => {
+      const code = statSync(join(here, "plan-queue.mjs")).mtimeMs;
+      expect(plans("webhook").status).toBe(0);
+      const first = record();
+      expect(first.code).toBe(code);
+      // Its own copy's: left, its pid unchanged.
+      expect(plans("webhook").status).toBe(0);
+      expect(record().pid).toBe(first.pid);
+      // An older copy's, by a lower code: stopped, and another started with this copy's.
+      writeFileSync(
+        join(dir, ".claude", "webhook.json"),
+        JSON.stringify({ ...first, code: code - 1000 }),
+      );
+      const again = plans("webhook");
+      expect(again.status).toBe(0);
+      expect(again.stdout).toMatch(new RegExp(`^The webhook: listening on ${port} since `));
+      const second = record();
+      expect(second.pid).not.toBe(first.pid);
+      expect(second.code).toBe(code);
+      await new Promise((done) => setTimeout(done, 300));
+      expect(() => process.kill(first.pid, 0)).toThrow();
+      // One with no code at all, as every listener before this copy wrote: replaced too.
+      const { code: _drop, ...bare } = second;
+      writeFileSync(join(dir, ".claude", "webhook.json"), JSON.stringify(bare));
+      expect(plans("webhook").status).toBe(0);
+      expect(record().pid).not.toBe(second.pid);
+      expect(record().code).toBe(code);
+      expect(plans("webhook", "--stop").stdout.trim()).toBe("The webhook: stopped.");
+    });
+
     it("exits 1 when no listener is up after the wait", async () => {
       // The port taken by another server, so the listener cannot bind it.
       const taken = createServer();
@@ -9284,6 +9497,35 @@ describe("an app that sends no failed run", () => {
     );
     expect(webhookLine({ ...record, lastAt: Date.now(), lacks: installation })).toMatch(
       /, last delivery \d\d:\d\d; the app sends no failed run \(its new permissions are not accepted\), so they are read every five minutes\.$/,
+    );
+  });
+
+  // plans/checks-read-with-the-app.md, parts 1 and 2.
+  it("unreadLines says a list or the checks GitHub would not give, and nothing without", () => {
+    expect(unreadLines({})).toEqual([]);
+    expect(unreadLines({ readAt: "2026-11-15T09:00:00.000Z", runs: [] })).toEqual([]);
+    const at = "2026-11-15T09:12:00.000Z";
+    const [read] = unreadLines({
+      unread: {
+        at,
+        said: [
+          "the open pull requests (GraphQL: Resource not accessible by personal access token)",
+          "the runs of #132 and #118 (out of time)",
+        ],
+      },
+    });
+    expect(read).toMatch(
+      /^GitHub: the read at \d\d:\d\d could not read the open pull requests \(GraphQL: Resource not accessible by personal access token\); the runs of #132 and #118 \(out of time\); plans github reads again\.$/,
+    );
+    const lines = unreadLines({
+      checksUnread: {
+        at: Date.parse(at),
+        why: "GraphQL: Resource not accessible by personal access token",
+      },
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^GitHub: the pull requests' checks could not be read at \d\d:\d\d \(GraphQL: Resource not accessible by personal access token\), so the Stop hook names no failed check; GH_TOKEN needs Checks and Commit statuses read\.$/,
     );
   });
 

@@ -4312,6 +4312,10 @@ export function list({ all = false, live, related = true, readers = null } = {})
     (proj().found && proj().land === "pull-request" && secret("WORKFLOW_WEBHOOK_SECRET"))
   )
     out.push(webhookLine());
+  // **What GitHub would not give**, with pull requests, a webhook or none:
+  // with none the Stop hook's read is the only route (plans/checks-read-
+  // with-the-app.md, part 2).
+  if (proj().found && proj().land === "pull-request") out.push(...unreadLines(readSeen()));
   // **Leftover worktrees are seen** (plans/queue-sees-worktree-executor.md):
   // a background executor works in one, and a retired one leaves it behind.
   const under = join(root, ".claude", "worktrees") + "/";
@@ -4653,21 +4657,19 @@ export function otherServices(rollup = []) {
  */
 function pullChecks({ brought = false } = {}) {
   try {
-    const out = execFileSync(
-      "gh",
-      [
-        "pr",
-        "list",
-        "--state",
-        "open",
-        // Past fifty, so a busy repository's own pull request is still read.
-        "--limit",
-        "200",
-        "--json",
-        "number,url,headRefName,headRefOid,statusCheckRollup",
-      ],
-      { cwd: root, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"] },
-    );
+    const { out, why } = checksRead([
+      "pr",
+      "list",
+      "--state",
+      "open",
+      // Past fifty, so a busy repository's own pull request is still read.
+      "--limit",
+      "200",
+      "--json",
+      "number,url,headRefName,headRefOid,statusCheckRollup",
+    ]);
+    noteChecksUnread(out === null ? why : null);
+    if (out === null) throw new Error(why);
     // The local branches at their commits, in one call; a pull request whose
     // head is none of them is another person's.
     const local = new Map(
@@ -4706,6 +4708,50 @@ function pullChecks({ brought = false } = {}) {
   } catch {
     process.stderr.write("plan-queue: the pull requests' checks could not be read (gh)\n");
     return null;
+  }
+}
+
+/**
+ * **The checks read with the person's token, then the app's**
+ * (plans/checks-read-with-the-app.md, part 1): `gh` on the person's token
+ * and, when GitHub refuses it and the project has an app, again as `plans
+ * gh`, the one way the queue calls as the app. `{ out, why }`, `out` null
+ * when both failed and `why` the first failure's reason. Eight seconds each,
+ * so both fit the Stop hook's ninety in hooks.json with the rest of the hook.
+ */
+function checksRead(args) {
+  const person = ghAsk(args, 8000);
+  if (person.out !== null) return person;
+  const { why } = person;
+  if (!secret("WORKFLOW_APP_ID") || !secret("WORKFLOW_APP_KEY")) return { out: null, why };
+  try {
+    const out = execFileSync(process.execPath, [fileURLToPath(import.meta.url), "gh", ...args], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 8000,
+      env: { ...process.env, WORKFLOW_ROOT: root },
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return { out, why: "" };
+  } catch {
+    return { out: null, why };
+  }
+}
+
+/**
+ * The seen file's `checksUnread`: set to `why` when the checks could not be
+ * read, removed when they were (null); written only when it changes, never
+ * at every stop.
+ */
+function noteChecksUnread(why) {
+  const seen = readJson(files.githubSeen()) || {};
+  if (why === null ? !seen.checksUnread : seen.checksUnread?.why === why) return;
+  const next = { ...seen, checksUnread: { at: Date.now(), why } };
+  if (why === null) delete next.checksUnread;
+  try {
+    writeJson(files.githubSeen(), next);
+  } catch {
+    // A checkout it cannot write: the stderr line stands.
   }
 }
 
@@ -6509,6 +6555,61 @@ function dropWebhookRecord(seen) {
   }
 }
 
+/**
+ * **The copy of the plugin this is**: when this `plan-queue.mjs` was
+ * written. Each installed version is its own folder, written when it was
+ * installed, so a later version's is higher (plans/checks-read-with-the-
+ * app.md, part 3).
+ */
+function codeStamp() {
+  return statSync(fileURLToPath(import.meta.url)).mtimeMs;
+}
+
+/** Whether a listener's record was written by an older copy than `code`: none named, or lower. */
+export function listenerOlder(record, code = codeStamp()) {
+  return !record?.code || record.code < code;
+}
+
+/**
+ * **A listener of an older copy is replaced** (plans/checks-read-with-the-
+ * app.md, part 3, as Bazel's client stops a server of another version):
+ * when `alive` was started by an older copy, it is stopped and its record
+ * removed, as `--stop` does, and true is returned once its port is free
+ * (two seconds at most), so the new one can take it. Only an older one, so
+ * two chats on two versions do not take turns stopping each other's.
+ */
+async function replaceOlder(alive) {
+  if (!listenerOlder(alive) || !ourListener(alive.pid)) return false;
+  try {
+    process.kill(alive.pid);
+  } catch (error) {
+    // Another user's process is not ours to stop; one gone already is.
+    if (error.code === "EPERM") return false;
+  }
+  const until = Date.now() + 2000;
+  while ((await portAnswers(alive.port)) && Date.now() < until)
+    await new Promise((done) => setTimeout(done, 100));
+  // Still answering, it keeps its record, so `plans` and `--stop` still find it (/code-review).
+  if (await portAnswers(alive.port)) return false;
+  dropWebhookRecord(alive);
+  return true;
+}
+
+/**
+ * Whether `pid` runs a listener of the queue's, by its command line where
+ * the system shows one (`/proc`); elsewhere taken as one. A pid a reboot
+ * gave another process is not stopped by a start (/code-review).
+ */
+function ourListener(pid) {
+  let line;
+  try {
+    line = readFileSync(`/proc/${pid}/cmdline`, "utf8");
+  } catch {
+    return !existsSync("/proc/self/cmdline");
+  }
+  return line.includes("plan-queue.mjs") && line.includes("webhook");
+}
+
 /** `plans`'s webhook line, in a project with issues: listening or none. */
 export function webhookLine(record = webhookAlive()) {
   if (!record) return "The webhook: none; plans webhook starts it.";
@@ -6538,7 +6639,8 @@ export async function armWebhook(env = process.env) {
   if (!proj().found || proj().land !== "pull-request" || !secret("WORKFLOW_WEBHOOK_SECRET", env))
     return 0;
   const seen = readJson(files.webhook());
-  if (await webhookListening()) return 0;
+  const alive = await webhookListening();
+  if (alive && !(await replaceOlder(alive))) return 0;
   dropWebhookRecord(seen);
   return detached(process.execPath, [fileURLToPath(import.meta.url), "webhook", "--serve"], {
     ...env,
@@ -6558,16 +6660,45 @@ export function githubContext(plans = readPlans(join(root, "plans"))) {
 
 /** `gh` for a read, the person's token: the queue's reads, as `openPulls` does. */
 function ghRead(args, timeout, env = process.env) {
+  return ghAsk(args, timeout, env).out;
+}
+
+/**
+ * `gh` for a read that is said when it fails (plans/checks-read-with-the-
+ * app.md, part 2): `{ out, why }`, `out` null and `why` GitHub's reason
+ * (`whyOf`) when the call fails.
+ */
+function ghAsk(args, timeout, env = process.env) {
   try {
-    return execFileSync(env.WORKFLOW_GH || "gh", args, {
+    const out = execFileSync(env.WORKFLOW_GH || "gh", args, {
       cwd: root,
       encoding: "utf8",
       timeout,
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
-  } catch {
-    return null;
+    return { out, why: "" };
+  } catch (error) {
+    return { out: null, why: whyOf(error, timeout) };
   }
+}
+
+/**
+ * **Why a `gh` call failed, in GitHub's words**: the first line `gh` wrote
+ * on stderr, cut before its first " (" (the GraphQL path after it) and at
+ * 120 characters, its last period dropped; "no answer in <n> seconds" when
+ * its timeout killed it; the error's own first line when `gh` wrote nothing.
+ */
+export function whyOf(error, timeout = 0) {
+  if (error?.code === "ETIMEDOUT")
+    return `no answer in ${Math.max(1, Math.round(timeout / 1000))} seconds`;
+  const first = (text) =>
+    String(text || "")
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean) || "";
+  const line = first(error?.stderr) || first(error?.message) || "no answer";
+  const cut = line.indexOf(" (");
+  return (cut > 0 ? line.slice(0, cut) : line).slice(0, 120).trim().replace(/\.$/, "");
 }
 
 /**
@@ -6733,6 +6864,19 @@ function readSeen() {
 }
 
 /**
+ * The seen file written by a read, with the Stop hook's `checksUnread` as it
+ * is on disk now, not as the read found it seconds before: the Stop hook
+ * alone sets it (Codex).
+ */
+function writeSeen(next) {
+  const { checksUnread } = readJson(files.githubSeen()) || {};
+  const kept = { ...next };
+  delete kept.checksUnread;
+  if (checksUnread) kept.checksUnread = checksUnread;
+  writeJson(files.githubSeen(), kept);
+}
+
+/**
  * Items and the seen file through `githubEvents`, the permissions read first,
  * then handled. With issues off only failed runs make events
  * (`failedOnly`); a failed run whose pull request GitHub left out is given
@@ -6770,7 +6914,7 @@ async function act(items, { deadline = Date.now() + 25_000, dry = false } = {}) 
   const { events, seen: next } = githubEvents(seen, items, context);
   const { said, seen: kept } = await handleEvents(events, next, { dry });
   // A dry run changes nothing on disk, so the real one still sees it all (/code-review).
-  if (!dry) writeJson(files.githubSeen(), kept);
+  if (!dry) writeSeen(kept);
   return said;
 }
 
@@ -6844,7 +6988,31 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
   // that fails or runs out of time does not pass a failure it missed (Codex).
   const runsSince = seen.runsReadAt ?? since;
   const newerRun = (at) => !runsSince || (at && at > runsSince);
-  let runsRead = true;
+  // **A list it could not read is said, and its line holds**
+  // (plans/checks-read-with-the-app.md, part 2): each failed read is kept by
+  // its name and GitHub's reason, and the lines below move only past what
+  // was read. `runs` is a run list, `pulls` the open pull requests, which
+  // hold both lines, anything else `readAt` alone.
+  const unread = [];
+  const listOf = (name, line, args, most) => {
+    if (Date.now() >= deadline) {
+      unread.push({ name, line, why: "out of time" });
+      return null;
+    }
+    const { out, why } = ghAsk(args, left(deadline, most));
+    if (out === null) {
+      unread.push({ name, line, why });
+      return null;
+    }
+    try {
+      const list = JSON.parse(out || "[]");
+      if (Array.isArray(list)) return list;
+    } catch {
+      // Said below, as unread.
+    }
+    unread.push({ name, line, why: "an answer that is not JSON" });
+    return null;
+  };
   // What changed since the last read, not the newest fifty (/code-review).
   const searched = (what) => (since ? ["--search", `${what}:>=${since.slice(0, 19)}Z`] : []);
   // With issues off, the queue's own pull requests' failed runs alone
@@ -6852,22 +7020,22 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
   const issuesOn = hasIssues();
   const issues = !issuesOn
     ? []
-    : JSON.parse(
-        ghRead(
-          [
-            "issue",
-            "list",
-            "--state",
-            "open",
-            "--limit",
-            "100",
-            ...searched("updated"),
-            "--json",
-            "number,title,labels,author,createdAt,updatedAt,url,body,comments",
-          ],
-          left(deadline, 10_000),
-        ) || "[]",
-      );
+    : listOf(
+        "the open issues",
+        "read",
+        [
+          "issue",
+          "list",
+          "--state",
+          "open",
+          "--limit",
+          "100",
+          ...searched("updated"),
+          "--json",
+          "number,title,labels,author,createdAt,updatedAt,url,body,comments",
+        ],
+        10_000,
+      ) || [];
   const plans = readPlans(join(root, "plans"));
   const context = githubContext(plans);
   for (const issue of issues) {
@@ -6909,8 +7077,10 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
           url: comment.url || issue.url,
         });
   }
-  const pulls = JSON.parse(
-    ghRead(
+  const pulls =
+    listOf(
+      "the open pull requests",
+      "pulls",
       [
         "pr",
         "list",
@@ -6923,9 +7093,8 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
         // (plans/failed-runs-the-webhook-misses.md, part 2).
         "number,title,url,headRefName,headRefOid,comments,reviews",
       ],
-      left(deadline, 10_000),
-    ) || "[]",
-  );
+      10_000,
+    ) || [];
   const own = new Set(context.own);
   for (const pull of pulls) {
     if (!own.has(pull.number) && !own.has(pull.headRefName)) continue;
@@ -6939,32 +7108,24 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
     };
     // The head commit's runs alone, so a busy branch's older runs do not
     // crowd a failed one out (Codex).
-    const out =
-      Date.now() < deadline
-        ? ghRead(
-            [
-              "run",
-              "list",
-              "--branch",
-              pull.headRefName,
-              "--commit",
-              pull.headRefOid,
-              "--limit",
-              "100",
-              "--json",
-              "databaseId,attempt,status,conclusion,headSha,workflowName,updatedAt,url",
-            ],
-            left(deadline, 5000),
-          )
-        : null;
-    let runs = null;
-    try {
-      runs = out === null ? null : JSON.parse(out || "[]");
-    } catch {
-      // Unread, as a failed call.
-    }
-    if (Array.isArray(runs)) items.push(...failedRunsOf(pull, base, runs, newerRun));
-    else runsRead = false;
+    const runs = listOf(
+      `the runs of #${pull.number}`,
+      "runs",
+      [
+        "run",
+        "list",
+        "--branch",
+        pull.headRefName,
+        "--commit",
+        pull.headRefOid,
+        "--limit",
+        "100",
+        "--json",
+        "databaseId,attempt,status,conclusion,headSha,workflowName,updatedAt,url",
+      ],
+      5000,
+    );
+    if (runs) items.push(...failedRunsOf(pull, base, runs, newerRun));
     if (!issuesOn) continue;
     for (const comment of pull.comments || [])
       if (newer(comment.createdAt))
@@ -6984,43 +7145,50 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
           at: review.submittedAt,
           text: review.body || "",
         });
-    if (Date.now() < deadline) {
-      const notes = JSON.parse(
-        ghRead(
-          ["api", `repos/{owner}/{repo}/pulls/${pull.number}/comments`],
-          left(deadline, 5000),
-        ) || "[]",
-      );
-      for (const note of notes)
-        if (newer(note.created_at))
-          items.push({
-            ...base,
-            kind: "review",
-            author: note.user?.login || "",
-            at: note.created_at,
-            text: note.body || "",
-            url: note.html_url || pull.url,
-          });
+    const notes = listOf(
+      `the review comments of #${pull.number}`,
+      "read",
+      ["api", `repos/{owner}/{repo}/pulls/${pull.number}/comments`],
+      5000,
+    );
+    // Unread, the pull request's comments and reviews wait for the next read
+    // too: one told now would move its last seen past the review comment
+    // missed, and `githubEvents` would pass that (/code-review).
+    if (!notes) {
+      for (let at = items.length - 1; at >= 0; at--)
+        if (items[at].number === pull.number && items[at].pull && items[at].kind !== "failed")
+          items.splice(at, 1);
+      continue;
     }
+    for (const note of notes)
+      if (newer(note.created_at))
+        items.push({
+          ...base,
+          kind: "review",
+          author: note.user?.login || "",
+          at: note.created_at,
+          text: note.body || "",
+          url: note.html_url || pull.url,
+        });
   }
   const merged = !issuesOn
     ? []
-    : JSON.parse(
-        ghRead(
-          [
-            "pr",
-            "list",
-            "--state",
-            "merged",
-            "--limit",
-            "100",
-            ...searched("merged"),
-            "--json",
-            "number,title,url,body,mergedAt,mergedBy,headRefName",
-          ],
-          left(deadline, 10_000),
-        ) || "[]",
-      );
+    : listOf(
+        "the merged pull requests",
+        "read",
+        [
+          "pr",
+          "list",
+          "--state",
+          "merged",
+          "--limit",
+          "100",
+          ...searched("merged"),
+          "--json",
+          "number,title,url,body,mergedAt,mergedBy,headRefName",
+        ],
+        10_000,
+      ) || [];
   for (const pull of merged)
     if (newer(pull.mergedAt))
       items.push({
@@ -7038,13 +7206,68 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
       });
   items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
   const said = await act([...items, ...inboxItems(seen)], { deadline, dry });
-  if (!dry && !inbox)
-    writeJson(files.githubSeen(), {
+  // Unmoved, `runsReadAt` keeps the line it read from, so a `readAt` that
+  // moves does not carry the runs past what they missed.
+  const readOk = !unread.some((one) => one.line !== "runs");
+  const runsOk = !unread.some((one) => one.line !== "read");
+  const groups = unreadSaid(unread);
+  if (!dry && !inbox) {
+    const next = {
       ...readSeen(),
-      readAt: began,
-      runsReadAt: runsRead ? began : runsSince,
-    });
-  return said.length ? said : ["GitHub: nothing new."];
+      readAt: readOk ? began : seen.readAt,
+      runsReadAt: runsOk ? began : runsSince,
+      unread: { at: began, said: groups },
+    };
+    if (!groups.length) delete next.unread;
+    writeSeen(next);
+  }
+  const all = [...said, ...groups.map((group) => `GitHub: could not read ${group}.`)];
+  return all.length ? all : ["GitHub: nothing new."];
+}
+
+/**
+ * **The lists a read could not get, said** (plans/checks-read-with-the-
+ * app.md, part 2): grouped by their reason, in the order met, each group
+ * `<names> (<why>)`, one kind's pull requests joined ("the runs of #132 and
+ * #118").
+ */
+export function unreadSaid(unread = []) {
+  const groups = new Map();
+  for (const { name, why } of unread) {
+    if (!groups.has(why)) groups.set(why, []);
+    groups.get(why).push(name);
+  }
+  return [...groups].map(([why, names]) => {
+    const kinds = new Map();
+    for (const name of names) {
+      const [, kind, number] = name.match(/^(.* of) (#\d+)$/) || [null, name, null];
+      if (!kinds.has(kind)) kinds.set(kind, []);
+      if (number) kinds.get(kind).push(number);
+    }
+    const said = [...kinds].map(([kind, numbers]) =>
+      numbers.length ? `${kind} ${andList(numbers)}` : kind,
+    );
+    return `${andList(said)} (${why})`;
+  });
+}
+
+/**
+ * **`plans`'s lines for what GitHub would not give** (plans/checks-read-
+ * with-the-app.md, parts 1 and 2): the lists the last `plans github` could
+ * not read, and the pull requests' checks the Stop hook could not, each
+ * while it holds.
+ */
+export function unreadLines(seen = {}) {
+  const out = [];
+  if (seen.unread?.said?.length)
+    out.push(
+      `GitHub: the read at ${hhmm(seen.unread.at)} could not read ${seen.unread.said.join("; ")}; plans github reads again.`,
+    );
+  if (seen.checksUnread)
+    out.push(
+      `GitHub: the pull requests' checks could not be read at ${hhmm(seen.checksUnread.at)} (${seen.checksUnread.why}), so the Stop hook names no failed check; GH_TOKEN needs Checks and Commit statuses read.`,
+    );
+  return out;
 }
 
 /**
@@ -7139,7 +7362,7 @@ export async function webhookCommand(
   if (!webhookSecret) return { said: noSecretWords(env), status: 1 };
   const seen = readJson(files.webhook());
   const alive = await webhookListening();
-  if (alive) return { said: webhookLine(alive), status: 0 };
+  if (alive && !(await replaceOlder(alive))) return { said: webhookLine(alive), status: 0 };
   const port = webhookPort(env);
   if (!args.includes("--serve")) {
     // The listener writes its own record once it listens, so only the starter
@@ -7158,7 +7381,7 @@ export async function webhookCommand(
     return { said: webhookLine(up), status: 0 };
   }
   mkdirSync(files.githubInbox(), { recursive: true });
-  const record = { pid: process.pid, port, at: Date.now(), lastAt: 0 };
+  const record = { pid: process.pid, port, at: Date.now(), lastAt: 0, code: codeStamp() };
   // **The handling runs in a child**, one at a time, so a start's wait never
   // keeps the server from answering GitHub within its ten seconds (/code-review).
   let child = null;

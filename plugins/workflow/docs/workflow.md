@@ -531,9 +531,11 @@ read after a push straight to the branch, and nothing else is. The
 executor's Stop hook names a failed check the webhook does not bring,
 never one still running: every one where no webhook listens (no
 secret, or its listener down), and a check by another service (a
-commit status, another app's check) where one does. Failed is a
-conclusion of failure, timed out or startup failure, or a commit
-status of failure or error.
+commit status, another app's check) where one does. It reads the
+checks with the person's token and, when GitHub refuses that, with the
+app's where the project has one; a read both are refused is said in
+`plans`, with what the token needs. Failed is a conclusion of failure,
+timed out or startup failure, or a commit status of failure or error.
 (decisions.md#push-not-waited-on)
 
 **Ready plans never wait with no executor**: a plan the Stop hook
@@ -698,7 +700,10 @@ host's reverse proxy, checks each delivery's signature, notes each event in
 `plans/github/`, starts the assistant on it, and closes an issue when its
 pull request merges; a run that failed on the queue's own pull request
 arrives the same way, in any project with `land: pull-request`; `plans
-github` reads what was missed; the assistant
+github` reads what was missed, says any list GitHub would not give it,
+in its own output and in `plans` until a read gets everything, and does
+not move its line past what it missed; a listener an older copy of the
+plugin started is replaced by the first start that finds it; the assistant
 answers as the app, writes the brief, or writes Ready and starts the
 build. (decisions.md#github-webhook)
 

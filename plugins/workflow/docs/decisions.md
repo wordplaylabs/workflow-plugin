@@ -478,6 +478,18 @@ on the machine that planned them.
   the assistant reruns once what the diff does not explain, since a
   hosted runner fails on its own some days. What CI alone can do is
   the project's `run`. plans/executor-never-watches-ci.md.
+  15 November: a run is taken whatever set it off, and read back by
+  `gh run list`, which needs the token's Actions read alone: in the
+  project that asked, the token could not read a pull request's checks
+  and the read brought nothing. Failed is failure, timed out or startup
+  failure, or a status of failure or error, in the webhook and the Stop
+  hook alike: a cancelled check was superseded or stopped by a person
+  (17 of that project's last 100 runs), one that needs action waits on
+  a person, on the pull request's page, and only GitHub marks one
+  stale. A check by another service, which no Actions event carries, is
+  named by the Stop hook also while a webhook listens: GitHub itself
+  notifies of Actions runs alone, and the token already reads checks.
+  plans/failed-runs-the-webhook-misses.md.
   - ~~The checks are watched after every push and fixed before the
     next plan.~~ (Javi, 28 October)
 - `plans-reach-an-executor` **Ready plans never wait with no executor: a
@@ -666,6 +678,8 @@ on the machine that planned them.
   name another process. plans/webhook-stale-record.md.
   14 November: a failed run on the queue's own pull request is an event
   too, `failed`, with issues on or off. plans/executor-never-watches-ci.md.
+  15 November: a failed run is an event whatever set it off.
+  plans/failed-runs-the-webhook-misses.md.
 - `days-fixes` **The day's fixes are one pull request, `Small fixes, <d
   Month yyyy>`, never two in a day.** (Javi, 30 October) A daily pull
   request for the small fixes rather than a message for the group, which

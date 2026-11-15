@@ -282,7 +282,9 @@ commit gets nothing. Else read `gh run view <id> --log-failed | tail -n
 attempt 1, is rerun once, `plans gh run rerun <id> --failed`; one it
 explains, a rerun's, or a rerun refused, is a short plan for the fix,
 `Lands: topic <the head branch>, waiting; lands in #<n>.` (`Lands:
-fix.` on the day's fixes), started at once. Then write `## Handled,
+fix.` on the day's fixes), started at once. Several `failed` lines on
+one commit that fail the same way are one failure: each run is rerun at
+most once, and one short plan is written. Then write `## Handled,
 <date>, session <id>` with a line of what you did, for `failed` which of
 the three.
 

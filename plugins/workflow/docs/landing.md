@@ -193,8 +193,9 @@ the same.
 the push and the pull request's create or edit, start the next plan;
 run no `gh pr checks` and no `gh run watch` on a pull request. A run
 that fails there reaches the assistant by the app's webhook and comes
-back as a short plan landing in it; with no webhook, the Stop hook
-names checks that have already failed, fixed and pushed before the
+back as a short plan landing in it; the Stop hook names a failed check
+the webhook does not bring (any with no webhook, another service's
+with one), fixed and pushed before the
 next plan. The project's `run` is read only for a fix pushed straight.
 
 **After the batch's last plan**, `git checkout --detach

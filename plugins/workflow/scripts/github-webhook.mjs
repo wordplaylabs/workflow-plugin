@@ -102,13 +102,15 @@ export function itemsOfDelivery(event, payload = {}, deliveryId = "") {
   }
   // **A failed run is an item** (plans/executor-never-watches-ci.md, part 1):
   // `completed` comes whatever the outcome, so only the failing conclusions,
-  // on a pull request from this repository; a cancelled run was superseded by
-  // a later push, and a fork's branch may share a name.
+  // on a branch of this repository, a fork's branch may share a name.
+  // Whatever set it off, a push to the branch as much as the pull request: a
+  // run is judged by its pull request, in `githubEvents`, and one on a branch
+  // with no pull request of the queue's own is no event
+  // (plans/failed-runs-the-webhook-misses.md, part 1).
   if (event === "workflow_run" && payload.action === "completed") {
     const run = payload.workflow_run;
     if (
       !run ||
-      run.event !== "pull_request" ||
       !FAILED_CONCLUSIONS.includes(run.conclusion) ||
       !run.head_repository?.full_name ||
       run.head_repository.full_name !== payload.repository?.full_name
@@ -150,7 +152,13 @@ export function itemsOfDelivery(event, payload = {}, deliveryId = "") {
   return [];
 }
 
-/** A run's conclusions that make it failed: `cancelled` is a later push's doing. */
+/**
+ * **The conclusions that make a check failed**, in the webhook and the Stop
+ * hook alike (plans/failed-runs-the-webhook-misses.md, part 3): `cancelled`
+ * was superseded by a later push or stopped by a person, `action_required`
+ * waits on a person, on the pull request's page, and only GitHub sets
+ * `stale`; none is anybody's to fix.
+ */
 export const FAILED_CONCLUSIONS = ["failure", "timed_out", "startup_failure"];
 
 /** The issue a pull request is for, from its `For #<n>.` line; 0 with none. */

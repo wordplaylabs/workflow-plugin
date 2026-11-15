@@ -493,9 +493,9 @@ while its file waits; `plans first --undo <path>` takes it out.
 
 **One checkout has one executor**, which holds `.claude/executor.lock`;
 another's edits are refused. Its Stop hook holds the stop on a red or
-unfinished `run` of its push, or, with no webhook, a pull request of the
-checkout whose checks have failed, whose fix is pushed where the red one
-was, before anything else, then names
+unfinished `run` of its push, or a pull request of the checkout with a
+failed check no webhook brings to the assistant, whose fix is pushed
+where the red one was, before anything else, then names
 the waiting plans to a session it may reuse (a context under the
 ceiling the queue works out for this project and agent: the wash of
 "context-cost" from inputs measured in its transcripts, raised by what
@@ -515,17 +515,20 @@ decisions.md#shared-is-what-is-held)
 **A push is not waited on.** The executor runs the project's checks
 once, under **Before the push**, pushes and starts the next plan: it
 watches no pull request's checks, which repeat them. A run that fails
-on a pull request of the queue's own reaches the assistant by the
-app's webhook, as `failed` in `plans/github/<n>.md`: it reads the
+on a pull request of the queue's own, whatever set it off, reaches the
+assistant by the app's webhook, as `failed` in `plans/github/<n>.md`: it reads the
 failed log and the diff, reruns the failed jobs once when the diff
 does not explain the failure, and writes the fix's short plan,
 landing in that pull request, when it does or the rerun fails too.
 What CI does that the local checks cannot (a deploy, a check that
 needs the hosted machine or a secret) is the project file's `run`,
-read after a push straight to the branch, and nothing else is. With
-no webhook listening (no secret, or its listener down), the executor's
-Stop hook names a pull request's checks that have already failed, never
-ones still running.
+read after a push straight to the branch, and nothing else is. The
+executor's Stop hook names a failed check the webhook does not bring,
+never one still running: every one where no webhook listens (no
+secret, or its listener down), and a check by another service (a
+commit status, another app's check) where one does. Failed is a
+conclusion of failure, timed out or startup failure, or a commit
+status of failure or error.
 (decisions.md#push-not-waited-on)
 
 **Ready plans never wait with no executor**: a plan the Stop hook

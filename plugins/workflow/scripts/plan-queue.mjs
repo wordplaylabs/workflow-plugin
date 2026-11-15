@@ -2115,15 +2115,20 @@ export function decideStop({
   ) {
     const how = run.status === "completed" ? "failed" : "in progress";
     // **A pull request's failed checks, in the pull request mode** (`land:
-    // pull-request`) with no webhook to bring them to the assistant; running
-    // ones are never waited on (plans/executor-never-watches-ci.md, part 4).
+    // pull-request`) that no webhook brings to the assistant: every one with
+    // no webhook, another service's (`other`) with one; running ones are
+    // never waited on (plans/executor-never-watches-ci.md, part 4,
+    // plans/failed-runs-the-webhook-misses.md, part 4).
     if (run.pull) {
       const n = run.pull.number;
       const also = run.pull.also || [];
+      const first = run.pull.other
+        ? `A check by another service on pull request #${n} (${run.pull.url}) has failed, and the webhook brings only Actions runs to the assistant. Read it (\`gh pr checks ${n} --json name,state,link\`), fix it and push the branch; the new checks are not waited on.`
+        : `The checks on pull request #${n} (${run.pull.url}) have failed, and no webhook brings that to the assistant here. Read the failed job's log (\`gh run view <run id> --log-failed\`, the id from \`gh pr checks ${n} --json link\`), fix it and push the branch; the new checks are not waited on.`;
       return {
         refuse: true,
         runId: run.id,
-        reason: `The checks on pull request #${n} (${run.pull.url}) have failed, and no webhook brings that to the assistant here. Read the failed job's log (\`gh run view <run id> --log-failed\`, the id from \`gh pr checks ${n} --json link\`), fix it and push the branch; the new checks are not waited on.${also.length ? ` ${also.length === 1 ? "Pull request" : "Pull requests"} ${andList(also.map((m) => `#${m}`))} ${also.length === 1 ? "has" : "have"} failed checks too.` : ""}${run.pull.run ? ` The ${run.pull.run.workflow || "Actions"} run on your push (${run.pull.run.id}) is ${run.pull.run.status === "completed" ? "failed" : "in progress"} too: \`gh run watch ${run.pull.run.id} --exit-status\`.` : ""}`,
+        reason: `${first}${also.length ? ` ${also.length === 1 ? "Pull request" : "Pull requests"} ${andList(also.map((m) => `#${m}`))} ${also.length === 1 ? "has" : "have"} failed checks too.` : ""}${run.pull.run ? ` The ${run.pull.run.workflow || "Actions"} run on your push (${run.pull.run.id}) is ${run.pull.run.status === "completed" ? "failed" : "in progress"} too: \`gh run watch ${run.pull.run.id} --exit-status\`.` : ""}`,
       };
     }
     return {
@@ -4586,40 +4591,48 @@ export function pullThenRun(pull, run) {
   return { ...pull, id: `${pull.id},run ${run.id}`, pull: { ...pull.pull, run } };
 }
 
-/** A check run's conclusions that make a pull request's checks red. */
-const RED_CONCLUSIONS = [
-  "FAILURE",
-  "TIMED_OUT",
-  "CANCELLED",
-  "ACTION_REQUIRED",
-  "STARTUP_FAILURE",
-  "STALE",
-];
+/** A rollup entry that is a commit status, not a check run. */
+const isContext = (check) =>
+  check.__typename === "StatusContext" || (!("status" in check) && "state" in check);
 
 /**
  * **The verdict on a pull request's checks**, from `gh pr list --json
- * statusCheckRollup`: "red" when a check run concluded in failure (any of
- * `RED_CONCLUSIONS`) or a status context's state is FAILURE or ERROR,
- * "running" when a check run is not COMPLETED or a context is PENDING or
- * EXPECTED, else "green", an empty rollup included: a project with no checks
- * has nothing to wait for. Red beats running.
+ * statusCheckRollup`: "red" when a check run concluded in failure, timed out
+ * or startup failure (`FAILED_CONCLUSIONS`, the webhook's own) or a status
+ * context's state is FAILURE or ERROR, "running" when a check run is not
+ * COMPLETED or a context is PENDING or EXPECTED, else "green", an empty
+ * rollup included: a project with no checks has nothing to wait for. Red
+ * beats running. Cancelled, action required and stale are not red: a
+ * cancelled check was superseded or stopped by a person, one that needs
+ * action waits on a person, on the pull request's page, and only GitHub
+ * marks one stale (plans/failed-runs-the-webhook-misses.md, part 3).
  */
 export function checksVerdict(rollup = []) {
   let running = false;
   for (const check of rollup || []) {
     if (!check) continue;
-    const context =
-      check.__typename === "StatusContext" || (!("status" in check) && "state" in check);
-    if (context) {
+    if (isContext(check)) {
       const state = String(check.state || "").toUpperCase();
       if (state === "FAILURE" || state === "ERROR") return "red";
       if (state === "PENDING" || state === "EXPECTED") running = true;
       continue;
     }
-    if (RED_CONCLUSIONS.includes(String(check.conclusion || "").toUpperCase())) return "red";
+    if (FAILED_CONCLUSIONS.includes(String(check.conclusion || "").toLowerCase())) return "red";
     if (String(check.status || "").toUpperCase() !== "COMPLETED") running = true;
   }
   return running ? "running" : "green";
+}
+
+/**
+ * **The checks by another service** in a `statusCheckRollup`: the commit statuses and
+ * the check runs whose `detailsUrl` is no Actions run, which no Actions
+ * event carries to the webhook (plans/failed-runs-the-webhook-misses.md,
+ * part 4).
+ */
+export function otherServices(rollup = []) {
+  return (rollup || []).filter(
+    (check) => check && (isContext(check) || !/\/actions\/runs\/\d+/.test(check.detailsUrl || "")),
+  );
 }
 
 /**
@@ -4627,11 +4640,13 @@ export function checksVerdict(rollup = []) {
  * pull-request`): the open pull requests whose head branch is a local branch
  * here at the same commit, from one `gh pr list`; the first whose checks are
  * red, in the run's shape (`id` its number and commit, so a push is asked
- * about again), for `decideStop`. Running checks are not waited on
+ * about again), for `decideStop`. With `brought`, a webhook brings the
+ * Actions runs to the assistant, and only another service's checks are
+ * judged (`other` in the answer). Running checks are not waited on
  * (plans/executor-never-watches-ci.md, part 4). Null when none is red, none
  * is this checkout's, or `gh` cannot be read.
  */
-function pullChecks() {
+function pullChecks({ brought = false } = {}) {
   try {
     const out = execFileSync(
       "gh",
@@ -4660,7 +4675,12 @@ function pullChecks() {
     );
     const open = JSON.parse(out)
       .filter((pull) => local.get(pull.headRefName) === pull.headRefOid)
-      .map((pull) => ({ ...pull, verdict: checksVerdict(pull.statusCheckRollup) }))
+      .map((pull) => ({
+        ...pull,
+        verdict: checksVerdict(
+          brought ? otherServices(pull.statusCheckRollup) : pull.statusCheckRollup,
+        ),
+      }))
       .filter((pull) => pull.verdict === "red");
     if (!open.length) return null;
     const [first, ...rest] = open;
@@ -4671,7 +4691,12 @@ function pullChecks() {
       status: "completed",
       conclusion: "failure",
       onHead: true,
-      pull: { number: first.number, url: first.url, also: rest.map((pull) => pull.number) },
+      pull: {
+        number: first.number,
+        url: first.url,
+        also: rest.map((pull) => pull.number),
+        other: brought,
+      },
     };
   } catch {
     process.stderr.write("plan-queue: the pull requests' checks could not be read (gh)\n");
@@ -6080,16 +6105,20 @@ function hook(mode, input) {
       current: plans.find((p) => p.state === "building" && p.session === sessionId) || null,
       waiting,
       handed,
-      // The pull request mode reads its pull requests' failed checks where no
-      // webhook brings them to the assistant (two fixes would cross): no
-      // secret, or no listener alive (/code-review); then the run a fix
-      // pushed straight sets off. The push mode reads its run. `webhookAlive`
-      // is the pid alone, no port's wait in a Stop hook: a record a reboot
-      // left can read as alive until the next session's start drops it.
+      // The pull request mode reads its pull requests' failed checks that no
+      // webhook brings to the assistant (two fixes would cross): every one
+      // with no secret or no listener alive (/code-review), another
+      // service's with one (plans/failed-runs-the-webhook-misses.md, part 4);
+      // then the run a fix pushed straight sets off. The push mode reads its
+      // run. `webhookAlive` is the pid alone, no port's wait in a Stop hook: a
+      // record a reboot left can read as alive until the next session's start
+      // drops it.
       run:
         proj().land === "pull-request"
           ? pullThenRun(
-              secret("WORKFLOW_WEBHOOK_SECRET") && webhookAlive() ? null : pullChecks(),
+              pullChecks({
+                brought: Boolean(secret("WORKFLOW_WEBHOOK_SECRET") && webhookAlive()),
+              }),
               imageRun({
                 only: plans.filter((p) => p.state === "built" && p.fix && p.sha).map((p) => p.sha),
               }),
@@ -6748,6 +6777,11 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
     return said.length ? said : ["GitHub: nothing new."];
   }
   const newer = (at) => !since || (at && at > since);
+  // The runs' own line, moved only when every run list was read, so a read
+  // that fails or runs out of time does not pass a failure it missed (Codex).
+  const runsSince = seen.runsReadAt ?? since;
+  const newerRun = (at) => !runsSince || (at && at > runsSince);
+  let runsRead = true;
   // What changed since the last read, not the newest fifty (/code-review).
   const searched = (what) => (since ? ["--search", `${what}:>=${since.slice(0, 19)}Z`] : []);
   // With issues off, the queue's own pull requests' failed runs alone
@@ -6822,7 +6856,9 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
         "--limit",
         "50",
         "--json",
-        "number,title,url,headRefName,headRefOid,statusCheckRollup,comments,reviews",
+        // No checks: a token that cannot read them would fail the whole list
+        // (plans/failed-runs-the-webhook-misses.md, part 2).
+        "number,title,url,headRefName,headRefOid,comments,reviews",
       ],
       left(deadline, 10_000),
     ) || "[]",
@@ -6838,7 +6874,34 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
       pull: true,
       head: pull.headRefName,
     };
-    items.push(...failedRunsOf(pull, base, newer, (id) => failedAttempt(id, deadline)));
+    // The head commit's runs alone, so a busy branch's older runs do not
+    // crowd a failed one out (Codex).
+    const out =
+      Date.now() < deadline
+        ? ghRead(
+            [
+              "run",
+              "list",
+              "--branch",
+              pull.headRefName,
+              "--commit",
+              pull.headRefOid,
+              "--limit",
+              "100",
+              "--json",
+              "databaseId,attempt,status,conclusion,headSha,workflowName,updatedAt,url",
+            ],
+            left(deadline, 5000),
+          )
+        : null;
+    let runs = null;
+    try {
+      runs = out === null ? null : JSON.parse(out || "[]");
+    } catch {
+      // Unread, as a failed call.
+    }
+    if (Array.isArray(runs)) items.push(...failedRunsOf(pull, base, runs, newerRun));
+    else runsRead = false;
     if (!issuesOn) continue;
     for (const comment of pull.comments || [])
       if (newer(comment.createdAt))
@@ -6912,73 +6975,50 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
       });
   items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
   const said = await act([...items, ...inboxItems(seen)], { deadline, dry });
-  if (!dry && !inbox) writeJson(files.githubSeen(), { ...readSeen(), readAt: began });
+  if (!dry && !inbox)
+    writeJson(files.githubSeen(), {
+      ...readSeen(),
+      readAt: began,
+      runsReadAt: runsRead ? began : runsSince,
+    });
   return said.length ? said : ["GitHub: nothing new."];
 }
 
 /**
- * **A pull request's failed runs, as read** (plans/executor-never-watches-ci.md,
- * part 2): from its `statusCheckRollup`, grouped by the run in each check's
- * `detailsUrl`, one `failed` item per run whose checks have all completed,
- * one of them failed (`FAILED_CONCLUSIONS`), and whose last completion is
- * `newer` than the last read, so a run still going is read once it ends
- * (Codex). `attempt(id)` gives the run's attempt, 0 when it cannot be read or
- * the run is not failed and done; such a run is no item. `at` is its last
- * completion, `sha` the pull request's head.
+ * **A pull request's failed runs, as read** (plans/failed-runs-the-webhook-misses.md,
+ * part 2): from `gh run list --branch <head>`, which needs the token's
+ * Actions read alone, whatever set each run off. One `failed` item per row
+ * on the pull request's head commit that has completed in a failing
+ * conclusion (`FAILED_CONCLUSIONS`) and is `newer` than the last read; a run
+ * still going is read once it ends (Codex). `at` is the row's `updatedAt`,
+ * as a delivery's `updated_at`, and the run and attempt make the same
+ * `seen.runs` key, so a run both bring is told once.
  */
-export function failedRunsOf(pull, base, newer = () => true, attempt = () => 1) {
-  const runs = new Map();
-  for (const check of pull.statusCheckRollup || []) {
-    const id = Number(/\/actions\/runs\/(\d+)/.exec(check?.detailsUrl || "")?.[1] || 0);
-    if (!id) continue;
-    const run = runs.get(id) || { id, failed: false, done: true, at: "", workflow: "" };
-    run.workflow ||= check.workflowName || "";
-    if (String(check.status || "").toUpperCase() !== "COMPLETED") run.done = false;
-    if (FAILED_CONCLUSIONS.includes(String(check.conclusion || "").toLowerCase()))
-      run.failed = true;
-    if (check.completedAt && check.completedAt > run.at) run.at = check.completedAt;
-    runs.set(id, run);
-  }
+export function failedRunsOf(pull, base, runs = [], newer = () => true) {
   const items = [];
-  for (const run of runs.values()) {
-    if (!run.failed || !run.done || !newer(run.at)) continue;
-    const tried = attempt(run.id);
-    if (!tried) continue;
+  for (const row of runs || []) {
+    if (
+      !row ||
+      row.headSha !== pull.headRefOid ||
+      row.status !== "completed" ||
+      !FAILED_CONCLUSIONS.includes(row.conclusion) ||
+      !newer(row.updatedAt)
+    )
+      continue;
     items.push({
       ...base,
       kind: "failed",
       author: "",
       text: "",
-      url: `${String(pull.url || "").replace(/\/pull\/\d+$/, "")}/actions/runs/${run.id}`,
-      workflow: run.workflow,
-      run: run.id,
-      attempt: tried,
+      url: row.url || "",
+      workflow: row.workflowName || "",
+      run: row.databaseId,
+      attempt: row.attempt || 1,
       sha: String(pull.headRefOid || "").slice(0, 8),
-      at: run.at,
+      at: row.updatedAt,
     });
   }
   return items;
-}
-
-/**
- * A run's attempt by `gh run view`, when it is completed and failed; 0 when
- * it is not, or cannot be read in time.
- */
-function failedAttempt(id, deadline) {
-  if (Date.now() >= deadline) return 0;
-  try {
-    const run = JSON.parse(
-      ghRead(
-        ["run", "view", String(id), "--json", "attempt,status,conclusion"],
-        left(deadline, 5000),
-      ) || "{}",
-    );
-    return run.status === "completed" && FAILED_CONCLUSIONS.includes(run.conclusion)
-      ? run.attempt || 1
-      : 0;
-  } catch {
-    return 0;
-  }
 }
 
 /**

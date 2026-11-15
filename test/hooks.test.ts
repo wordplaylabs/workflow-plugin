@@ -120,6 +120,7 @@ import {
   noSecretWords,
   hasIssues,
   failedRunsOf,
+  otherServices,
 } from "../plugins/workflow/scripts/plan-queue.mjs";
 import { statusFrom } from "../plugins/workflow/scripts/statusline.mjs";
 import {
@@ -922,19 +923,39 @@ describe("plan-queue", () => {
       expect(checksVerdict([context("EXPECTED")])).toBe("running");
     });
     it("is red for a failed check or context, and red beats running", () => {
-      for (const conclusion of [
-        "FAILURE",
-        "TIMED_OUT",
-        "CANCELLED",
-        "ACTION_REQUIRED",
-        "STARTUP_FAILURE",
-        "STALE",
-      ])
+      for (const conclusion of ["FAILURE", "TIMED_OUT", "STARTUP_FAILURE"])
         expect(checksVerdict([run("COMPLETED", conclusion)]), conclusion).toBe("red");
       expect(checksVerdict([context("ERROR")])).toBe("red");
       expect(checksVerdict([context("FAILURE")])).toBe("red");
       expect(checksVerdict([run("IN_PROGRESS"), run("COMPLETED", "FAILURE")])).toBe("red");
       expect(checksVerdict([context("PENDING"), context("ERROR")])).toBe("red");
+    });
+    // plans/failed-runs-the-webhook-misses.md, part 3: one meaning of failed, the webhook's.
+    it("is green for a cancelled, waiting or stale check: nobody's to fix", () => {
+      for (const conclusion of ["CANCELLED", "ACTION_REQUIRED", "STALE"])
+        expect(checksVerdict([run("COMPLETED", conclusion)]), conclusion).toBe("green");
+    });
+  });
+
+  // plans/failed-runs-the-webhook-misses.md, part 4: what no Actions event carries.
+  describe("otherServices", () => {
+    it("keeps a status context and a check run that is no Actions run, and drops an Actions job", () => {
+      const status = { __typename: "StatusContext", state: "FAILURE", context: "ci/external" };
+      const app = {
+        __typename: "CheckRun",
+        status: "COMPLETED",
+        conclusion: "FAILURE",
+        detailsUrl: "https://app.example.com/checks/12",
+      };
+      const actions = {
+        __typename: "CheckRun",
+        status: "COMPLETED",
+        conclusion: "FAILURE",
+        detailsUrl: "https://github.com/o/r/actions/runs/5/job/6",
+      };
+      expect(otherServices([status, app, actions])).toEqual([status, app]);
+      expect(otherServices(null as never)).toEqual([]);
+      expect(checksVerdict(otherServices([actions]))).toBe("green");
     });
   });
 
@@ -966,6 +987,11 @@ describe("plan-queue", () => {
       expect(first).toMatchObject({ refuse: true, runId: "21@61c4a812" });
       expect(first!.reason).toBe(
         "The checks on pull request #21 (https://github.com/o/r/pull/21) have failed, and no webhook brings that to the assistant here. Read the failed job's log (`gh run view <run id> --log-failed`, the id from `gh pr checks 21 --json link`), fix it and push the branch; the new checks are not waited on.",
+      );
+      // With a webhook listening, another service's check, in its own words
+      // (plans/failed-runs-the-webhook-misses.md, part 4).
+      expect(decideStop({ run: { ...pull, pull: { ...pull.pull, other: true } } })!.reason).toBe(
+        "A check by another service on pull request #21 (https://github.com/o/r/pull/21) has failed, and the webhook brings only Actions runs to the assistant. Read it (`gh pr checks 21 --json name,state,link`), fix it and push the branch; the new checks are not waited on.",
       );
       // Checks still running are not waited on.
       expect(decideStop({ run: { ...pull, status: "in_progress", conclusion: null } })).toBeNull();
@@ -4080,10 +4106,14 @@ describe("the queue's faults, closed", () => {
     const sha = g(dir, "rev-parse", "land-x");
     const bin = temp("queue-gh-pr-");
     // A `gh` that answers `pr list` only: the run list is not the mode's.
-    writeFileSync(
-      join(bin, "gh"),
-      `#!/bin/sh\nif [ "$1 $2" = "pr list" ]; then echo '[{"number":21,"url":"https://github.com/o/r/pull/21","headRefName":"land-x","headRefOid":"${sha}","statusCheckRollup":[{"__typename":"CheckRun","status":"COMPLETED","conclusion":"FAILURE"}]}]'; else echo '[{"databaseId":7,"status":"completed","conclusion":"failure","headSha":"${sha}"}]'; fi\n`,
-    );
+    const answer = (rollup: string) =>
+      writeFileSync(
+        join(bin, "gh"),
+        `#!/bin/sh\nif [ "$1 $2" = "pr list" ]; then echo '[{"number":21,"url":"https://github.com/o/r/pull/21","headRefName":"land-x","headRefOid":"${sha}","statusCheckRollup":[${rollup}]}]'; else echo '[{"databaseId":7,"status":"completed","conclusion":"failure","headSha":"${sha}"}]'; fi\n`,
+      );
+    const actionsJob =
+      '{"__typename":"CheckRun","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/o/r/actions/runs/7/job/8"}';
+    answer(actionsJob);
     chmodSync(join(bin, "gh"), 0o755);
     // No webhook here, so the pull request's failed checks are read.
     const env = { PATH: `${bin}:${process.env.PATH}`, WORKFLOW_SECRETS_FILE: "" };
@@ -4115,6 +4145,28 @@ describe("the queue's faults, closed", () => {
       JSON.stringify({ pid: process.pid, port: 1, at: Date.now() }),
     );
     expect(hooked("red-pull-hook")).toBe("");
+    // Another service's check failed beside it: refused once, in its own words, while the
+    // webhook listens (plans/failed-runs-the-webhook-misses.md, part 4).
+    answer(
+      `${actionsJob},{"__typename":"StatusContext","state":"FAILURE","context":"ci/external"}`,
+    );
+    const other = hooked("red-pull-other");
+    expect(other).toContain('"decision":"block"');
+    expect(other).toContain(
+      "A check by another service on pull request #21 (https://github.com/o/r/pull/21) has failed, and the webhook brings only Actions runs to the assistant.",
+    );
+    expect(
+      runIn(
+        dir,
+        ["stop"],
+        { ...env, WORKFLOW_WEBHOOK_SECRET: "s3cret" },
+        {
+          session_id: `red-pull-other-${process.pid}`,
+          agent_type: "executor",
+          stop_hook_active: true,
+        },
+      ),
+    ).toBe("");
     rmSync(join(dir, ".claude", "webhook.json"));
     // Checks still running are not waited on.
     writeFileSync(
@@ -8509,10 +8561,16 @@ describe("github webhook", () => {
         expect(itemsOfDelivery("workflow_run", delivery({ conclusion }), "w")).toHaveLength(1);
     });
 
-    it("itemsOfDelivery gives none for a cancelled or green run, a push's, or a fork's", () => {
-      expect(itemsOfDelivery("workflow_run", delivery({ conclusion: "cancelled" }))).toEqual([]);
-      expect(itemsOfDelivery("workflow_run", delivery({ conclusion: "success" }))).toEqual([]);
-      expect(itemsOfDelivery("workflow_run", delivery({ event: "push" }))).toEqual([]);
+    // plans/failed-runs-the-webhook-misses.md, part 1: whatever set it off.
+    it("itemsOfDelivery gives one failed item from a run a push set off", () => {
+      const pushed = itemsOfDelivery("workflow_run", delivery({ event: "push" }), "w1");
+      expect(pushed).toEqual(itemsOfDelivery("workflow_run", recorded, "w1"));
+      expect(pushed).toHaveLength(1);
+    });
+
+    it("itemsOfDelivery gives none for a cancelled, waiting, stale or green run, or a fork's", () => {
+      for (const conclusion of ["cancelled", "action_required", "stale", "success"])
+        expect(itemsOfDelivery("workflow_run", delivery({ conclusion })), conclusion).toEqual([]);
       expect(
         itemsOfDelivery("workflow_run", delivery({ head_repository: { full_name: "someone/r" } })),
       ).toEqual([]);
@@ -8544,6 +8602,17 @@ describe("github webhook", () => {
         run: 19283746501,
         sha: "4f1c2b9a",
       });
+      // A run a push to the queue's own head branch set off is one failed event
+      // (plans/failed-runs-the-webhook-misses.md, part 1); with no pull request named in it,
+      // `act` fills the number from the head branch first.
+      const pushed = itemsOfDelivery(
+        "workflow_run",
+        delivery({ id: 19283746503, event: "push" }),
+        "w4",
+      );
+      const pushedEvents = githubEvents(nobody, pushed, context).events;
+      expect(pushedEvents).toHaveLength(1);
+      expect(pushedEvents[0]).toMatchObject({ kind: "failed", run: 19283746503 });
       // Another pull request's run is no event.
       const other = itemsOfDelivery(
         "workflow_run",
@@ -8578,65 +8647,55 @@ describe("github webhook", () => {
       rmSync(dir, { recursive: true, force: true });
     });
 
-    it("failedRunsOf reads one failed item per finished run off a pull request's checks", () => {
-      const check = (
-        name: string,
-        run: number,
+    // plans/failed-runs-the-webhook-misses.md, part 2: read by `gh run list`.
+    it("failedRunsOf reads one failed item per finished, failed run on the head commit", () => {
+      const head = "4f1c2b9a7e3d5c8b";
+      const row = (
+        databaseId: number,
         conclusion: string | null,
-        completedAt: string,
-        status = "COMPLETED",
+        updatedAt: string,
+        change: Record<string, unknown> = {},
       ) => ({
-        __typename: "CheckRun",
-        name,
-        workflowName: run === 9 ? "Suites" : "Checks",
-        status,
+        databaseId,
+        attempt: 2,
+        status: "completed",
         conclusion,
-        completedAt,
-        detailsUrl: `https://github.com/o/r/actions/runs/${run}/job/${run + 1}`,
+        headSha: head,
+        workflowName: "Checks",
+        updatedAt,
+        url: `https://github.com/o/r/actions/runs/${databaseId}`,
+        ...change,
       });
-      const pull = {
-        number: 40,
-        url: "https://github.com/o/r/pull/40",
-        headRefOid: "4f1c2b9a7e3d5c8b",
-        statusCheckRollup: [
-          check("format", 5, "FAILURE", at(10)),
-          check("tests", 5, "SUCCESS", at(12)),
-          check("validate", 6, "SUCCESS", at(11)),
-          check("old", 7, "FAILURE", at(1)),
-          check("superseded", 8, "CANCELLED", at(13)),
-          // A run with a failed job and one still going is read once it ends (Codex).
-          check("browser", 9, "FAILURE", at(14)),
-          check("browser-2", 9, null, "", "IN_PROGRESS"),
-          { __typename: "StatusContext", state: "FAILURE", context: "external" },
-        ],
-      };
+      const pull = { number: 40, url: "https://github.com/o/r/pull/40", headRefOid: head };
+      const runs = [
+        row(5, "failure", at(12)),
+        // Set off by a push to the branch: taken all the same.
+        row(6, "timed_out", at(13), { event: "push", attempt: 0 }),
+        row(7, "success", at(11)),
+        row(8, "failure", at(14), { headSha: "0ld0ld0ld0ld" }),
+        row(9, null, "", { status: "in_progress" }),
+        row(10, "cancelled", at(15)),
+        row(11, "action_required", at(15)),
+        row(12, "failure", at(1)),
+      ];
       const base = { number: 40, title: "S", labels: [], url: "u", pull: true, head: "x" };
-      const asked: number[] = [];
-      const attempt = (id: number) => (asked.push(id), 2);
-      expect(failedRunsOf(pull, base, (when: string) => when > at(5), attempt)).toEqual([
-        {
-          ...base,
-          kind: "failed",
-          author: "",
-          text: "",
-          url: "https://github.com/o/r/actions/runs/5",
-          workflow: "Checks",
-          run: 5,
-          attempt: 2,
-          sha: "4f1c2b9a",
-          at: at(12),
-        },
+      const failed = (run: number, attempt: number, when: string) => ({
+        ...base,
+        kind: "failed",
+        author: "",
+        text: "",
+        url: `https://github.com/o/r/actions/runs/${run}`,
+        workflow: "Checks",
+        run,
+        attempt,
+        sha: "4f1c2b9a",
+        at: when,
+      });
+      expect(failedRunsOf(pull, base, runs, (when: string) => when > at(5))).toEqual([
+        failed(5, 2, at(12)),
+        failed(6, 1, at(13)),
       ]);
-      expect(asked).toEqual([5]);
-      // A run whose attempt cannot be read is no item.
-      expect(
-        failedRunsOf(
-          pull,
-          base,
-          () => true,
-          () => 0,
-        ),
-      ).toEqual([]);
+      expect(failedRunsOf(pull, base, [], () => true)).toEqual([]);
     });
 
     it("githubEvents tells a run once by its id and attempt, whoever brought it, and hides nothing else", () => {
@@ -8803,6 +8862,89 @@ else {
           );
           expect(note).not.toContain("Rename this.");
           expect(JSON.parse(readFileSync(rows, "utf8"))).toHaveLength(1);
+        },
+      );
+
+      // plans/failed-runs-the-webhook-misses.md, part 2: a token that cannot read a pull
+      // request's checks still brings its comments and its failed runs.
+      it(
+        "plans github reads comments with no checks asked, and failed runs by gh run list",
+        { timeout: 30_000 },
+        () => {
+          const read = mkdtempSync(join(tmpdir(), "failed-read-"));
+          try {
+            execFileSync("git", ["init", "-q"], { cwd: read });
+            execFileSync("git", ["remote", "add", "origin", "https://github.com/o/r.git"], {
+              cwd: read,
+            });
+            mkdirSync(join(read, ".claude"));
+            mkdirSync(join(read, "plans"));
+            writeFileSync(
+              join(read, ".claude", "workflow.md"),
+              "---\nname: Runs\nbranch: test\nland: pull-request\n---\n\n# Runs\n\n## Issues\n\nTopics here are GitHub issues.\n",
+            );
+            writeFileSync(
+              join(read, "plans", "series-order.md"),
+              "# Series\n\nPlan only, 14 November 2026, for Javi.\n\n## Built, 14 November 2026\n\nPull request #40 (https://github.com/o/r/pull/40) to test from branch series-order, commit 4f1c2b9a; draft.\n",
+            );
+            const sha = "4f1c2b9a7e3d5c8b";
+            const asked = join(read, "asked.log");
+            const gh = join(stubDir, "gh-read");
+            // Answers `pr list` without checks, as a token that cannot read them would: refuses any
+            // list that asks for them.
+            writeFileSync(
+              gh,
+              `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(asked)}, args.join(" ") + "\\n");
+const say = (value) => process.stdout.write(JSON.stringify(value));
+if (args.join(" ").includes("statusCheckRollup")) process.exit(1);
+if (args[0] === "pr" && args.includes("open"))
+  say([{ number: 40, title: "Series keep their order", url: "https://github.com/o/r/pull/40",
+    headRefName: "series-order", headRefOid: "${sha}",
+    comments: [{ author: { login: "anton" }, createdAt: "2026-11-14T21:00:00Z", body: "Rename this." }],
+    reviews: [] }]);
+else if (args[0] === "run" && args[1] === "list") {
+  if (process.env.RUNS_FAIL) process.exit(1);
+  say([{ databaseId: 5, attempt: 1, status: "completed", conclusion: "failure", headSha: "${sha}",
+    workflowName: "Checks", updatedAt: "2026-11-14T21:04:00Z", url: "https://github.com/o/r/actions/runs/5" }]);
+}
+else if (args[0] === "api" && /collaborators/.test(args[1])) process.stdout.write("write");
+else say([]);
+`,
+            );
+            chmodSync(gh, 0o755);
+            writeFileSync(rows, "[]");
+            const github = (extra: Record<string, string> = {}) =>
+              spawnSync("node", [join(here, "plan-queue.mjs"), "github"], {
+                encoding: "utf8",
+                env: {
+                  ...env(),
+                  WORKFLOW_ROOT: read,
+                  CLAUDE_PROJECT_DIR: read,
+                  WORKFLOW_GH: gh,
+                  ...extra,
+                },
+              }).stdout;
+            // A run list that fails reads the comment and does not pass the run it missed (Codex).
+            const unread = github({ RUNS_FAIL: "1" });
+            expect(unread).toMatch(/GitHub: #40 \w+ by anton, noted/);
+            expect(unread).not.toContain("run failed");
+            const said = github();
+            expect(said).toContain("GitHub: #40 Checks run failed, noted");
+            expect(said).not.toContain("by anton");
+            const note = readFileSync(join(read, "plans", "github", "40.md"), "utf8");
+            expect(note).toContain(
+              "Checks run 5 on 4f1c2b9a: https://github.com/o/r/actions/runs/5",
+            );
+            expect(note).toContain("Rename this.");
+            const calls = readFileSync(asked, "utf8");
+            expect(calls).toContain(`run list --branch series-order --commit ${sha}`);
+            expect(calls).not.toContain("statusCheckRollup");
+          } finally {
+            rmSync(read, { recursive: true, force: true });
+          }
         },
       );
     });

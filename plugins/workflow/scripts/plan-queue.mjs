@@ -63,7 +63,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { fileURLToPath } from "node:url";
 import { agentsChoice, shellWrites, untiered } from "./turn-audit.mjs";
 import { catalogueFiles, locations, paragraphs } from "./catalogue-context.mjs";
-import { appSlug, installationToken, repoOfRemote } from "./github-app.mjs";
+import { appLacks, appSlug, appStanding, installationToken, repoOfRemote } from "./github-app.mjs";
 import {
   FAILED_CONCLUSIONS,
   NOTHING_SEEN,
@@ -143,6 +143,8 @@ export const QUEUE_SINCE = Date.UTC(2026, 9, 24);
 export const FIVE_HOUR_MAX = 80;
 export const SEVEN_DAY_MAX = 95;
 const MINUTE = 60_000;
+/** How often a listener whose app sends no failed run reads them itself. */
+const APP_RECHECK = 5 * MINUTE;
 const QUICK_DEATH = 10 * MINUTE;
 const USAGE_STALE = 30 * MINUTE;
 const TRIPWIRE = 24;
@@ -168,6 +170,8 @@ const files = {
   githubSeen: () => join(root, ".claude", "github-seen.json"),
   githubInbox: () => join(root, ".claude", "github-inbox"),
   webhook: () => join(root, ".claude", "webhook.json"),
+  // What the owner was told of an app that sends no failed run (plans/app-old-registration-said.md).
+  webhookTold: () => join(root, ".claude", "webhook.told.json"),
 };
 
 /** What `plans` says, and `plans start` refuses with, in a project with no project file. */
@@ -5801,8 +5805,8 @@ export function agentLine(kind) {
 function sayAgent(input) {
   try {
     const { agent, did } = sessionAgent(root, { form: proj().form });
-    if (!did || process.env.WORKFLOW_STARTED) return;
-    if (input?.agent_type) return;
+    if (!did || process.env.WORKFLOW_STARTED) return false;
+    if (input?.agent_type) return false;
     const kind = agent.slice(agent.lastIndexOf(":") + 1);
     const line = agentLine(kind);
     process.stdout.write(
@@ -5814,6 +5818,51 @@ function sayAgent(input) {
         systemMessage: line,
       }),
     );
+    return true;
+  } catch {
+    // Said nothing, which is the start without it.
+    return false;
+  }
+}
+
+/**
+ * The line that tells the owner his app sends no failed run
+ * (plans/app-old-registration-said.md, The words): what it lacks and where to
+ * add it, or, the registration having it, where to accept it.
+ */
+export function appLine(lacks) {
+  const opening = "The project's Claude is sent no failed run by GitHub: ";
+  const until = "Until then failed runs are read every five minutes.";
+  if (lacks.where === "installation")
+    return `${opening}its app's new permissions are not accepted on ${lacks.repo} yet. Accept them at ${lacks.url}. ${until}`;
+  return `${opening}its app lacks ${lacks.what.join(" and ")}. Add ${lacks.what.length > 1 ? "them" : "it"} on GitHub (Settings, Developer settings, GitHub Apps, ${lacks.slug}, Permissions & events) and accept the new permissions if GitHub asks. ${until}`;
+}
+
+/**
+ * **An app that cannot send a failed run is said once** in a chat the queue
+ * did not start, whatever agent it opened as, while the listener's record says
+ * it lacks something (plans/app-old-registration-said.md, part 4); said again
+ * only when what it lacks changes. As `sayAgent` says its line; any failure
+ * says nothing.
+ */
+function sayApp() {
+  try {
+    if (process.env.WORKFLOW_STARTED || proj().land !== "pull-request") return;
+    const lacks = webhookAlive()?.lacks;
+    if (!lacks?.what?.length) return;
+    const key = `${lacks.where}: ${lacks.what.join(", ")}`;
+    if (readJson(files.webhookTold())?.told === key) return;
+    const line = appLine(lacks);
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "SessionStart",
+          additionalContext: `${line}\n\nSay this line to the owner in its own words, then go on with what was asked.`,
+        },
+        systemMessage: line,
+      }),
+    );
+    writeJson(files.webhookTold(), { told: key, at: Date.now() });
   } catch {
     // Said nothing, which is the start without it.
   }
@@ -5845,7 +5894,7 @@ function hook(mode, input) {
   // **A project's chats open as its agent, from the project's own settings**
   // (plans/agent-set-by-the-project.md, part 3): before the compact return,
   // since a compact project needs its maker.
-  if (mode === "session") sayAgent(input);
+  const saidAgent = mode === "session" && sayAgent(input);
   // **The compact form has no queue**: the maker is one chat, and the queue's
   // hooks do nothing (the catalogue's hooks run in both forms).
   if (proj().form === "compact") return;
@@ -5853,6 +5902,8 @@ function hook(mode, input) {
   if (mode === "session") {
     // Not awaited: the process stays up the port's check, at most 300 ms.
     armWebhook().catch(() => {});
+    // One JSON object a start: the app's line waits for a start without the agent's.
+    if (!saidAgent) sayApp();
     return;
   }
   const sessionId = input.session_id;
@@ -6462,7 +6513,18 @@ function dropWebhookRecord(seen) {
 export function webhookLine(record = webhookAlive()) {
   if (!record) return "The webhook: none; plans webhook starts it.";
   const last = record.lastAt ? `, last delivery ${hhmm(record.lastAt)}` : "";
-  return `The webhook: listening on ${record.port} since ${hhmm(record.at)}${last}.`;
+  // **An app that cannot send a failed run is said while it holds**
+  // (plans/app-old-registration-said.md, part 3).
+  const lacks = record.lacks;
+  const why = !lacks?.what?.length
+    ? ""
+    : lacks.where === "installation"
+      ? "its new permissions are not accepted"
+      : `it lacks ${lacks.what.join(" and ")}`;
+  const reads = why
+    ? `; the app sends no failed run (${why}), so they are read every five minutes`
+    : "";
+  return `The webhook: listening on ${record.port} since ${hhmm(record.at)}${last}${reads}.`;
 }
 
 /**
@@ -7046,9 +7108,16 @@ function labeller(number, label, deadline) {
 /**
  * **`plans webhook`**: with `--serve`, the listener itself; with
  * `--stop`, the listener ended; else a listener started when none is
- * alive. With no secret, one line and nothing runs.
+ * alive. With no secret, one line and nothing runs. The listener asks GitHub
+ * what its app has and, while the app cannot send a failed run, reads them
+ * itself every `every` milliseconds (plans/app-old-registration-said.md,
+ * part 2).
  */
-export async function webhookCommand(args = [], env = process.env) {
+export async function webhookCommand(
+  args = [],
+  env = process.env,
+  { fetch = globalThis.fetch, every = APP_RECHECK } = {},
+) {
   if (args.includes("--stop")) {
     // A record whose port answers nothing is stale, its pid perhaps another
     // process's: nothing is killed, and the next start removes the record.
@@ -7093,10 +7162,13 @@ export async function webhookCommand(args = [], env = process.env) {
   // **The handling runs in a child**, one at a time, so a start's wait never
   // keeps the server from answering GitHub within its ten seconds (/code-review).
   let child = null;
-  let again = false;
+  // What waits on the child: null, the inbox, or a whole read, which reads the
+  // inbox too, so a timer's read that finds the child busy is not lost to it
+  // (plans/app-old-registration-said.md, part 2).
+  let again = null;
   const run = (args) => {
     if (child) {
-      again = true;
+      again = args.length === 0 || again?.length === 0 ? [] : ["--inbox"];
       return;
     }
     child = spawn(process.execPath, [fileURLToPath(import.meta.url), "github", ...args], {
@@ -7107,8 +7179,9 @@ export async function webhookCommand(args = [], env = process.env) {
     child.on("exit", () => {
       child = null;
       if (again) {
-        again = false;
-        run(["--inbox"]);
+        const next = again;
+        again = null;
+        run(next);
       }
     });
   };
@@ -7123,10 +7196,57 @@ export async function webhookCommand(args = [], env = process.env) {
     },
     after: work,
   });
-  server.on("listening", () => {
+  // **What the app has**, asked of GitHub: "has", "lacks" (set on the record),
+  // "unknown" when GitHub's answer or the record's write failed, the record's
+  // `lacks` left as it was, and "none" with no app's id, key or repository here.
+  // Never throws: the listener outlives a failed check (/code-review).
+  const check = async () => {
+    try {
+      const id = secret("WORKFLOW_APP_ID", env);
+      const key = secret("WORKFLOW_APP_KEY", env);
+      const repo = repoHere(spawnSync, env, false);
+      if (!id || !key || !repo) return "none";
+      const [owner, name] = repo.split("/");
+      const lacks = appLacks(await appStanding({ owner, repo: name, id, key, fetch }));
+      if (lacks) record.lacks = { ...lacks, repo };
+      else {
+        delete record.lacks;
+        try {
+          unlinkSync(files.webhookTold());
+        } catch {
+          // Never told.
+        }
+      }
+      writeJson(files.webhook(), record);
+      return lacks ? "lacks" : "has";
+    } catch {
+      return "unknown";
+    }
+  };
+  server.on("listening", async () => {
     writeJson(files.webhook(), record);
     // What a container that was down missed, once, as `plans github` reads it.
     run([]);
+    const first = await check();
+    if (first === "has" || first === "none") return;
+    // **While the app cannot send a failed run, the listener reads them
+    // itself**, asking GitHub again each time, so the read ends once it can:
+    // also while what the app has is unknown, or its id, key or repository
+    // cannot be read for a moment (/code-review); one read more when it gains
+    // them, for a run that failed since the last; and none once pull requests
+    // are off, the project file read afresh (Codex).
+    let checking = false;
+    const timer = setInterval(async () => {
+      if (checking) return;
+      if (project(root).land !== "pull-request") return clearInterval(timer);
+      checking = true;
+      const standing = await check();
+      checking = false;
+      if (standing !== "has") return run([]);
+      clearInterval(timer);
+      run([]);
+    }, every);
+    server.on("close", () => clearInterval(timer));
   });
   server.on("error", () => process.exit(1));
   return { said: "", status: 0, server };

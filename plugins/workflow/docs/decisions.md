@@ -490,6 +490,15 @@ on the machine that planned them.
   named by the Stop hook also while a webhook listens: GitHub itself
   notifies of Actions runs alone, and the token already reads checks.
   plans/failed-runs-the-webhook-misses.md.
+  15 November, later: an app registered before its line named Actions
+  and Workflow run sent no failed run, and with its listener alive
+  nothing read them. The listener asks GitHub what the app's
+  registration and installation have, tells the owner once what to add
+  or to accept, as `gh` names a missing scope and the command that
+  adds it, and reads failed runs every five minutes meanwhile: the
+  project that asked runs its checks in about four, and its token
+  cannot read a pull request's checks, so the Stop hook's read would
+  bring nothing there. plans/app-old-registration-said.md.
   - ~~The checks are watched after every push and fixed before the
     next plan.~~ (Javi, 28 October)
 - `plans-reach-an-executor` **Ready plans never wait with no executor: a
@@ -680,6 +689,8 @@ on the machine that planned them.
   too, `failed`, with issues on or off. plans/executor-never-watches-ci.md.
   15 November: a failed run is an event whatever set it off.
   plans/failed-runs-the-webhook-misses.md.
+  15 November: the listener reads what its app can send and, lacking
+  failed runs, reads them itself. plans/app-old-registration-said.md.
 - `days-fixes` **The day's fixes are one pull request, `Small fixes, <d
   Month yyyy>`, never two in a day.** (Javi, 30 October) A daily pull
   request for the small fixes rather than a message for the group, which

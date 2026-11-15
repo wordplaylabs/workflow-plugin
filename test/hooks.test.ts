@@ -19,7 +19,7 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { QUEUE_IGNORES } from "../plugins/workflow/scripts/project.mjs";
 import {
   listToJudge,
@@ -49,6 +49,8 @@ import {
   withShare,
   sweepTemp,
   ghCommand,
+  appLine,
+  webhookLine,
   secret,
   notesWaiting,
   marksReady,
@@ -130,7 +132,12 @@ import {
   seenIn,
   seenOf,
 } from "../plugins/workflow/scripts/seen.mjs";
-import { appJwt, repoOfRemote } from "../plugins/workflow/scripts/github-app.mjs";
+import {
+  appJwt,
+  appLacks,
+  appStanding,
+  repoOfRemote,
+} from "../plugins/workflow/scripts/github-app.mjs";
 import {
   WEBHOOK_EVENTS,
   githubEvents,
@@ -8039,6 +8046,73 @@ describe("github-app", () => {
     expect(appJwt("123", pem.replace(/\n/g, "\\n"), now)).toBe(jwt);
   });
 
+  // plans/app-old-registration-said.md, part 1: what the app has, asked of GitHub.
+  const answering =
+    (answers: Record<string, [number, object]>, asked: string[] = []) =>
+    async (url: string) => {
+      const path = new URL(url).pathname;
+      asked.push(path);
+      const [status, body] = answers[path] || [404, { message: "Not Found" }];
+      return new Response(JSON.stringify(body), { status });
+    };
+
+  it("appStanding reads the registration and the installation, and throws GitHub's message", async () => {
+    const asked: string[] = [];
+    const fetch = answering(
+      {
+        "/app": [200, { slug: "docs-claude", permissions: { actions: "write" }, events: ["push"] }],
+        "/repos/o/r/installation": [
+          200,
+          {
+            id: 7,
+            permissions: { issues: "write" },
+            events: ["issues"],
+            html_url: "https://github.com/settings/installations/7",
+          },
+        ],
+      },
+      asked,
+    );
+    const standing = await appStanding({ owner: "o", repo: "r", id: "1", key: pem, fetch });
+    expect(standing).toEqual({
+      slug: "docs-claude",
+      app: { permissions: { actions: "write" }, events: ["push"] },
+      installation: {
+        permissions: { issues: "write" },
+        events: ["issues"],
+        url: "https://github.com/settings/installations/7",
+      },
+    });
+    expect(asked).toEqual(["/app", "/repos/o/r/installation"]);
+    const missing = answering({ "/app": [200, { slug: "s" }] });
+    await expect(
+      appStanding({ owner: "o", repo: "r", id: "1", key: pem, fetch: missing }),
+    ).rejects.toThrow("GET /repos/o/r/installation answered 404: Not Found");
+  });
+
+  it("appLacks says where a failed run cannot come from, and what is missing", () => {
+    const none = { permissions: {}, events: [] };
+    const both = { permissions: { actions: "read" }, events: ["workflow_run"] };
+    const url = "https://github.com/settings/installations/7";
+    expect(appLacks({ slug: "s", app: none, installation: { ...both, url } })).toEqual({
+      where: "app",
+      what: ["Actions read and write", "the Workflow run event"],
+      slug: "s",
+    });
+    expect(appLacks({ slug: "s", app: both, installation: { ...both, url } })).toBeNull();
+    expect(appLacks({ slug: "s", app: both, installation: { ...none, url } })).toEqual({
+      where: "installation",
+      what: ["Actions read and write", "the Workflow run event"],
+      slug: "s",
+      url,
+    });
+    const write = { permissions: { actions: "write" }, events: ["workflow_run"] };
+    expect(appLacks({ slug: "s", app: write, installation: { ...write, url } })).toBeNull();
+    expect(
+      appLacks({ slug: "s", app: { ...write, events: [] }, installation: { ...write, url } }),
+    ).toEqual({ where: "app", what: ["the Workflow run event"], slug: "s" });
+  });
+
   it("reads the repository from a GitHub remote, https or ssh", () => {
     expect(repoOfRemote("https://github.com/o/r.git\n")).toBe("o/r");
     expect(repoOfRemote("git@github.com:o/r")).toBe("o/r");
@@ -9181,6 +9255,277 @@ else say([]);
         await new Promise((done) => taken.close(done));
       }
     }, 10_000);
+  });
+});
+
+// plans/app-old-registration-said.md: an app that cannot send a failed run is said once, and its
+// listener reads them itself until it can.
+describe("an app that sends no failed run", () => {
+  const both = ["Actions read and write", "the Workflow run event"];
+  const url = "https://github.com/settings/installations/7";
+  const app = { where: "app" as const, what: both, slug: "docs-claude", repo: "o/r" };
+  const installation = {
+    where: "installation" as const,
+    what: both,
+    slug: "docs-claude",
+    url,
+    repo: "o/r",
+  };
+
+  it("webhookLine says it while it holds, and is unchanged without", () => {
+    const record = { pid: 1, port: 8789, at: Date.now(), lastAt: 0 };
+    expect(webhookLine(record)).toMatch(/^The webhook: listening on 8789 since \d\d:\d\d\.$/);
+    expect(webhookLine({ ...record, lacks: app })).toMatch(
+      /^The webhook: listening on 8789 since \d\d:\d\d; the app sends no failed run \(it lacks Actions read and write and the Workflow run event\), so they are read every five minutes\.$/,
+    );
+    expect(webhookLine({ ...record, lastAt: Date.now(), lacks: installation })).toMatch(
+      /, last delivery \d\d:\d\d; the app sends no failed run \(its new permissions are not accepted\), so they are read every five minutes\.$/,
+    );
+  });
+
+  it("appLine says what to add and where, it for one and them for two, or where to accept", () => {
+    expect(appLine(app)).toBe(
+      "The project's Claude is sent no failed run by GitHub: its app lacks Actions read and write and the Workflow run event. Add them on GitHub (Settings, Developer settings, GitHub Apps, docs-claude, Permissions & events) and accept the new permissions if GitHub asks. Until then failed runs are read every five minutes.",
+    );
+    expect(appLine({ ...app, what: ["the Workflow run event"] })).toBe(
+      "The project's Claude is sent no failed run by GitHub: its app lacks the Workflow run event. Add it on GitHub (Settings, Developer settings, GitHub Apps, docs-claude, Permissions & events) and accept the new permissions if GitHub asks. Until then failed runs are read every five minutes.",
+    );
+    expect(appLine(installation)).toBe(
+      "The project's Claude is sent no failed run by GitHub: its app's new permissions are not accepted on o/r yet. Accept them at https://github.com/settings/installations/7. Until then failed runs are read every five minutes.",
+    );
+  });
+
+  describe("plans webhook --serve, in process", () => {
+    const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
+    const until = async (ok: () => boolean, ms = 20_000) => {
+      const end = Date.now() + ms;
+      while (!ok()) {
+        if (Date.now() > end) throw new Error("timed out");
+        await pause(50);
+      }
+    };
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    const sha = "4f1c2b9a7e3d5c8b";
+    // A port nothing holds: a listener in this process that cannot bind exits it.
+    const freePort = () =>
+      new Promise<number>((done) => {
+        const probe = createServer();
+        probe.listen(0, "127.0.0.1", () => {
+          const { port } = probe.address() as { port: number };
+          probe.close(() => done(port));
+        });
+      });
+    let dir: string;
+    let stub: string;
+    // The queue's module with its root at `dir`: the root is read once, at import.
+    const queueAt = async (root: string) => {
+      const saved = process.env.WORKFLOW_ROOT;
+      process.env.WORKFLOW_ROOT = root;
+      vi.resetModules();
+      try {
+        return await import("../plugins/workflow/scripts/plan-queue.mjs");
+      } finally {
+        if (saved === undefined) delete process.env.WORKFLOW_ROOT;
+        else process.env.WORKFLOW_ROOT = saved;
+      }
+    };
+    const env = (port: number, extra: Record<string, string> = {}) => ({
+      PATH: process.env.PATH || "",
+      WORKFLOW_ROOT: dir,
+      CLAUDE_PROJECT_DIR: dir,
+      WORKFLOW_WEBHOOK_SECRET: "s3cret",
+      WORKFLOW_WEBHOOK_PORT: String(port),
+      WORKFLOW_GH: join(stub, "gh"),
+      WORKFLOW_CLAUDE: join(stub, "claude"),
+      STUB_ROWS: join(stub, "rows.json"),
+      WORKFLOW_STARTS_LOG: join(stub, "starts.log"),
+      WORKFLOW_USAGE_FILE: join(stub, "usage.json"),
+      CLAUDE_PLUGIN_OPTION_OWNER: "Javi",
+      CLAUDE_PLUGIN_OPTION_MACHINE: "lab",
+      WORKFLOW_APP_ID: "1",
+      WORKFLOW_APP_KEY: pem,
+      ...extra,
+    });
+    beforeAll(() => {
+      stub = mkdtempSync(join(tmpdir(), "app-lacks-stub-"));
+      writeFileSync(join(stub, "rows.json"), "[]");
+      writeFileSync(
+        join(stub, "claude"),
+        `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const rows = process.env.STUB_ROWS;
+if (args[0] === "agents") process.stdout.write(fs.readFileSync(rows, "utf8"));
+else {
+  const name = args[args.indexOf("--name") + 1];
+  const all = JSON.parse(fs.readFileSync(rows, "utf8"));
+  all.push({ sessionId: "stub-" + Date.now(), name, kind: "background", cwd: process.cwd() });
+  fs.writeFileSync(rows, JSON.stringify(all));
+}
+`,
+      );
+      writeFileSync(
+        join(stub, "gh"),
+        `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.STUB_ROWS.replace("rows.json", "asked.log"), args.join(" ") + "\\n");
+const say = (value) => process.stdout.write(JSON.stringify(value));
+if (args[0] === "pr" && args.includes("open"))
+  say([{ number: 40, title: "Series keep their order", url: "https://github.com/o/r/pull/40",
+    headRefName: "series-order", headRefOid: "${sha}", comments: [], reviews: [] }]);
+else if (args[0] === "run" && args[1] === "list")
+  say([{ databaseId: 5, attempt: 1, status: "completed", conclusion: "failure", headSha: "${sha}",
+    workflowName: "Checks", updatedAt: "2026-11-14T21:04:00Z", url: "https://github.com/o/r/actions/runs/5" }]);
+else if (args[0] === "api" && /collaborators/.test(args[1])) process.stdout.write("write");
+else say([]);
+`,
+      );
+      chmodSync(join(stub, "claude"), 0o755);
+      chmodSync(join(stub, "gh"), 0o755);
+      dir = mkdtempSync(join(tmpdir(), "app-lacks-"));
+      execFileSync("git", ["init", "-q"], { cwd: dir });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/o/r.git"], { cwd: dir });
+      mkdirSync(join(dir, ".claude"));
+      mkdirSync(join(dir, "plans"));
+      writeFileSync(
+        join(dir, ".claude", "workflow.md"),
+        "---\nname: Runs\nbranch: test\nland: pull-request\n---\n\n# Runs\n",
+      );
+      writeFileSync(
+        join(dir, "plans", "series-order.md"),
+        "# Series\n\nPlan only, 14 November 2026, for Javi.\n\n## Built, 14 November 2026\n\nPull request #40 (https://github.com/o/r/pull/40) to test from branch series-order, commit 4f1c2b9a; draft.\n",
+      );
+    });
+    afterAll(() => {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(stub, { recursive: true, force: true });
+    });
+
+    it(
+      "reads failed runs every period while the installation lacks them, and stops once it has them",
+      { timeout: 60_000 },
+      async () => {
+        let has = false;
+        const asked: string[] = [];
+        const fetch = async (address: string) => {
+          const path = new URL(address).pathname;
+          asked.push(path);
+          const granted = { permissions: { actions: "write" }, events: ["workflow_run"] };
+          const body =
+            path === "/app"
+              ? { slug: "docs-claude", ...granted }
+              : has
+                ? { id: 7, html_url: url, ...granted }
+                : { id: 7, html_url: url, permissions: { issues: "write" }, events: ["issues"] };
+          return new Response(JSON.stringify(body), { status: 200 });
+        };
+        const port = await freePort();
+        const queue = await queueAt(dir);
+        const { server } = await queue.webhookCommand(["--serve"], env(port), { fetch, every: 50 });
+        const record = () => JSON.parse(readFileSync(join(dir, ".claude", "webhook.json"), "utf8"));
+        const told = join(dir, ".claude", "webhook.told.json");
+        const log = join(stub, "asked.log");
+        const runLists = () =>
+          (existsSync(log) ? readFileSync(log, "utf8") : "")
+            .split("\n")
+            .filter((line) => line.startsWith("run list")).length;
+        try {
+          await until(() => existsSync(join(dir, ".claude", "webhook.json")) && record().lacks);
+          expect(record().lacks).toEqual({ ...installation, repo: "o/r" });
+          expect(queue.webhookLine(record())).toContain(
+            "; the app sends no failed run (its new permissions are not accepted), so they are read every five minutes.",
+          );
+          // The read at the start, then the timer's: run list asked again.
+          await until(() => runLists() >= 2);
+          await until(() => existsSync(join(dir, "plans", "github", "40.md")));
+          expect(readFileSync(join(dir, "plans", "github", "40.md"), "utf8")).toContain(
+            "Checks run 5 on 4f1c2b9a: https://github.com/o/r/actions/runs/5",
+          );
+          await until(() => JSON.parse(readFileSync(join(stub, "rows.json"), "utf8")).length > 0);
+          expect(JSON.parse(readFileSync(join(stub, "rows.json"), "utf8"))[0].name).toBe(
+            "Runs Assistant 1 (lab)",
+          );
+          // The app gains them: lacks and the told file go, and nothing more is asked or read.
+          writeFileSync(told, JSON.stringify({ told: "installation: x", at: 1 }));
+          has = true;
+          await until(() => !record().lacks);
+          expect(existsSync(told)).toBe(false);
+          await pause(2000);
+          const [calls, reads] = [asked.length, runLists()];
+          await pause(600);
+          expect([asked.length, runLists()]).toEqual([calls, reads]);
+        } finally {
+          await new Promise((done) => server!.close(done));
+        }
+      },
+    );
+
+    // Codex: what the app has unknown is read for anyway; pull requests off end the reads.
+    it(
+      "reads while GitHub's answer fails, and stops once pull requests are off",
+      { timeout: 60_000 },
+      async () => {
+        let calls = 0;
+        const fetch = async () => {
+          calls += 1;
+          return new Response(JSON.stringify({ message: "Server Error" }), { status: 500 });
+        };
+        const port = await freePort();
+        const file = join(dir, ".claude", "workflow.md");
+        const kept = readFileSync(file, "utf8");
+        const log = join(stub, "asked.log");
+        rmSync(log, { force: true });
+        rmSync(join(dir, ".claude", "webhook.json"), { force: true });
+        const runLists = () =>
+          (existsSync(log) ? readFileSync(log, "utf8") : "")
+            .split("\n")
+            .filter((line) => line.startsWith("run list")).length;
+        const queue = await queueAt(dir);
+        const { server } = await queue.webhookCommand(["--serve"], env(port), { fetch, every: 50 });
+        try {
+          await until(() => runLists() >= 2);
+          expect(JSON.parse(readFileSync(join(dir, ".claude", "webhook.json"), "utf8")).lacks).toBe(
+            undefined,
+          );
+          writeFileSync(file, kept.replace("land: pull-request\n", ""));
+          await pause(2000);
+          const [asked, reads] = [calls, runLists()];
+          await pause(600);
+          expect([calls, runLists()]).toEqual([asked, reads]);
+        } finally {
+          writeFileSync(file, kept);
+          await new Promise((done) => server!.close(done));
+        }
+      },
+    );
+
+    it("with no app id asks GitHub nothing and runs no timer", { timeout: 20_000 }, async () => {
+      let calls = 0;
+      const fetch = async () => {
+        calls += 1;
+        return new Response("{}", { status: 200 });
+      };
+      const port = await freePort();
+      rmSync(join(dir, ".claude", "webhook.json"), { force: true });
+      const queue = await queueAt(dir);
+      const { server } = await queue.webhookCommand(
+        ["--serve"],
+        env(port, { WORKFLOW_APP_ID: "" }),
+        { fetch, every: 50 },
+      );
+      try {
+        await until(() => existsSync(join(dir, ".claude", "webhook.json")));
+        await pause(500);
+        expect(calls).toBe(0);
+        expect(JSON.parse(readFileSync(join(dir, ".claude", "webhook.json"), "utf8")).lacks).toBe(
+          undefined,
+        );
+      } finally {
+        await new Promise((done) => server!.close(done));
+      }
+    });
   });
 });
 

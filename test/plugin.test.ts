@@ -16,6 +16,7 @@ import { delimiter, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   agentLine,
+  appLine,
   canStart,
   checkDeny,
   data,
@@ -3540,6 +3541,53 @@ describe("the agent a project's chats open as", () => {
       agentLine("maker"),
     );
     expect(JSON.parse(readLocal(compact)).agent).toBe("workflow:maker");
+  });
+
+  // plans/app-old-registration-said.md, part 4: an app that sends no failed run is said once.
+  it("says once in the owner's chat that the app sends no failed run, again when that changes", () => {
+    const root = project();
+    writeFileSync(
+      join(root, ".claude", "workflow.md"),
+      "---\nname: A\nbranch: main\nland: pull-request\n---\n",
+    );
+    // The agent already set, so the agent's line is not what this start says.
+    writeFileSync(local(root), JSON.stringify({ agent: "workflow:assistant" }));
+    const both = ["Actions read and write", "the Workflow run event"];
+    const app = { where: "app", what: both, slug: "docs-claude", repo: "o/r" };
+    const accept = {
+      where: "installation",
+      what: both,
+      slug: "docs-claude",
+      url: "https://github.com/settings/installations/7",
+      repo: "o/r",
+    };
+    // A listener's record, its pid this test's, alive.
+    const record = (lacks?: object) =>
+      writeFileSync(
+        join(root, ".claude", "webhook.json"),
+        JSON.stringify({ pid: process.pid, port: 1, at: Date.now(), lastAt: 0, lacks }),
+      );
+    const start = (id: string, env: Record<string, string> = {}) =>
+      // No secret, from the environment or a secrets file, so no listener is armed here.
+      hookIn(
+        root,
+        { session_id: id },
+        { WORKFLOW_WEBHOOK_SECRET: "", WORKFLOW_SECRETS_FILE: "", ...env },
+      );
+    record(app);
+    const said = JSON.parse(start("a1"));
+    expect(said.systemMessage).toBe(appLine(app));
+    expect(said.hookSpecificOutput).toEqual({
+      hookEventName: "SessionStart",
+      additionalContext: `${appLine(app)}\n\nSay this line to the owner in its own words, then go on with what was asked.`,
+    });
+    expect(start("a2")).toBe("");
+    record(accept);
+    expect(start("a3", { WORKFLOW_STARTED: "planner" })).toBe("");
+    expect(JSON.parse(start("a4")).systemMessage).toBe(appLine(accept));
+    expect(start("a5")).toBe("");
+    record();
+    expect(start("a6")).toBe("");
   });
 
   it("does nothing in a folder with no project file", () => {

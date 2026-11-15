@@ -520,7 +520,12 @@ assistant by the app's webhook, as `failed` in `plans/github/<n>.md`: it reads t
 failed log and the diff, reruns the failed jobs once when the diff
 does not explain the failure, and writes the fix's short plan,
 landing in that pull request, when it does or the rerun fails too.
-What CI does that the local checks cannot (a deploy, a check that
+An app that cannot send a failed run, with no Actions permission or
+no Workflow run event on its registration, or with them not yet
+accepted on its installation, is said once at the start of the
+owner's own chat and in `plans`' webhook line while it holds, and
+its listener reads failed runs itself every five minutes until it
+can. What CI does that the local checks cannot (a deploy, a check that
 needs the hosted machine or a secret) is the project file's `run`,
 read after a push straight to the branch, and nothing else is. The
 executor's Stop hook names a failed check the webhook does not bring,
@@ -831,8 +836,9 @@ comment, Pull request, Pull request review, Pull request review comment
 and Workflow run; without Actions and Workflow run no failed run reaches
 the queue, and without one of the others its notes do not. `plans gh`
 with no app says the same, and `plans webhook` with no secret names the
-same events, both from the webhook's own list. Any of the four
-variables left out of
+same events, both from the webhook's own list. A listener whose app
+lacks Actions or Workflow run says so ("A push is not waited on"). Any
+of the four variables left out of
 the environment is read, when the queue uses it, from the private dotenv
 file that `WORKFLOW_SECRETS_FILE` names (a relative path from the
 checkout's root), and never put into the environment, so the key stays

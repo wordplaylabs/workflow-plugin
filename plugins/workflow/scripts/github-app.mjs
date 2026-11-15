@@ -131,3 +131,63 @@ export function repoOfRemote(url = "") {
   const m = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url.trim());
   return m ? `${m[1]}/${m[2]}` : null;
 }
+
+/**
+ * **What the app has** (plans/app-old-registration-said.md, part 1): its
+ * registration, `GET /app`, and its installation on the repository, `GET
+ * /repos/{owner}/{repo}/installation`, each with the permissions and events
+ * GitHub gives, the installation's with its address, where its owner accepts
+ * new permissions. One JWT for both; throws as either call does.
+ */
+export async function appStanding({
+  owner,
+  repo,
+  id,
+  key,
+  fetch = globalThis.fetch,
+  now = Date.now(),
+}) {
+  const jwt = appJwt(id, key, now);
+  const app = await call(fetch, "GET", "/app", jwt);
+  const inst = await call(fetch, "GET", `/repos/${owner}/${repo}/installation`, jwt);
+  return {
+    slug: app?.slug || "",
+    app: { permissions: app?.permissions || {}, events: app?.events || [] },
+    installation: {
+      permissions: inst?.permissions || {},
+      events: inst?.events || [],
+      url: inst?.html_url || "",
+    },
+  };
+}
+
+/**
+ * **What a failed run needs that a grant lacks**: Actions read or write, and
+ * the Workflow run event. An app with Actions read is sent every run; only its
+ * rerun is refused, which the assistant already turns into a short plan.
+ */
+export function runsLack({ permissions = {}, events = [] } = {}) {
+  const lacks = [];
+  if (!["read", "write"].includes(permissions.actions)) lacks.push("Actions read and write");
+  if (!events.includes("workflow_run")) lacks.push("the Workflow run event");
+  return lacks;
+}
+
+/**
+ * **Where the app cannot send a failed run**: its registration, else its
+ * installation, whose new permissions wait on the account's owner; null when
+ * both have what it takes.
+ */
+export function appLacks(standing) {
+  const registered = runsLack(standing.app);
+  if (registered.length) return { where: "app", what: registered, slug: standing.slug };
+  const installed = runsLack(standing.installation);
+  if (installed.length)
+    return {
+      where: "installation",
+      what: installed,
+      slug: standing.slug,
+      url: standing.installation.url,
+    };
+  return null;
+}

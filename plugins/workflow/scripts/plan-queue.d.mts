@@ -143,6 +143,27 @@ export function launchEnv(
 ): Record<string, string | undefined>;
 /** The line a plain chat that opened before its agent's setting says, for `assistant` or `maker`. */
 export function agentLine(kind: string): string;
+export type AppLacks = {
+  where: "app" | "installation";
+  what: string[];
+  slug: string;
+  url?: string;
+  repo?: string;
+};
+export function appLine(lacks: AppLacks): string;
+export type WebhookRecord = {
+  pid: number;
+  port: number | string;
+  at: number;
+  lastAt: number;
+  lacks?: AppLacks;
+};
+export function webhookLine(record?: WebhookRecord | null): string;
+export function webhookCommand(
+  args?: string[],
+  env?: Record<string, string | undefined>,
+  options?: { fetch?: typeof fetch; every?: number },
+): Promise<{ said: string; status: number; server?: import("node:http").Server }>;
 export function takeLock(
   sessionId: string,
   live: LiveRow[] | null,

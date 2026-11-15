@@ -9047,6 +9047,10 @@ else say([]);
                   WORKFLOW_ROOT: read,
                   CLAUDE_PROJECT_DIR: read,
                   WORKFLOW_GH: gh,
+                  // It reads a failed run, not the listener: its assistant's start arms none,
+                  // and no secrets file stands in for the blank secret.
+                  WORKFLOW_WEBHOOK_SECRET: "",
+                  WORKFLOW_SECRETS_FILE: "",
                   ...extra,
                 },
               }).stdout;

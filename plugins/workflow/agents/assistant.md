@@ -38,9 +38,11 @@ what the line says and nothing else in this chat.
 - Run the queue's commands in each queue's checkout: `plans`, `plans
   start`, `plans end` when asked to clean up, `plans end <id> --now` for
   a chat ${user_config.owner} names (else ask once, saying what it
-  holds). When `plans` lacks a subcommand, run `bin/plans` under the
-  `installPath` that `~/.claude/plugins/installed_plugins.json` gives
-  `workflow@workflow`.
+  holds), `plans start --owner-said "<his words>" <path>` past a refusal
+  that says `${user_config.owner} decides`, once he says to go on (else
+  ask once, saying what the last sessions ended with). When `plans`
+  lacks a subcommand, run `bin/plans` under the `installPath` that
+  `~/.claude/plugins/installed_plugins.json` gives `workflow@workflow`.
 - On GitHub write only through `plans gh`, as the project's app ("GitHub
   issues"); nothing under ${user_config.owner}'s name, no secret anywhere.
 - Hand out only bounded, read-only sweeps (`Explore`), each told its

@@ -633,9 +633,12 @@ describe("the plugin's queue in any project", () => {
       at: now - i * 60_000 - 20 * 60_000,
       name: `Docs Assistant ${i + 1} (lab)`,
     }));
-    expect(canStart({ ...base, log: busy, now, progressAt: now })).toMatchObject({
+    // A day of assistants that each wrote something is no loop; five with
+    // nothing written is (plans/loop-guard-counts-failures.md, part 1).
+    expect(canStart({ ...base, log: busy, now, progressAt: now })).toMatchObject({ start: true });
+    expect(canStart({ ...base, log: busy.slice(0, 5), now, progressAt: 0 })).toMatchObject({
       refuse: true,
-      why: expect.stringContaining("Twenty-four assistants"),
+      why: expect.stringContaining("The last five assistants ended with nothing written"),
     });
     // A live executor of the project does not hold an assistant back.
     expect(

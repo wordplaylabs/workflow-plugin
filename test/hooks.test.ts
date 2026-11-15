@@ -1451,21 +1451,139 @@ describe("plan-queue", () => {
       });
     });
 
-    it("refuses after a quick death and at the tripwire, and names the next executor", () => {
+    it("refuses after a quick death, and names the next executor", () => {
       const last = { at: now - 5 * 60_000, name: "Executor 3" };
-      expect(canStart({ now, log: [last], usage: usage(10) }).why).toContain("Executor 3");
+      expect(canStart({ now, log: [last], usage: usage(10) }).why).toBe(
+        'The last executor (Executor 3) ended within ten minutes with nothing built, and usage was not the cause; starting another would repeat it. Javi decides: a yes starts one more, by plans start --owner-said "<the words>".',
+      );
       expect(
         canStart({ now, log: [last], progressAt: now - 60_000, usage: usage(10) }),
       ).toMatchObject({
         start: true,
         name: "Executor 4",
       });
-      const day = Array.from({ length: 24 }, (_, i) => ({
-        at: now - (i + 1) * 30 * 60_000,
-        name: `Executor ${i + 2}`,
-      }));
-      expect(canStart({ now, log: day.reverse(), usage: usage(10) }).why).toContain("Twenty-four");
       expect(canStart({ now, usage: usage(10) })).toMatchObject({ name: "Executor 1" });
+    });
+
+    // plans/loop-guard-counts-failures.md, parts 1 and 2.
+    describe("the loop guard counts five in a row with nothing done", () => {
+      // As starts.log writes them, oldest first.
+      const line = (minutesAgo: number, n: number, kind = "Executor") => ({
+        at: now - minutesAgo * 60_000,
+        name: `Executor ${n}`.replace("Executor", kind),
+        paths: ["plans/x.md"],
+        five: 10,
+        seven: 10,
+      });
+      // Five within an hour, the newest twenty minutes old: no quick death.
+      const five = [60, 50, 40, 30, 20].map((ago, i) => line(ago, i + 1));
+      const looping = "The last five executors ended with nothing built; something is looping.";
+
+      it("lets a day of executors that each built start a twenty-fifth", () => {
+        const day = Array.from({ length: 24 }, (_, i) => line((24 - i) * 55, i + 1));
+        expect(
+          canStart({ now, log: day, progressAt: now - 60_000, usage: usage(10) }),
+        ).toMatchObject({ start: true, name: "Executor 25" });
+      });
+
+      it("refuses five with nothing built since, and starts four", () => {
+        expect(
+          canStart({ now, log: five, progressAt: now - 2 * 3600_000, usage: usage(10) }),
+        ).toEqual({
+          refuse: true,
+          why: `${looping} Javi decides: a yes starts one more, by plans start --owner-said "<the words>".`,
+        });
+        expect(canStart({ now, log: five.slice(1), usage: usage(10) })).toMatchObject({
+          start: true,
+        });
+      });
+
+      it("counts no start older than a day, and none before the newest progress", () => {
+        // Four in the day and one older: the old one is not counted.
+        const aged = [line(25 * 60, 1), ...five.slice(1)];
+        expect(canStart({ now, log: aged, usage: usage(10) })).toMatchObject({ start: true });
+        // Progress between the second and the third.
+        expect(
+          canStart({ now, log: five, progressAt: now - 45 * 60_000, usage: usage(10) }),
+        ).toMatchObject({ start: true, name: "Executor 6" });
+      });
+
+      it("starts one more on the owner's word, past either refusal", () => {
+        const said = "Yes, we should continue";
+        expect(canStart({ now, log: five, said, usage: usage(10) })).toMatchObject({
+          start: true,
+          name: "Executor 6",
+          past: looping,
+        });
+        const last = { at: now - 5 * 60_000, name: "Executor 3" };
+        expect(canStart({ now, log: [last], said, usage: usage(10) })).toMatchObject({
+          start: true,
+          past: expect.stringMatching(/^The last executor \(Executor 3\) ended within ten minutes/),
+        });
+        // A start with nothing to pass carries no past.
+        expect(canStart({ now, said, usage: usage(10) })).not.toHaveProperty("past");
+      });
+
+      it("passes nothing else: the pause, the usage windows and a live executor answer as before", () => {
+        const said = "Yes, we should continue";
+        expect(canStart({ now, log: five, said, paused: "today", usage: usage(10) })).toMatchObject(
+          { refuse: true, why: expect.stringContaining("The queue is paused") },
+        );
+        expect(canStart({ now, log: five, said, usage: usage(81) })).toMatchObject({
+          defer: true,
+          why: "the five-hour window is at 81 percent",
+        });
+        const lock = { sessionId: "abc", pid: 1, name: "Executor 5" };
+        expect(
+          canStart({ now, log: five, said, lock, alive: () => true, usage: usage(10) }),
+        ).toMatchObject({ refuse: true, why: expect.stringContaining("An executor is alive") });
+      });
+
+      it("counts a GitHub note an assistant handled as written, and not one with an event after", () => {
+        const dir = mkdtempSync(join(tmpdir(), "written-notes-"));
+        try {
+          const none = join(dir, "decisions-taken.md");
+          writeFileSync(
+            join(dir, "40.md"),
+            "# Pull request #40\n\ncomment, 15 November 2026 15:00, by a\n\n## Handled, 15 November 2026\n\nAnswered.\n",
+          );
+          const handled = statSync(join(dir, "40.md")).mtimeMs;
+          expect(writtenAt([], none, dir)).toBe(handled);
+          writeFileSync(
+            join(dir, "40.md"),
+            "# Pull request #40\n\n## Handled, 15 November 2026\n\nAnswered.\n\ncomment, 15 November 2026 16:00, by a\n",
+          );
+          expect(writtenAt([], none, dir)).toBe(0);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
+
+      it("counts no planner still at work beside which the start goes", () => {
+        const planners = [60, 50, 40, 30, 20].map((ago, i) => line(ago, i + 1, "Planner"));
+        const busy = {
+          sessionId: "p5",
+          name: "Planner 5",
+          status: "busy",
+          usage: { context: 300_000 },
+        };
+        expect(canStart({ kind: "planner", now, log: planners, usage: usage(10) })).toMatchObject({
+          refuse: true,
+          why: expect.stringContaining(
+            'The last five planners ended with nothing planned; something is looping. Javi decides: a yes starts one more, by plans start --agent planner --owner-said "<the words>".',
+          ),
+        });
+        expect(
+          canStart({
+            kind: "planner",
+            now,
+            log: planners,
+            sessions: [busy],
+            brief: "plans/b.md",
+            usage: usage(10),
+          }),
+        ).toMatchObject({ start: true, name: "Planner 6" });
+      });
     });
   });
 
@@ -4464,9 +4582,9 @@ if (args[0] === "agents") {
       chmodSync(script, 0o755);
       return { script, rows };
     };
-    const startIn = (dir: string, env: Record<string, string>) => {
+    const startIn = (dir: string, env: Record<string, string>, args = ["plans/x.md"]) => {
       const { WORKFLOW_LIVE: _, ...rest } = process.env;
-      return execFileSync("node", [join(here, queue), "start", "plans/x.md"], {
+      return execFileSync("node", [join(here, queue), "start", ...args], {
         encoding: "utf8",
         env: {
           ...rest,
@@ -4497,6 +4615,136 @@ if (args[0] === "agents") {
         "Started Seen Executor 1 (lab)",
       );
     });
+    // plans/loop-guard-counts-failures.md, parts 2 to 4.
+    describe("the owner's word past five executors with nothing built", () => {
+      const words = "Yes, we should continue";
+      const looping = "The last five executors ended with nothing built; something is looping.";
+      /** A project whose log holds five executors within the hour, none built anything. */
+      const looped = (name: string) => {
+        const dir = fixture(name);
+        const now = Date.now();
+        writeFileSync(
+          join(dir, ".claude", "starts.log"),
+          [60, 50, 40, 30, 20]
+            .map(
+              (ago, i) =>
+                `${JSON.stringify({ at: now - ago * 60_000, name: `${name} Executor ${i + 1} (lab)`, paths: ["plans/x.md"], five: 10, seven: 10 })}\n`,
+            )
+            .join(""),
+        );
+        return dir;
+      };
+
+      it("a dry run prints the refusal, and with his words what it would start", () => {
+        const dir = looped("Dry");
+        const { script, rows } = stub();
+        const env = { WORKFLOW_CLAUDE: script, STUB_ROWS: rows };
+        expect(startIn(dir, env, ["--dry", "plans/x.md"])).toContain(
+          `${looping} Javi decides: a yes starts one more, by plans start --owner-said "<the words>".`,
+        );
+        const said = startIn(dir, env, ["--dry", "--owner-said", words, "plans/x.md"]);
+        expect(said).toMatch(/^Would run: claude .*"Dry Executor 6 \(lab\)"/m);
+        expect(said).toContain(`Would start on Javi's word, past: ${looping}`);
+      });
+
+      it("starts one more on his words and logs them", { timeout: 30_000 }, () => {
+        const dir = looped("Said");
+        const { script, rows } = stub();
+        const said = startIn(dir, { WORKFLOW_CLAUDE: script, STUB_ROWS: rows }, [
+          "--owner-said",
+          ` ${words}\n `,
+          "plans/x.md",
+        ]);
+        const sentence = `Javi said to start it ("${words}"), past: ${looping}`;
+        expect(said).toContain("Said Executor 6 (lab) was started on: plans/x.md.");
+        expect(said).toContain(sentence);
+        const last = JSON.parse(
+          readFileSync(join(dir, ".claude", "starts.log"), "utf8")
+            .trim()
+            .split("\n")
+            .at(-1)!,
+        );
+        expect(last).toMatchObject({ name: "Said Executor 6 (lab)", said: words });
+        expect(last.why).toContain(sentence);
+      });
+
+      it("prints the needs line for words left out, and starts nothing", () => {
+        const dir = looped("Needs");
+        const { script, rows } = stub();
+        const env = { WORKFLOW_CLAUDE: script, STUB_ROWS: rows };
+        const log = () => readFileSync(join(dir, ".claude", "starts.log"), "utf8");
+        const before = log();
+        for (const args of [
+          ["plans/x.md", "--owner-said"],
+          ["--owner-said", "  ", "plans/x.md"],
+          ["--owner-said", "--dry", "plans/x.md"],
+          ["--owner-said", "plans/x.md"],
+        ]) {
+          expect(startIn(dir, env, args)).toBe(
+            "plans start --owner-said needs what Javi said, in quotes, before the path.\n",
+          );
+        }
+        expect(log()).toBe(before);
+        expect(readFileSync(rows, "utf8")).toBe("[]");
+      });
+
+      it("a start deferred by usage keeps his words for the timer", { timeout: 30_000 }, () => {
+        const dir = looped("Later");
+        const { script, rows } = stub();
+        const now = Date.now() / 1000;
+        writeFileSync(
+          join(dir, ".claude", "usage.json"),
+          JSON.stringify({
+            at: now,
+            five_hour: { used_percentage: 90, resets_at: now + 3600 },
+          }),
+        );
+        const said = startIn(dir, { WORKFLOW_CLAUDE: script, STUB_ROWS: rows }, [
+          "--owner-said",
+          words,
+          "plans/x.md",
+        ]);
+        expect(said).toContain("Deferred until");
+        const file = join(dir, ".claude", "executor.deferred");
+        const deferred = JSON.parse(readFileSync(file, "utf8"));
+        const pids = [deferred.pid];
+        const cmdline = (pid: number) => readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+        try {
+          expect(deferred).toMatchObject({ said: words, paths: ["plans/x.md"] });
+          expect(cmdline(deferred.pid)).toEqual(expect.arrayContaining(["--owner-said", words]));
+          // A second plan joins the deferral, and the word stays with it.
+          startIn(dir, { WORKFLOW_CLAUDE: script, STUB_ROWS: rows }, ["plans/y.md"]);
+          const both = JSON.parse(readFileSync(file, "utf8"));
+          pids.push(both.pid);
+          expect(both).toMatchObject({ said: words, paths: ["plans/x.md", "plans/y.md"] });
+          // Started on his word with the window open again, x spends it: y
+          // is left deferred without it, its timer re-armed with no word (Codex C2).
+          writeFileSync(join(dir, ".claude", "usage.json"), JSON.stringify({ at: now }));
+          expect(
+            startIn(dir, { WORKFLOW_CLAUDE: script, STUB_ROWS: rows }, [
+              "--owner-said",
+              words,
+              "plans/x.md",
+            ]),
+          ).toContain("Later Executor 6 (lab) was started on: plans/x.md.");
+          const left = JSON.parse(readFileSync(file, "utf8"));
+          pids.push(left.pid);
+          expect(left.paths).toEqual(["plans/y.md"]);
+          expect(left).not.toHaveProperty("said");
+          expect(left.pid).not.toBe(both.pid);
+          expect(cmdline(left.pid)).not.toContain("--owner-said");
+          expect(cmdline(left.pid)).toContain("plans/y.md");
+        } finally {
+          for (const pid of pids)
+            try {
+              process.kill(pid);
+            } catch {
+              // Gone already.
+            }
+        }
+      });
+    });
+
     // plans/brief-lease-per-brief.md, part 1.
     it(
       "keeps a lease per brief: two entries, one timer at the earlier, and the file goes with the last",

@@ -554,6 +554,19 @@ on the machine that planned them.
   is.** (Javi, 27 October) A queue that starts sessions on its own must
   not spend the subscription's window or loop on a session that dies.
   plans/queue-faults-carried-over.md.
+  15 November (Javi): the day's bound counts the starts that ended with
+  nothing built, planned or written, five in a row, and the owner's yes
+  starts one more. In a project twenty-four executors that each built
+  and pushed, retiring at their ceiling, were refused a twenty-fifth as
+  a loop, and his yes had no way in. A circuit breaker opens on
+  failures in a row and a Kubernetes Job's `backoffLimit` counts failed
+  pods only; a breaker half open lets one trial through, and
+  `systemctl reset-failed` lets an administrator start a unit its start
+  limit refuses. An assistant's progress counts a note from GitHub it
+  handled, since answering a comment writes no plan.
+  plans/loop-guard-counts-failures.md.
+  - ~~A tripwire at twenty-four starts of a kind a day.~~ (Javi, 27
+    October)
 - `session-names` **Every session the queue starts is a Remote Control
   chat named after the project and the machine.** (Javi, 27 October) The
   owner finds each chat on his phone by its name, and no two sessions on

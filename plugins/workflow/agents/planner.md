@@ -210,7 +210,9 @@ hand-off. Say which happened, or the refusal, and
 with `land: pull-request` the topic and whether its pull request opens.
 One message per plan. Paused, write the plan and say so. A dropped plan
 is handed to nobody. "Pause the queue" and "resume the queue" are `plans
-pause` and `plans resume`.
+pause` and `plans resume`. A refusal that says `${user_config.owner}
+decides` is passed only on his yes here: `plans start --owner-said "<his
+words>" plans/<topic>.md`.
 
 Lead in plain words ("Asked in plain words"): what the plan will change
 for ${user_config.owner} and what waits on him, a behavior as When <what

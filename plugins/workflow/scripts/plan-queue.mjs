@@ -32,7 +32,8 @@
 // **Bounded, as every loop over model calls is**: one executor at a time
 // (the lock); no start without usage headroom, deferred to the window's
 // reset instead; no start after one that died within ten minutes for
-// another reason; a tripwire at twenty-four starts a day; a pause switch.
+// another reason; no start once the last five of a kind ended with nothing
+// done, until the owner says to start one; a pause switch.
 // Every session the queue starts is a Remote Control chat, so none runs
 // unwatched. No model call here; a hook that fails does nothing, which is
 // the behavior without it. Session state lives in the OS temp directory;
@@ -147,7 +148,10 @@ const MINUTE = 60_000;
 const APP_RECHECK = 5 * MINUTE;
 const QUICK_DEATH = 10 * MINUTE;
 const USAGE_STALE = 30 * MINUTE;
-const TRIPWIRE = 24;
+// **Five starts of a kind in a row with nothing done is a loop**
+// (plans/loop-guard-counts-failures.md, part 1): systemd's start burst, the
+// failures a circuit breaker counts before it opens.
+const LOOP_RUN = 5;
 const MAX_HANDOVERS = 6;
 /** Seconds after a window's reset that a deferred start runs. */
 const AFTER_RESET = 120;
@@ -2317,6 +2321,7 @@ export function canStart({
   machine = "",
   unwatched = false,
   open = [],
+  said = "",
 }) {
   // **Session names carry the project and the machine** (`Docs Executor 2
   // (lab)`), and the count is per project and per machine (the log is this
@@ -2489,19 +2494,34 @@ export function canStart({
       };
     }
   }
+  // **The two refusals the owner decides** (plans/loop-guard-counts-
+  // failures.md, parts 1 and 2): a quick death, and the last five starts of
+  // the kind in a day all made since the newest progress, a circuit
+  // breaker's failures in a row. A busy day of sessions that each did
+  // something is never a loop; among the five, a start whose session is
+  // still at work (one this start goes beside) has not ended. The quick
+  // death's condition is as it was. With his word (`said`) neither
+  // refuses: the decision carries `past`, the finding of the first that
+  // would have, and every check above has answered as before.
+  const done = { planner: "planned", assistant: "written" }[kind] || "built";
+  // A planner's or an assistant's start names its agent, as `plans start
+  // --agent planner <brief>` does, so the command it gives starts the same
+  // kind (/code-review).
+  const agentFlag = kind === "executor" ? "" : `--agent ${kind} `;
+  const decides = `${owner()} decides: a yes starts one more, by plans start ${agentFlag}--owner-said "<the words>".`;
+  const findings = [];
   const last = log.at(-1);
-  if (last && now - last.at < QUICK_DEATH && progressAt <= last.at) {
-    return {
-      refuse: true,
-      why: `The last ${kind} (${last.name}) ended within ten minutes with nothing ${{ planner: "planned", assistant: "written" }[kind] || "built"}, and usage was not the cause; starting another would repeat it. ${owner()} decides.`,
-    };
-  }
-  if (log.filter((line) => now - line.at < 24 * 60 * MINUTE).length >= TRIPWIRE) {
-    return {
-      refuse: true,
-      why: `Twenty-four ${kind}s were started in a day; something is looping. ${owner()} decides.`,
-    };
-  }
+  if (last && now - last.at < QUICK_DEATH && progressAt <= last.at)
+    findings.push(
+      `The last ${kind} (${last.name}) ended within ten minutes with nothing ${done}, and usage was not the cause; starting another would repeat it.`,
+    );
+  const going = new Set(beside.map((one) => one.name));
+  const since = log.filter(
+    (line) => now - line.at < 24 * 60 * MINUTE && progressAt <= line.at && !going.has(line.name),
+  );
+  if (since.length >= LOOP_RUN)
+    findings.push(`The last five ${kind}s ended with nothing ${done}; something is looping.`);
+  if (findings.length && !said) return { refuse: true, why: `${findings[0]} ${decides}` };
   // From 1 in a project with none started yet (/code-review, 27 October).
   // The live list counts too: the log can be reset (a marketplace move) while
   // a session it named is still alive.
@@ -2518,6 +2538,7 @@ export function canStart({
     name: sessionName(kind, n, { project: name, machine }),
     note: [note, besideNote].filter(Boolean).join(" "),
     ...(replace.length ? { replace } : {}),
+    ...(findings.length ? { past: findings[0] } : {}),
   };
 }
 
@@ -2677,9 +2698,15 @@ export function assistantPrompt(path) {
  * assistant writes, its progress for the quick-death rule. A built plan is
  * not one: the executor writes its "Built" just before it starts an
  * assistant (/code-review). An assistant handed only a decision to log
- * writes the log alone (plans/executor-never-waits.md, /code-review).
+ * writes the log alone (plans/executor-never-waits.md, /code-review). **A
+ * note from GitHub it handled counts** (plans/loop-guard-counts-failures.md,
+ * part 5): answering a comment or rerunning a job writes no plan.
  */
-export function writtenAt(plans, log = join(root, TAKEN_LOG)) {
+export function writtenAt(
+  plans,
+  log = join(root, TAKEN_LOG),
+  notes = join(root, "plans", "github"),
+) {
   let logged = 0;
   try {
     logged = statSync(log).mtimeMs;
@@ -2687,6 +2714,9 @@ export function writtenAt(plans, log = join(root, TAKEN_LOG)) {
   return Math.max(
     0,
     logged,
+    ...readNotes(notes)
+      .filter((one) => one.state === "handled")
+      .map((one) => one.mtime),
     ...plans
       .filter((plan) => ["brief", "planning", "ready"].includes(plan.state))
       .map((plan) => plan.mtime || 0),
@@ -3162,7 +3192,16 @@ function dropDeferred(file, paths) {
  * where `plans` shows it. **Paused, the deferral is held**: the file is
  * written with no timer (`pid: null`), and `resume` re-arms it.
  */
-function defer(until, why, paths, replace = "", agent = "executor", file = agent, retired = "") {
+function defer(
+  until,
+  why,
+  paths,
+  replace = "",
+  agent = "executor",
+  file = agent,
+  retired = "",
+  said = "",
+) {
   const old = readJson(files.deferred(file));
   if (old?.pid) {
     try {
@@ -3182,6 +3221,10 @@ function defer(until, why, paths, replace = "", agent = "executor", file = agent
       ? Math.max(Math.min(until, old?.until || Infinity), Date.now() + MINUTE)
       : Math.max(until, old?.until || 0, Date.now() + MINUTE);
   const stop = replace || old?.replace || "";
+  // **A deferred start keeps the owner's word** (plans/loop-guard-counts-
+  // failures.md, part 4): the timer removes this file before it starts, so
+  // the word goes on its command line.
+  const word = said || old?.said || "";
   const held = Boolean(pausedSince());
   // The timer runs as the command, so its root is said: this project's.
   const pid = held
@@ -3196,6 +3239,7 @@ function defer(until, why, paths, replace = "", agent = "executor", file = agent
           ...(stop ? ["--replace", stop] : []),
           ...(agent === "executor" ? [] : ["--agent", agent]),
           ...(file === agent ? [] : ["--deferral", file]),
+          ...(word ? ["--owner-said", word] : []),
           ...all,
         ],
         { ...process.env, WORKFLOW_ROOT: root },
@@ -3209,6 +3253,7 @@ function defer(until, why, paths, replace = "", agent = "executor", file = agent
     pid,
     replace: stop,
     ...(because ? { retired: because } : {}),
+    ...(word ? { said: word } : {}),
   });
   const hhmm = new Date(when).toTimeString().slice(0, 5);
   return held
@@ -3697,10 +3742,14 @@ function startHere(
     timer = false,
     deferral = "",
     why = "",
+    said = "",
   } = {},
 ) {
   if (!proj().found) return NO_PROJECT;
   paths = paths.map(queuePath);
+  // **The owner's word** (plans/loop-guard-counts-failures.md, part 2), as
+  // one line: it passes the two refusals he decides, and the log keeps it.
+  said = said.replace(/\s+/g, " ").trim();
   const live = liveSessions();
   // **A start takes over from an executor with no process** (plans/put-
   // first-review-fixes.md, part 6): each plan its Building line holds is
@@ -3838,7 +3887,16 @@ function startHere(
   const paused = pausedSince();
   // Paused, the deferral is held (no timer), so the resume re-arms it.
   if (at && at > Date.now())
-    return defer(at, `the usage limit cut the last ${kind} off`, paths, replace, kind, kind, why);
+    return defer(
+      at,
+      `the usage limit cut the last ${kind} off`,
+      paths,
+      replace,
+      kind,
+      kind,
+      why,
+      said,
+    );
   const probe = !["executor", "planner", "assistant"].includes(agent);
   // A timer's start replacing a session takes the retirement's why its deferral kept.
   if (timer && replace && !why) why = readJson(files.deferred(deferral || kind))?.retired || "";
@@ -3888,6 +3946,7 @@ function startHere(
         // Only the window's and a lease's timer: a usage limit's restart
         // refuses beside a live executor as before.
         unwatched: timer && (deferral === "asking" || deferral === "handed"),
+        said,
       });
   if (decision.refuse) {
     // A refused timer's start leaves the due briefs free, under Briefs in `plans`.
@@ -3941,7 +4000,13 @@ function startHere(
       kind,
       deferral === "asking" ? deferral : kind,
       why,
+      said,
     );
+  // The sentence a start past a refusal on the owner's word adds, in its
+  // output and in its log line's why.
+  const pastWords = decision.past
+    ? `${owner()} said to start it ("${said}"), past: ${decision.past}`
+    : "";
   const prompt = probe
     ? "Reply with the single word ok"
     : kind === "planner"
@@ -3977,6 +4042,7 @@ function startHere(
   if (dry)
     return [
       `Would run: claude ${args.map((a) => JSON.stringify(a)).join(" ")}`,
+      ...(decision.past ? [`Would start on ${owner()}'s word, past: ${decision.past}`] : []),
       ...(decision.replace || []).map(
         (old) => `Would retire ${old.name} [${String(old.sessionId).slice(0, 8)}]: ${old.why}.`,
       ),
@@ -4010,8 +4076,27 @@ function startHere(
     return seen;
   }
   // The deferrals keep the paths this start did not take, and their timers.
-  for (const file of { executor: ["executor", "asking"], planner: ["planner"] }[kind] || [])
-    dropDeferred(file, paths);
+  const deferrals = { executor: ["executor", "asking"], planner: ["planner"] }[kind] || [];
+  for (const file of deferrals) dropDeferred(file, paths);
+  // **His yes starts one more** (plans/loop-guard-counts-failures.md; Codex
+  // C2): a start on his word spends it, so a deferral still holding it is
+  // re-armed without it, and its timer starts nothing past the guard.
+  if (said)
+    for (const file of deferrals) {
+      const left = readJson(files.deferred(file));
+      if (!left?.said) continue;
+      const { said: _spent, ...rest } = left;
+      writeJson(files.deferred(file), rest);
+      defer(
+        rest.until,
+        rest.why,
+        rest.paths || [],
+        rest.replace || "",
+        agentOfDeferral(file),
+        file,
+        rest.retired || "",
+      );
+    }
   // The brief started on ends its lease; a timer's other due briefs are left
   // free, the new planner's at its stops as any planner's (part 2).
   if (kind === "planner") releaseLease([...paths, ...due]);
@@ -4034,10 +4119,11 @@ function startHere(
       // A start with nothing replaced says its own why (startOnReady's).
       ...(!replace && why ? [`${why[0].toUpperCase()}${why.slice(1)}.`] : []),
       ...retiredWords,
+      ...(pastWords ? [pastWords] : []),
     ].join(" ");
     appendFileSync(
       files.starts(),
-      `${JSON.stringify({ at: Date.now(), name: decision.name, paths, five: usage?.five_hour?.used_percentage ?? null, seven: usage?.seven_day?.used_percentage ?? null, ...(because ? { why: because } : {}) })}\n`,
+      `${JSON.stringify({ at: Date.now(), name: decision.name, paths, five: usage?.five_hour?.used_percentage ?? null, seven: usage?.seven_day?.used_percentage ?? null, ...(because ? { why: because } : {}), ...(said ? { said } : {}) })}\n`,
     );
   }
   // The session replaced is stopped three minutes on: a tired executor, or a
@@ -4051,7 +4137,7 @@ function startHere(
   // the retired planners' chats: the next planner starting is their cut-off.
   if (kind === "planner") stopRetiredPlanners(live, { except: replace });
   return [
-    `${decision.name} was started on: ${paths.join(", ")}.${unread}${decision.note ? ` ${decision.note}` : ""}`,
+    `${decision.name} was started on: ${paths.join(", ")}.${unread}${decision.note ? ` ${decision.note}` : ""}${pastWords ? ` ${pastWords}` : ""}`,
     ...retiredWords,
   ].join(" ");
 }
@@ -6985,30 +7071,43 @@ export function behindOf(event, pulls = [], own = [], login = "") {
  * them, so a note whose chat could not start is seen.
  */
 export function notesWaiting(dir = join(root, "plans", "github")) {
+  return readNotes(dir)
+    .filter((one) => one.state === "waiting")
+    .sort((a, b) => a.mtime - b.mtime)
+    .map((one) => one.path);
+}
+
+/** A note's event line, as `noteFor` writes it: what `noteState` reads for `notesWaiting` and `writtenAt`. */
+const NOTE_EVENT = /^(?:plan|mention|comment|review|ready|failed|merged), /;
+
+/**
+ * "waiting" when a note's last event line comes after its last `## Handled`
+ * line, "handled" when the reverse, "" with neither.
+ */
+function noteState(text) {
+  const lines = text.split("\n");
+  const lastEvent = lines.findLastIndex((line) => NOTE_EVENT.test(line));
+  const lastHandled = lines.findLastIndex((line) => /^## Handled\b/.test(line));
+  return lastEvent > lastHandled ? "waiting" : lastHandled > lastEvent ? "handled" : "";
+}
+
+/** Each note in `dir`: its path, its state (`noteState`) and its time; a note unread is left out. */
+function readNotes(dir) {
   let names = [];
   try {
     names = readdirSync(dir).filter((name) => /^\d+\.md$/.test(name));
   } catch {
     return [];
   }
-  const event = /^(?:plan|mention|comment|review|ready|failed|merged), /;
-  return names
-    .map((name) => {
-      const file = join(dir, name);
-      try {
-        const lines = readFileSync(file, "utf8").split("\n");
-        const lastEvent = lines.findLastIndex((line) => event.test(line));
-        const lastHandled = lines.findLastIndex((line) => /^## Handled\b/.test(line));
-        return lastEvent > lastHandled
-          ? { path: `plans/github/${name}`, mtime: statSync(file).mtimeMs }
-          : null;
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.mtime - b.mtime)
-    .map((one) => one.path);
+  return names.flatMap((name) => {
+    const file = join(dir, name);
+    try {
+      const state = noteState(readFileSync(file, "utf8"));
+      return [{ path: `plans/github/${name}`, state, mtime: statSync(file).mtimeMs }];
+    } catch {
+      return [];
+    }
+  });
 }
 
 /** The seen file, with its defaults. */
@@ -7735,6 +7834,7 @@ plans --all           with the older plans listed by path
 plans start [path...] start an executor on the waiting plans, or these
 plans start --agent planner <brief>   start a planner on a brief
 plans start --agent assistant <plan>  start an assistant chat on a built plan's follow-ups
+plans start --owner-said "<words>" [path...]  start one more past a refusal that says the owner decides, on the owner's yes
 plans first <path> [--undo]  put a waiting plan or brief first, on the owner's word, or take that back
 plans pause | resume  stop and restart starting sessions
 plans end [id...] [--now]  end this queue's finished chats, or these; --now ends a named one whatever it is doing
@@ -7909,6 +8009,7 @@ export function main(args = process.argv.slice(2)) {
         agentOfDeferral(kind),
         kind,
         deferred.retired || "",
+        deferred.said || "",
       );
       armed.push(deferredWords(readJson(files.deferred(kind)) || deferred));
     }
@@ -7928,7 +8029,19 @@ export function main(args = process.argv.slice(2)) {
       else if (rest[i] === "--replace") options.replace = rest[++i];
       else if (rest[i] === "--timer") timer = Number(rest[++i]);
       else if (rest[i] === "--deferral") options.deferral = rest[++i];
+      else if (rest[i] === "--owner-said") options.said = rest[++i] ?? "";
       else paths.push(rest[i]);
+    }
+    // **The owner's words, or nothing starts** (plans/loop-guard-counts-
+    // failures.md, part 3): words left out, or a path or a flag taken for them.
+    if ("said" in options) {
+      const words = options.said.trim();
+      if (!words || words.startsWith("--") || /^\S+\.md$/.test(words)) {
+        process.stdout.write(
+          `plans start --owner-said needs what ${owner()} said, in quotes, before the path.\n`,
+        );
+        return;
+      }
     }
     if (timer) {
       // The deferred start: a wait and then the same start, nothing else.

@@ -565,9 +565,14 @@ or why none does. (decisions.md#plans-reach-an-executor)
 
 **Starts are bounded**: one executor at a time; none while the five-hour
 window is above 80 percent or the seven-day above 95, deferred to the
-reset; none after a quick death; twenty-four a day at most; `plans pause`
-and `plans resume` on the owner's "pause the queue" and "resume the
-queue".
+reset; none after a quick death; none once the last five of a kind, in
+a day, ended with nothing built, planned or written, however many
+started and pushed before them; `plans pause` and `plans resume` on the
+owner's "pause the queue" and "resume the queue". After a quick death
+or five with nothing the owner decides: on his yes in its chat, the
+assistant or a planner runs `plans start --owner-said "<his words>"`,
+which starts one more and logs the words. No hook and no executor
+passes it, and it passes nothing else.
 (decisions.md#starts-bounded)
 
 **`plans cost` measures the queue**: each session's turns, context and

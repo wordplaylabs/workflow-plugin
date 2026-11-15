@@ -7093,7 +7093,7 @@ export async function webhookCommand(args = [], env = process.env) {
 
 /** `plans gh`'s refusal with no app here (plans/plans-as-github-issues.md, part 1). */
 export function noAppWords(repo = "", env = process.env, project = proj().name) {
-  return `The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues and Pull requests read and write), install it on ${repo || "this repository"}, and ${setWhere("WORKFLOW_APP_ID and WORKFLOW_APP_KEY", env, project)}`;
+  return `The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on ${repo || "this repository"}, and ${setWhere("WORKFLOW_APP_ID and WORKFLOW_APP_KEY", env, project)}`;
 }
 
 /**

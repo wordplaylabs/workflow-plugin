@@ -8032,7 +8032,7 @@ describe("plans gh", () => {
       cacheFile: cache(),
     });
     expect(done).toEqual({
-      said: "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues and Pull requests read and write), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
+      said: "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
       status: 1,
     });
     expect(runs).toEqual([]);
@@ -8042,7 +8042,7 @@ describe("plans gh", () => {
   it("in a container setup made, names the host's file and the rebuild", () => {
     const mounted = { WORKFLOW_SECRETS_FILE: "/run/secrets/workflow.env" };
     expect(noAppWords("o/r", mounted, "Docs")).toBe(
-      "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues and Pull requests read and write), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY in ~/.config/workflow/docs.env on the host, then rebuild the container.",
+      "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY in ~/.config/workflow/docs.env on the host, then rebuild the container.",
     );
     expect(noSecretWords(mounted, "Docs")).toBe(
       "The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub with the address routed to this container and a secret, and set WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT in ~/.config/workflow/docs.env on the host, then rebuild the container.",
@@ -8053,7 +8053,7 @@ describe("plans gh", () => {
   it("with any other secrets file, says where GH_TOKEN is set as before", () => {
     const other = { WORKFLOW_SECRETS_FILE: ".secrets/workflow.env" };
     expect(noAppWords("o/r", other, "Docs")).toBe(
-      "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues and Pull requests read and write), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
+      "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
     );
     expect(noSecretWords(other, "Docs")).toBe(
       "The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub with the address routed to this container and a secret, and set WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
@@ -8231,7 +8231,7 @@ describe("secrets from a file", () => {
       repo: "o/r",
     });
     expect(done).toEqual({
-      said: "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues and Pull requests read and write), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
+      said: "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
       status: 1,
     });
     expect(ran).toEqual([]);

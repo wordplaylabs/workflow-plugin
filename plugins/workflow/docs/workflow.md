@@ -822,12 +822,16 @@ expires. A project with issues carries its app's id and private key the
 same way, `WORKFLOW_APP_ID` and `WORKFLOW_APP_KEY` (the PEM's text),
 from which `plans gh` mints the app's token, and its webhook's secret
 and port, `WORKFLOW_WEBHOOK_SECRET` and `WORKFLOW_WEBHOOK_PORT` (8789
-when unset). A failed run reaches the queue when the app has Actions
-read and write and is subscribed to the Workflow run event. Any of these left out of the environment is read, when the queue
-uses it, from the private dotenv file that `WORKFLOW_SECRETS_FILE`
-names (a relative path from the checkout's root), and never put into
-the environment, so the key stays out of every other program's
-environment. (decisions.md#push-token)
+when unset). The app has Issues, Pull requests and Actions read and
+write and is subscribed to the events the webhook reads: Issues, Issue
+comment, Pull request, Pull request review, Pull request review comment
+and Workflow run; without Actions and Workflow run no failed run reaches
+the queue, and without one of the others its notes do not. `plans gh`
+with no app says the same. Any of the four variables left out of
+the environment is read, when the queue uses it, from the private dotenv
+file that `WORKFLOW_SECRETS_FILE` names (a relative path from the
+checkout's root), and never put into the environment, so the key stays
+out of every other program's environment. (decisions.md#push-token)
 
 **Screenshots on a pull request** go up through `gh pr create --attach`
 and `gh pr edit --attach`, which need gh 2.99 or newer (from GitHub's apt

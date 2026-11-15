@@ -859,6 +859,11 @@ on the machine that planned them.
   container starts with the app off (Javi, 6 November).
   plans/push-to-github.md, plans/secrets-from-a-file.md,
   plans/secrets-file-made-on-host.md.
+  15 November: the app has Actions read and write, so a failed run
+  reaches the queue and the assistant can rerun it, and `plans gh` with
+  no app names its permissions and the events the webhook reads, so an
+  app registered by that line sends every delivery the queue takes.
+  plans/executor-never-watches-ci.md, plans/app-words-name-failed-runs.md.
 - `screenshots-attach` **Screenshots on a pull request go up through `gh
   pr create --attach` and `gh pr edit --attach`, from gh 2.99.** (as
   GitHub CLI does, 31 October) GitHub's changelog of 1 September 2026

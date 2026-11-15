@@ -2371,7 +2371,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
       "read the project file's **Pull requests** heading, which decides where a related plan lands",
     );
     expect(read("docs/landing.md").replace(/\s+/g, " ")).toContain(
-      "One of the queue's own marked ready goes by the project's **Pull requests** heading: lands in it (a draft again, as any join) when the heading says related plans share a pull request, else stacked on it",
+      "One of the queue's own marked ready goes by the project's **Pull requests** heading: lands in it (ready as he left it) when the heading says related plans share a pull request, else stacked on it",
     );
   });
 
@@ -2442,12 +2442,25 @@ describe("a pull request per topic", () => {
     // A topic: its name is the branch, its pull request opens with the first ready plan.
     expect(mode).toContain("**A topic's branch** is the topic's name");
     expect(mode).toContain("written from every plan of the topic so far, oldest first");
-    expect(mode).toContain("runs `gh pr ready --undo <n>` before its commit is pushed");
+    // plans/ready-stays-ready.md: a pull request the owner marked ready stays ready when joined.
+    expect(mode).toContain("a plan that joins one he has marked ready pushes to it as it is");
+    expect(mode).not.toContain("ready --undo");
+    expect(mode).not.toContain("a draft again");
+    expect(mode).not.toContain("joined, commit <sha>; draft.");
+    expect(mode).toContain("for one he marked ready, that it stays ready");
+    expect(read("docs/workflow.md")).not.toContain("a draft again");
+    expect(read("skills/setup/SKILL.md")).not.toContain("a draft again");
+    expect(read("docs/decisions.md")).toContain(
+      "once he marks it ready, it stays ready when work is added to it.** (Javi, 15 November, the draft since 30 October)",
+    );
+    expect(read("docs/decisions.md")).toContain(
+      "~~A plan that joins a pull request its owner marked ready runs `gh pr ready --undo` before its push.~~ (Javi, 30 October)",
+    );
     // plans/joined-pull-request-no-comment.md: a plan joining an open pull request posts nothing.
     expect(mode).not.toContain("one comment");
     // plans/owner-reviews-before-anyone-else.md: a topic's pull request opens as a draft.
     expect(mode).toContain("gh pr create --draft --base");
-    expect(mode).toContain("no `gh pr ready` without `--undo`");
+    expect(mode).toContain("no `gh pr merge` and no `gh pr ready`;");
     // plans/draft-says-nothing-about-itself.md: GitHub already shows a draft as one.
     expect(mode).not.toContain("Opened as a draft");
     expect(read("docs/workflow.md")).not.toContain("The draft's first line says so");

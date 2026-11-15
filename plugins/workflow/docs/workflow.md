@@ -253,8 +253,8 @@ project file opens as Claude Code's own.
 **`land: pull-request` lands by pull request.** A plan's author writes
 where it lands in a `Lands` line under its header paragraph; absent the
 key, the executor pushes everything to the branch and the line means
-nothing. A topic's pull request is a draft until the owner has reviewed
-it (below); `docs/landing.md` holds the executor's steps.
+nothing. A topic's pull request opens as a draft and stays ready once
+the owner marks it (below); `docs/landing.md` holds the executor's steps.
 (decisions.md#land-by-pull-request)
 
 - **A topic** (`Lands: topic <name>, ready.` or `, waiting.`): one
@@ -319,10 +319,11 @@ refreshed at his next message in his own assistant chat.
 (decisions.md#merge-refreshes-the-rest)
 
 **A topic's pull request opens as a draft and stays one until its owner
-has reviewed it himself**: he marks it ready on GitHub, the one act that
-asks anyone else's reading; the plugin refuses an agent's `gh pr ready`
-(`--undo` allowed), and a later plan's work makes it a draft again. The
-day's fixes pull request opens ready. (decisions.md#draft-until-reviewed)
+has reviewed it himself, and ready once he marks it**: he marks it ready
+on GitHub, the one act that asks anyone else's reading, and the plugin
+refuses an agent's `gh pr ready` that would mark one; a later plan's work
+joins it as it is, its checks run again, and the merge stays his. The day's fixes pull
+request opens ready. (decisions.md#draft-until-reviewed)
 
 **`mcp` names the MCP configs a chat here needs**, which `plans chat` and
 every chat the queue starts pass on the command line; `plans chat` opens

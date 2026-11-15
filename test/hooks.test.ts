@@ -2909,7 +2909,7 @@ describe("the planner queue", () => {
       const refused = tool(agent, "cd x && gh pr ready 12");
       expect(refused).toContain('"permissionDecision":"deny"');
       expect(refused).toContain(
-        "Marking a pull request ready for review is its owner's step on GitHub (the Ready for review button), never an agent's. `gh pr ready --undo` is allowed.",
+        "Marking a pull request ready for review is its owner's step on GitHub (the Ready for review button), never an agent's.",
       );
       expect(tool(agent, "gh pr ready 12 --undo")).not.toContain('"permissionDecision":"deny"');
     }

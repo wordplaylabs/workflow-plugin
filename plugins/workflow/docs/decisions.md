@@ -225,8 +225,7 @@ on the machine that planned them.
   a cost the project carries, each pull request one more review and one
   more run of its suites, so the project says it; Gerrit's
   submit-whole-topic is a server setting for the same reason. The first
-  project to say it chose that related plans share one pull request, a
-  ready one going back to draft when joined.
+  project to say it chose that related plans share one pull request.
   plans/related-plans-share-a-pull-request.md.
 - `merge-never-force` **A branch is brought up to date by merging, never
   force-pushed.** (Javi, 29 October) Merge, never force, which a project
@@ -261,15 +260,22 @@ on the machine that planned them.
   is not read: its run's failure arrives when the run ends, and a
   rerun needs that. plans/merged-pr-refreshes-the-rest.md.
 - `draft-until-reviewed` **A topic's pull request opens as a draft and
-  stays one until its owner has reviewed it himself.** (Javi, 30 October)
-  No pull request asks anyone else's time until he has reviewed it;
-  GitHub's draft pull requests, which nobody can merge until the author
-  marks them ready; Gerrit's work in progress, visible to anyone and
-  asking nothing of a reviewer. The old reason, that a draft hides a pull
-  request whose checks never finish, the Stop hook answers, since it
-  reads a draft's checks as any open pull request's.
-  plans/owner-reviews-before-anyone-else.md, plans/no-agent-marks-ready.md,
-  plans/draft-says-nothing-about-itself.md.
+  stays one until its owner has reviewed it himself; once he marks it
+  ready, it stays ready when work is added to it.** (Javi, 15 November,
+  the draft since 30 October) No pull request asks anyone else's time
+  until he has reviewed it; GitHub's draft pull requests, which nobody
+  can merge until the author marks them ready; Gerrit's work in
+  progress, visible to anyone and asking nothing of a reviewer. Once
+  ready, a joining plan's push runs its checks again and the merge stays
+  his, so making it a draft again only had him press Ready for review
+  once more, three times on one pull request in a day. The old reason,
+  that a draft hides a pull request whose checks never finish, the Stop
+  hook answers, since it reads a draft's checks as any open pull
+  request's. plans/owner-reviews-before-anyone-else.md,
+  plans/no-agent-marks-ready.md, plans/draft-says-nothing-about-itself.md,
+  plans/ready-stays-ready.md.
+  - ~~A plan that joins a pull request its owner marked ready runs `gh pr
+    ready --undo` before its push.~~ (Javi, 30 October)
   - ~~A pull request opens ready, never as a draft.~~ (Javi, 28 October)
 - `mcp-configs` **`mcp` names the MCP configs a chat here needs, which
   every chat the queue starts passes on the command line.** (Javi, 27

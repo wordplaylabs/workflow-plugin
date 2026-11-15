@@ -2,11 +2,11 @@
 
 The executor reads this at a batch's start in a project with `land:
 pull-request`, where "push" in its agent file means the landing below (decisions.md#topic-landing). The merge is the people's:
-run no `gh pr merge` and no `gh pr ready` without `--undo`; push the
+run no `gh pr merge` and no `gh pr ready`; push the
 branch itself only for a `Lands: fix, now.` plan, as a fast-forward. In a
 project whose file has an **Issues** heading, every write to GitHub but
-the push runs as `plans gh` (`gh pr create`, `gh pr edit`, `gh pr ready
---undo`); the push stays on `GH_TOKEN`.
+the push runs as `plans gh` (`gh pr create`, `gh pr edit`); the push
+stays on `GH_TOKEN`.
 
 **The `Lands` line**, under the plan's header paragraph, is one of
 `Lands: fix.`, `Lands: fix, now.`, `Lands: refresh.`, `Lands: topic
@@ -16,12 +16,11 @@ request, kept when the line is rewritten. A plan with none is `topic
 <the plan's file name without .md>, ready`. Follow the line; its author
 judges whether a topic is ready and a change a fix.
 
-**A topic's pull request is a draft until the owner has reviewed
-it** (decisions.md#draft-until-reviewed): `gh pr create` takes
-`--draft`, and a plan that joins one he has marked ready (`gh pr view
-<n> --json isDraft` says false) runs `gh pr ready --undo <n>` before its
-commit is pushed; a conversion that fails stops the push. The day's
-fixes pull request opens ready; the refresh and the retarget leave the
+**A topic's pull request opens as a draft, and stays ready once the
+owner marks it** (decisions.md#draft-until-reviewed): `gh pr create`
+takes `--draft`; a plan that joins one he has marked ready pushes to it
+as it is, its checks run again, and the merge stays his. The day's fixes
+pull request opens ready; a join, the refresh and the retarget leave the
 state as it is. Asked to mark one ready, give the step: the Ready for
 review button.
 
@@ -48,8 +47,8 @@ its "Built" saying why.
   ("No branch yet"), as `topic <the plan's file name without .md>` (with
   `-2` when that is the head branch) when its `Lands` line names that
   pull request's topic. One of the queue's own marked ready goes by the
-  project's **Pull requests** heading: lands in it (a draft again, as any
-  join) when the heading says related plans share a pull request, else
+  project's **Pull requests** heading: lands in it (ready as he left
+  it) when the heading says related plans share a pull request, else
   stacked on it as `topic <the plan's file name without .md>` (with `-2`
   when that is the head branch) when its `Lands` line names that pull
   request's topic. A plan sent to another topic has its `Lands` line
@@ -116,8 +115,7 @@ nothing was behind.`, and says `Codex review: not run (a refresh).`
 **A topic's plan**: one commit per plan on the topic's branch, squashed
 back to the plan's tip, so a commit another person pushed stays theirs;
 where that would rewrite a pushed commit, push the plan's commits as
-they are and name each in "Built". With the pull request open and no
-draft, `gh pr ready --undo <n>` first; then `git push -u origin <name>`,
+they are and name each in "Built". Then `git push -u origin <name>`,
 retried as for a merge. Then, by the topic:
 
 - **Waiting, no pull request**: nothing opens. "Built" opens with
@@ -140,8 +138,7 @@ retried as for a merge. Then, by the topic:
 - **A pull request already open**: the description written again from
   every plan of the topic to `plans/<this plan>/pull-request.md`, keeping
   the uploaded image addresses of its body (`gh pr view <n> --json
-  body`), this plan's screenshots as local paths; a draft again before
-  the push; then
+  body`), this plan's screenshots as local paths; then
 
   ```
   gh pr edit <n> --body-file plans/<this plan>/pull-request.md \
@@ -153,7 +150,8 @@ retried as for a merge. Then, by the topic:
   open already.
   No comment: the description is the record
   (decisions.md#joined-pull-request). "Built" opens with
-  `Pull request #<n> (<url>) joined, commit <sha>; draft.`
+  `Pull request #<n> (<url>) joined, commit <sha>; <draft | ready>.`,
+  its state as `gh pr view <n> --json isDraft` gives it.
 
 **A fix**, `Lands: fix.`, is built on the day's branch,
 `fixes-<yyyy-mm-dd>`, the day of its push (decisions.md#days-fixes),
@@ -220,11 +218,12 @@ origin/<branch>`; keep the local branches, the hook's match for pull
 requests.
 
 **The final message leads with** each pull request opened or joined, its
-link and what it was marked related to, and: `Pull request #<n>
-(<link>) is a draft and waits on you: read its description and
+link and what it was marked related to, and, for a draft: `Pull request
+#<n> (<link>) is a draft and waits on you: read its description and
 screenshots, then mark it ready for review on GitHub (the Ready for
 review button at the bottom of the pull request). Until then it asks
-nothing of anyone else.`; then the topics left waiting, the day's fixes
+nothing of anyone else.`; for one he marked ready, that it stays ready,
+its checks running again, and the merge his; then the topics left waiting, the day's fixes
 pull request, and the fixes pushed straight.
 
 **The description** is a short list of what changed

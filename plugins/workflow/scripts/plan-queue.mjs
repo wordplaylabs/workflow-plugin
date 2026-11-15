@@ -172,6 +172,8 @@ const files = {
   webhook: () => join(root, ".claude", "webhook.json"),
   // What the owner was told of an app that sends no failed run (plans/app-old-registration-said.md).
   webhookTold: () => join(root, ".claude", "webhook.told.json"),
+  // The refresh plans the owner's own assistant chat was told of (plans/merged-pr-refreshes-the-rest.md, part 6).
+  refreshesTold: () => join(root, ".claude", "refreshes.told.json"),
 };
 
 /** What `plans` says, and `plans start` refuses with, in a project with no project file. */
@@ -274,8 +276,9 @@ export function withoutStatus(text) {
 
 /**
  * **Where a plan lands**, from its `Lands` line (plans/pull-requests-by-
- * topic.md, part 1): `{ kind: "fix", now }` or `{ kind: "topic", name, ready
- * }`, read from the text before the plan's first `## ` heading, past its
+ * topic.md, part 1): `{ kind: "fix", now }`, `{ kind: "refresh" }` (the
+ * assistant's plan after a merge, plans/merged-pr-refreshes-the-rest.md,
+ * part 4) or `{ kind: "topic", name, ready }`, read from the text before the plan's first `## ` heading, past its
  * status sections; null with none, as a plan in the push mode or an older
  * plan has. A topic's line may say after its state the pull request it lands
  * in or is stacked on, `; lands in #52` or `; stacked on #52`, where agents
@@ -286,13 +289,14 @@ export function withoutStatus(text) {
 export function landsOf(text = "") {
   // Hand-wrapped prose: the line may wrap anywhere a space is (/code-review).
   const m =
-    /^Lands:\s+(?:fix(,\s+now)?|topic\s+([a-z0-9]+(?:-[a-z0-9]+)*),\s+(waiting|ready)(?:;\s+(lands\s+in|stacked\s+on)\s+#(\d+))?)\.?[ \t]*$/m.exec(
+    /^Lands:\s+(?:fix(,\s+now)?|(refresh)|topic\s+([a-z0-9]+(?:-[a-z0-9]+)*),\s+(waiting|ready)(?:;\s+(lands\s+in|stacked\s+on)\s+#(\d+))?)\.?[ \t]*$/m.exec(
       headOf(text),
     );
   if (!m) return null;
-  if (m[2]) {
-    const lands = { kind: "topic", name: m[2], ready: m[3] === "ready" };
-    if (m[4]) lands[/^lands/.test(m[4]) ? "into" : "stackedOn"] = Number(m[5]);
+  if (m[2]) return { kind: "refresh" };
+  if (m[3]) {
+    const lands = { kind: "topic", name: m[3], ready: m[4] === "ready" };
+    if (m[5]) lands[/^lands/.test(m[5]) ? "into" : "stackedOn"] = Number(m[6]);
     return lands;
   }
   return { kind: "fix", now: Boolean(m[1]) };
@@ -656,7 +660,19 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
         .find((line) => line.trim()) || "";
     const fix = /^Pushed straight to /.test(opening);
     const topic = /^On topic ([^\s,]+)/.exec(opening)?.[1] || "";
-    return { ...plan, state: "built", builtDay: (built[1] || "").trim(), sha, pr, fix, topic };
+    // A refresh has no commit of its own: the pull requests' are theirs
+    // (plans/merged-pr-refreshes-the-rest.md, part 4).
+    const refresh = /^Refreshed\b/.test(opening);
+    return {
+      ...plan,
+      state: "built",
+      builtDay: (built[1] || "").trim(),
+      sha: refresh ? "" : sha,
+      pr: refresh ? 0 : pr,
+      fix,
+      topic,
+      refresh,
+    };
   }
   const resumed = [
     ...text.matchAll(/^## Resumed, [^,\n]+, session [^,\s]+, at step ([^\s,.]+)/gm),
@@ -4367,7 +4383,7 @@ export function list({ all = false, live, related = true, readers = null } = {})
     const topic =
       plan.state === "brief" || plan.state === "planning"
         ? ""
-        : plan.lands?.kind === "fix"
+        : plan.lands?.kind === "fix" || plan.lands?.kind === "refresh"
           ? ""
           : plan.lands?.name || basename(plan.path, ".md");
     const lines = relatedLines(plan.text, plans, work, { topic, own });
@@ -4437,6 +4453,10 @@ export function list({ all = false, live, related = true, readers = null } = {})
         "New on GitHub",
         ...fresh.map(([n, one]) => `  #${n} ${one.title || ""}`.trimEnd()),
       );
+  }
+  // A note waits with issues on or off: failed runs and merges are noted in
+  // any project with pull requests (plans/merged-pr-refreshes-the-rest.md, part 2).
+  if (proj().found && proj().land === "pull-request") {
     const waiting = notesWaiting();
     if (waiting.length)
       out.push("", "From GitHub, not handled", ...waiting.map((path) => `  ${path}`));
@@ -4470,11 +4490,13 @@ export function list({ all = false, live, related = true, readers = null } = {})
   // call, made only when a row names one.
   const states = shown.some((p) => p.pr) ? pullStates() : null;
   group(all ? "Built" : "Built today", shown, (p) =>
-    p.pr
-      ? [`#${p.pr}`, states?.get(p.pr)].filter(Boolean).join(", ")
-      : p.topic
-        ? `topic ${p.topic}, waiting`
-        : [p.sha, onWhere(p.sha), p.fix ? "a fix" : ""].filter(Boolean).join(", "),
+    p.refresh
+      ? "a refresh"
+      : p.pr
+        ? [`#${p.pr}`, states?.get(p.pr)].filter(Boolean).join(", ")
+        : p.topic
+          ? `topic ${p.topic}, waiting`
+          : [p.sha, onWhere(p.sha), p.fix ? "a fix" : ""].filter(Boolean).join(", "),
   );
   // **A dropped plan is on screen only on its day** (plans/dropped-plan-
   // state.md), with its date and its why; every one with `--all`.
@@ -5185,6 +5207,7 @@ function doneWith(text = "") {
 export function landsWords(lands) {
   if (!lands) return "";
   if (lands.kind === "fix") return lands.now ? "a fix, now" : "a fix";
+  if (lands.kind === "refresh") return "a refresh";
   const where = lands.into
     ? `, lands in #${lands.into}`
     : lands.stackedOn
@@ -5203,6 +5226,7 @@ export function landsWords(lands) {
 export function whoTook(text = "", live = null) {
   if (/^## Built(?:,|\s*$)/m.test(text)) {
     const built = stateOf(text);
+    if (built?.refresh) return "built, a refresh";
     if (built?.pr) return `built, pull request #${built.pr}`;
     if (built?.fix)
       return `built, straight to ${/^Pushed straight to (\S+) as a fix/m.exec(text)?.[1] || branch()}`;
@@ -5914,6 +5938,30 @@ function sayApp() {
   }
 }
 
+/**
+ * **The refresh plans built since the owner last wrote here, said once**, in
+ * his own assistant chat, never in one the queue started
+ * (`WORKFLOW_STARTED`), as `sayApp` says the app's line: the paths told are
+ * kept in `.claude/refreshes.told.json`. Any failure says nothing.
+ */
+function sayRefreshed() {
+  try {
+    if (process.env.WORKFLOW_STARTED) return;
+    const told = readJson(files.refreshesTold())?.told || [];
+    const paths = readPlans(join(root, "plans"))
+      .filter((p) => p.state === "built" && p.lands?.kind === "refresh" && !told.includes(p.path))
+      .map((p) => p.path);
+    if (!paths.length) return;
+    hookOutput(
+      "UserPromptSubmit",
+      `Refreshed since ${owner()} last wrote here: ${andList(paths)}. Say to him first, in a line, which pull requests were brought up to date and which were left, from each plan's "Built".`,
+    );
+    writeJson(files.refreshesTold(), { told: [...told, ...paths].slice(-200) });
+  } catch {
+    // Said nothing, which is the prompt without it.
+  }
+}
+
 function hook(mode, input) {
   // **No agent marks a pull request ready**, in every session with the
   // plugin, whatever its project or agent (plans/no-agent-marks-ready.md).
@@ -5959,6 +6007,12 @@ function hook(mode, input) {
   // "Decided" lets one go; any other session's edit returns at once.
   if (mode === "wrote" && kindOf(input) === "assistant") {
     leaveAsking(input);
+    return;
+  }
+  // **He hears what was refreshed at his next message** in his own assistant
+  // chat (plans/merged-pr-refreshes-the-rest.md, part 6).
+  if (mode === "prompt" && kindOf(input) === "assistant") {
+    sayRefreshed();
     return;
   }
   if (mode === "wrote" && !executor && kindOf(input) !== "planner") return;
@@ -6758,36 +6812,68 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
   const noted = [];
   const fresh = { ...(seen.fresh || {}) };
   const plans = readPlans(join(root, "plans"));
+  let login = seen.login || "";
+  // Read once a batch, at its first merge: the open pull requests do not
+  // change between its events (/code-review).
+  let open;
   for (const event of events) {
     if (event.kind === "merged") {
-      const done = dry
-        ? { status: 0 }
-        : await ghCommand(
-            [
-              "issue",
-              "close",
-              String(event.number),
-              "--reason",
-              "completed",
-              "--comment",
-              `Merged as #${event.pull}.`,
-            ],
-            { run: (bin, args, options) => spawnSync(bin, args, { ...options, stdio: "ignore" }) },
-          );
-      const plan = plans.find((p) => p.issue === event.number && p.state === "built");
-      if (plan && done.status === 0) {
-        const lines = plan.text.split("\n");
-        const at = lines.findIndex((line) => /^## Built\b/.test(line));
-        const first = lines.findIndex((line, i) => i > at && line.trim());
-        if (at >= 0 && first > at) {
-          lines.splice(first + 1, 0, `Issue #${event.number} closed ${today()}.`);
-          writeFileSync(plan.file, lines.join("\n"));
+      if (event.issue) said.push(await closeIssue(event, plans, dry));
+      // **What the merge left behind** (plans/merged-pr-refreshes-the-rest.md,
+      // part 2): the open pull requests, read as they are now.
+      if (proj().land !== "pull-request" || !event.base) continue;
+      if (open === undefined) {
+        const { out } = ghAsk(
+          [
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "number,headRefName,baseRefName,author",
+          ],
+          10_000,
+        );
+        open = null;
+        try {
+          const list = out === null ? null : JSON.parse(out || "[]");
+          if (Array.isArray(list)) open = list;
+        } catch {
+          // Unread, as a failed call.
         }
+        if (!login) login = String(ghRead(["api", "user", "--jq", ".login"], 5000) || "").trim();
       }
+      // An unread login would leave every person's pull request as another's,
+      // so it is unread as the list is (Codex). A merge from the project's own
+      // branch into another (a release) leaves nothing stacked on it (/code-review).
+      const behind =
+        open && login
+          ? behindOf(
+              event.head === proj().branch ? { ...event, head: "" } : event,
+              open,
+              githubContext(plans).own,
+              login,
+            )
+          : { unread: true };
+      if (!behind.unread && !behind.own.length && !behind.stacked.length) {
+        said.push(
+          `GitHub: #${event.number} merged into ${event.base}: none of the queue's own is behind.`,
+        );
+        continue;
+      }
+      const dir = join(root, "plans", "github");
+      const file = join(dir, `${event.number}.md`);
+      if (!dry) {
+        mkdirSync(dir, { recursive: true });
+        appendFileSync(file, noteFor({ ...event, behind }, { first: !existsSync(file) }));
+      }
+      noted.push({ path: `plans/github/${event.number}.md`, line: said.length });
       said.push(
-        done.status === 0
-          ? `GitHub: #${event.number} closed, merged as #${event.pull}.`
-          : `GitHub: #${event.number} was not closed: ${done.said || "plans gh failed"}`,
+        behind.unread
+          ? `GitHub: #${event.number} merged into ${event.base}, noted: behind not read.`
+          : `GitHub: #${event.number} merged into ${event.base}, noted: ${behind.own.length + behind.stacked.length} behind.`,
       );
       continue;
     }
@@ -6817,13 +6903,80 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
     // **An open chat reads the notes itself** at its next turn: no message to send.
     const open = /^(.+?) is open: send it the message instead\./.exec(out);
     if (/ was started on: /.test(out))
-      said[ours.line] =
-        `${said[ours.line].replace(/, noted\.$/, ", noted; assistant started.")} ${out}`;
+      said[ours.line] = `${said[ours.line].replace(/\.$/, "; assistant started.")} ${out}`;
     else if (open)
       said.push(`GitHub: ${open[1]} is open and reads plans/github/ at its next turn.`);
     else if (out) said.push(out);
   }
-  return { said: said.filter(Boolean), seen: { ...seen, fresh } };
+  return { said: said.filter(Boolean), seen: { ...seen, fresh, ...(login ? { login } : {}) } };
+}
+
+/**
+ * The issue a merged pull request was for, closed as the app with a line in
+ * its plan's "Built"; the line `plans github` says of it.
+ */
+async function closeIssue(event, plans, dry) {
+  const done = dry
+    ? { status: 0 }
+    : await ghCommand(
+        [
+          "issue",
+          "close",
+          String(event.issue),
+          "--reason",
+          "completed",
+          "--comment",
+          `Merged as #${event.number}.`,
+        ],
+        {
+          run: (bin, args, options) => spawnSync(bin, args, { ...options, stdio: "ignore" }),
+          // Read here, since the run above keeps no output for `repoHere` to read.
+          repo: repoHere(spawnSync, process.env, false),
+        },
+      );
+  const plan = plans.find((p) => p.issue === event.issue && p.state === "built");
+  if (plan && done.status === 0 && !dry) {
+    const lines = plan.text.split("\n");
+    const at = lines.findIndex((line) => /^## Built\b/.test(line));
+    const first = lines.findIndex((line, i) => i > at && line.trim());
+    if (at >= 0 && first > at) {
+      lines.splice(first + 1, 0, `Issue #${event.issue} closed ${today()}.`);
+      writeFileSync(plan.file, lines.join("\n"));
+    }
+  }
+  return done.status === 0
+    ? `GitHub: #${event.issue} closed, merged as #${event.number}.`
+    : `GitHub: #${event.issue} was not closed: ${done.said || "plans gh failed"}`;
+}
+
+/**
+ * **What a merge leaves behind** (plans/merged-pr-refreshes-the-rest.md,
+ * part 2), pure: of the open pull requests (`number`, `headRefName`,
+ * `baseRefName`, `author`), the queue's own by `own` (a number or a head)
+ * whose base is the merged one's base or its head. `{ own, stacked, theirs }`,
+ * each `[{ number, head, login }]`: `stacked` on the merged head, `theirs`
+ * by a person who is not `login`, the token's own (with `login` empty, every
+ * person's: unread, the safe side is to leave it), `own` the rest.
+ */
+export function behindOf(event, pulls = [], own = [], login = "") {
+  const ours = new Set(own);
+  const out = { own: [], stacked: [], theirs: [] };
+  for (const pull of pulls) {
+    if (pull.number === event.number) continue;
+    if (!ours.has(pull.number) && !ours.has(pull.headRefName)) continue;
+    const on =
+      pull.baseRefName === event.base
+        ? "own"
+        : event.head && pull.baseRefName === event.head
+          ? "stacked"
+          : "";
+    if (!on) continue;
+    const who = pull.author?.login || "";
+    const one = { number: pull.number, head: pull.headRefName, login: who };
+    if (!pull.author?.is_bot && (!login || who !== login)) out.theirs.push(one);
+    else out[on].push(one);
+  }
+  return out;
 }
 
 /**
@@ -6838,7 +6991,7 @@ export function notesWaiting(dir = join(root, "plans", "github")) {
   } catch {
     return [];
   }
-  const event = /^(?:plan|mention|comment|review|ready|failed), /;
+  const event = /^(?:plan|mention|comment|review|ready|failed|merged), /;
   return names
     .map((name) => {
       const file = join(dir, name);
@@ -6878,8 +7031,8 @@ function writeSeen(next) {
 
 /**
  * Items and the seen file through `githubEvents`, the permissions read first,
- * then handled. With issues off only failed runs make events
- * (`failedOnly`); a failed run whose pull request GitHub left out is given
+ * then handled. With issues off only failed runs and merges make events
+ * (`issuesOff`); a failed run whose pull request GitHub left out is given
  * the open one of its head branch (plans/executor-never-watches-ci.md, part 1).
  */
 async function act(items, { deadline = Date.now() + 25_000, dry = false } = {}) {
@@ -6910,7 +7063,7 @@ async function act(items, { deadline = Date.now() + 25_000, dry = false } = {}) 
       repo,
       deadline,
     );
-  const context = { ...githubContext(), slug: seen.slug, failedOnly: !issues };
+  const context = { ...githubContext(), slug: seen.slug, issuesOff: !issues };
   const { events, seen: next } = githubEvents(seen, items, context);
   const { said, seen: kept } = await handleEvents(events, next, { dry });
   // A dry run changes nothing on disk, so the real one still sees it all (/code-review).
@@ -7171,7 +7324,10 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
           url: note.html_url || pull.url,
         });
   }
-  const merged = !issuesOn
+  // **The merges since the last read**, issues on or off, with their base
+  // (plans/merged-pr-refreshes-the-rest.md, part 1); none on a first read,
+  // which has no line yet and would tell the last hundred.
+  const merged = !(proj().land === "pull-request" && since)
     ? []
     : listOf(
         "the merged pull requests",
@@ -7185,7 +7341,7 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
           "100",
           ...searched("merged"),
           "--json",
-          "number,title,url,body,mergedAt,mergedBy,headRefName",
+          "number,title,url,body,mergedAt,mergedBy,headRefName,baseRefName",
         ],
         10_000,
       ) || [];
@@ -7198,6 +7354,7 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
         url: pull.url,
         pull: true,
         head: pull.headRefName,
+        base: pull.baseRefName || "",
         kind: "closed",
         merged: true,
         author: pull.mergedBy?.login || "",
@@ -7412,10 +7569,14 @@ export async function webhookCommand(
   const server = listen({
     port,
     secret: webhookSecret,
+    // Every verified delivery moves when GitHub last reached it; only one the
+    // queue takes something from is written (plans/merged-pr-refreshes-the-rest.md, part 3).
+    heard: () => {
+      record.lastAt = Date.now();
+      writeJson(files.webhook(), record);
+    },
     keep: (id, event, body) => {
       writeFileSync(join(files.githubInbox(), `${id}.json`), JSON.stringify({ id, event, body }));
-      writeJson(files.webhook(), { ...record, lastAt: Date.now() });
-      record.lastAt = Date.now();
     },
     after: work,
   });

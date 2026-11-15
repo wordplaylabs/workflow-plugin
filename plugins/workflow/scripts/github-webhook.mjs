@@ -50,7 +50,7 @@ export const WEBHOOK_EVENTS = Object.freeze([
  * author, at, text, url, merged, pull, label, head }`, `kind` one of `opened`
  * (an issue), `labeled`, `comment`, `review`, `closed` (a pull request) and
  * `failed` (a run that failed on a pull request, with `workflow`, `run` and
- * `sha`), `pull` true on a pull request. An event the queue takes nothing
+ * `sha`), `pull` true on a pull request; a `closed` one has `base` too. An event the queue takes nothing
  * from is no item.
  */
 export function itemsOfDelivery(event, payload = {}, deliveryId = "") {
@@ -158,6 +158,7 @@ export function itemsOfDelivery(event, payload = {}, deliveryId = "") {
       {
         ...base(pr, true),
         head: pr.head?.ref || "",
+        base: pr.base?.ref || "",
         kind: "closed",
         merged: Boolean(pr.merged),
         author: payload.sender?.login || "",
@@ -177,6 +178,23 @@ export function itemsOfDelivery(event, payload = {}, deliveryId = "") {
  */
 export const FAILED_CONCLUSIONS = ["failure", "timed_out", "startup_failure"];
 
+/**
+ * **Whether a delivery is kept** (plans/merged-pr-refreshes-the-rest.md,
+ * part 3): only an event the webhook reads, whose body is JSON and makes an
+ * item; an event the queue takes nothing from (Workflow job, a run not yet
+ * completed, a pull request pushed to) is answered and not kept.
+ */
+export function keeps(event, rawBody) {
+  if (!WEBHOOK_EVENTS.some((one) => one.event === event)) return false;
+  try {
+    // A body of `null` or a shape the parser trips on is kept nothing of, and
+    // never stops the listener (/code-review).
+    return itemsOfDelivery(event, JSON.parse(rawBody) || {}).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** The issue a pull request is for, from its `For #<n>.` line; 0 with none. */
 export function forOf(text = "") {
   return Number(/^For #(\d+)\.?[ \t]*$/m.exec(text)?.[1] || 0);
@@ -190,6 +208,7 @@ export const NOTHING_SEEN = Object.freeze({
   permissions: {},
   labeled: [],
   runs: [],
+  merges: [],
   readAt: "",
 });
 
@@ -202,14 +221,15 @@ const DELIVERIES_KEPT = 500;
  * url, title, permission, pull }`, in the items' order. `context` says
  * what the checkout's plans hold: `carried` (the issues a plan or a brief
  * carries), `planned` (a planned plan's issues), `own` (the queue's own
- * pull requests), `slug` (the app's) and `failedOnly` (issues off: every
- * delivery is marked seen, and only failed runs are events). Kinds: `issue` (an issue opened,
+ * pull requests), `slug` (the app's) and `issuesOff` (every delivery is
+ * marked seen, and only failed runs and merges are events). Kinds: `issue` (an issue opened,
  * unlabelled), `plan` (`status: planning` set on an issue nothing carries),
  * `mention` (`@<slug>` in a comment), `comment` (on an issue a plan
  * carries), `review` (a review, a review comment or a comment on the
  * queue's own pull request), `ready` (`status: ready` on a planned plan's
- * issue), `merged` (a pull request with a `For #<n>` line merged; its
- * number the issue's, `pull` the pull request's), `failed` (a run that
+ * issue), `merged` (a pull request merged, told once by its number, `issue`
+ * its `For #<n>` line's or 0 with issues off, with `base` and `head`; nobody
+ * is gated, since only a person with write access merges), `failed` (a run that
  * failed on the queue's own pull request, `by` its workflow, with `run` and
  * `sha`). A reader's item, one whose author's permission is not write or
  * admin in `seen.permissions`, and the app's own are never events, but a
@@ -231,6 +251,7 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
     permissions: { ...(seen.permissions || {}) },
     labeled: [...(seen.labeled || [])],
     runs: [...(seen.runs || [])],
+    merges: [...(seen.merges || [])],
   };
   const events = [];
   for (const item of items) {
@@ -238,9 +259,11 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
       if (next.deliveries.includes(item.deliveryId)) continue;
       next.deliveries.push(item.deliveryId);
     }
-    // With issues off (`failedOnly`), a delivery is still marked seen, so
-    // turning issues on later replays none of it (/code-review).
-    if (context.failedOnly && item.kind !== "failed") continue;
+    const merge = item.kind === "closed" && item.merged;
+    // With issues off, a delivery is still marked seen, so turning issues on
+    // later replays none of it (/code-review); a failed run and a merge are
+    // events either way (plans/merged-pr-refreshes-the-rest.md, part 1).
+    if (context.issuesOff && item.kind !== "failed" && !merge) continue;
     if (item.kind === "failed") {
       // **A run is told once, by its id and attempt**, whether a delivery or
       // a read brought it, and touches no pull request's time, so no comment
@@ -261,6 +284,28 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
         title: item.title || "",
         run: item.run,
         sha: item.sha || "",
+      });
+      continue;
+    }
+    if (merge) {
+      // **A merge is told once, by its number**, whether a delivery or a read
+      // brought it, and passes no author gate; before the read's time gate, so
+      // a comment seen after it does not hide a merge the webhook missed (Codex).
+      if (item.at && (!next.pulls[item.number] || item.at > next.pulls[item.number]))
+        next.pulls[item.number] = item.at;
+      if (next.merges.includes(item.number)) continue;
+      next.merges.push(item.number);
+      events.push({
+        kind: "merged",
+        number: item.number,
+        issue: context.issuesOff ? 0 : forOf(item.text),
+        base: item.base || "",
+        head: item.head || "",
+        by: item.author || "",
+        at: item.at || "",
+        url: item.url || "",
+        title: item.title || "",
+        text: "",
       });
       continue;
     }
@@ -310,13 +355,11 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
       else if (item.pull ? ours : carried.has(item.number)) event(item.pull ? "review" : "comment");
     } else if (item.kind === "review") {
       if (ours) event(mentions ? "mention" : "review");
-    } else if (item.kind === "closed" && item.merged) {
-      const issue = forOf(item.text);
-      if (issue) event("merged", { number: issue, pull: item.number });
     }
   }
   next.deliveries = next.deliveries.slice(-DELIVERIES_KEPT);
   next.runs = next.runs.slice(-DELIVERIES_KEPT);
+  next.merges = next.merges.slice(-DELIVERIES_KEPT);
   return { events, seen: next };
 }
 
@@ -349,17 +392,35 @@ export function noteFor(event, { first = false } = {}) {
   // A failed run's line names its workflow, run and commit; nobody wrote it.
   if (event.kind === "failed")
     return `${head}failed, ${noteTime(event.at)}, ${event.by} run ${event.run} on ${event.sha}: ${event.url}\n\n`;
+  // A merge's line names the base and who merged; under it, what it left behind
+  // (plans/merged-pr-refreshes-the-rest.md, part 2).
+  if (event.kind === "merged") {
+    const behind = event.behind || {};
+    const pulls = (list, login = false) =>
+      list.map((one) => `#${one.number} ${one.head}${login ? ` (${one.login})` : ""}`).join(", ");
+    const lines = behind.unread
+      ? ["    behind: not read"]
+      : [
+          behind.own?.length ? `    behind: ${pulls(behind.own)}` : "",
+          behind.stacked?.length ? `    stacked on it: ${pulls(behind.stacked)}` : "",
+          behind.theirs?.length ? `    another person's, left: ${pulls(behind.theirs, true)}` : "",
+        ].filter(Boolean);
+    return `${head}merged, ${noteTime(event.at)}, into ${event.base} by ${event.by}: ${event.url}\n${lines.map((line) => `${line}\n`).join("")}\n`;
+  }
   return `${head}${event.kind}, ${noteTime(event.at)}, by ${event.by} (${event.permission}): ${event.url}\n${text ? `${text}\n` : ""}\n`;
 }
 
 /**
  * **The listener** (plans/github-watched.md, part 1): every verified POST
- * is kept by `keep(id, event, rawBody)` and answered 202 before `after()`
- * runs the work, GitHub wanting an answer within ten seconds; an
- * unverified one is answered 401 with nothing kept, anything but a POST
- * 405. The server, listening on `port`.
+ * is `heard()`, kept by `keep(id, event, rawBody)` when the queue takes
+ * something from it (`keeps`), and answered 202 before `after()` runs the
+ * work, GitHub wanting an answer within ten seconds; one it takes nothing
+ * from is answered 202 with nothing kept and no work
+ * (plans/merged-pr-refreshes-the-rest.md, part 3); an unverified one is
+ * answered 401 with nothing kept, anything but a POST 405. The server,
+ * listening on `port`.
  */
-export function listen({ port, secret, keep, after = () => {} }) {
+export function listen({ port, secret, keep, heard = () => {}, after = () => {} }) {
   const server = createServer((request, response) => {
     if (request.method !== "POST") {
       response.writeHead(405).end();
@@ -381,14 +442,17 @@ export function listen({ port, secret, keep, after = () => {} }) {
       }
       const id = String(request.headers["x-github-delivery"] || "").replace(/[^\w-]/g, "");
       const event = String(request.headers["x-github-event"] || "");
+      const body = raw.toString("utf8");
+      const kept = keeps(event, body);
       try {
-        keep(id || `local-${Date.now()}`, event, raw.toString("utf8"));
+        heard();
+        if (kept) keep(id || `local-${Date.now()}`, event, body);
       } catch {
         response.writeHead(500).end();
         return;
       }
       response.writeHead(202).end();
-      setImmediate(after);
+      if (kept) setImmediate(after);
     });
   });
   server.listen(port);

@@ -272,6 +272,8 @@ it (below); `docs/landing.md` holds the executor's steps.
 - **A fix wanted now** (`Lands: fix, now.`, on the owner's word only):
   pushed straight to the branch, its `run` read, and listed in the day's
   fixes. (decisions.md#fix-now-landing)
+- **A refresh** (`Lands: refresh.`): the assistant's, after a merge; no
+  commit of its own. (decisions.md#merge-refreshes-the-rest)
 
 **The description is a short list of what changed**: the owner's
 paragraphs when he wrote some, the `For`, `Builds on` and `Related`
@@ -305,6 +307,16 @@ head branch only. (decisions.md#merge-never-force)
 checks alone**: those a plan in its `plans/` names as its own, the pull
 request its "Built" opened or joined or its `Lands` topic's branch, never
 one a `Related` line names. (decisions.md#refresh-only-your-own)
+
+**A merge brings the queue's other pull requests up to date.** A pull
+request merged into a branch reaches the assistant by the webhook with
+the queue's own open pull requests on that branch, or stacked on the
+merged one. The assistant writes one refresh plan for them, `Lands:
+refresh.`, put first on the owner's standing word, and the executor
+merges the base into each and pushes it to its own branch; another
+person's is left until the owner says so. The owner hears which were
+refreshed at his next message in his own assistant chat.
+(decisions.md#merge-refreshes-the-rest)
 
 **A topic's pull request opens as a draft and stays one until its owner
 has reviewed it himself**: he marks it ready on GitHub, the one act that
@@ -475,7 +487,8 @@ request mode `plans` names what each brief and plan looks related to, and
 the author answers with a `Related` line.
 (decisions.md#plan-state-in-file, decisions.md#related-line)
 
-**A plan put first is built next.** On the owner's word, `plans first
+**A plan put first is built next.** On the owner's word, or, for a
+refresh plan, the assistant's on his standing word, `plans first
 <path>` writes `First: <date> <time>.` above the first `## ` section of a
 waiting plan or brief, where the queue reads it: under the header
 paragraph, or straight above that section when the header sits under one;
@@ -520,6 +533,8 @@ assistant by the app's webhook, as `failed` in `plans/github/<n>.md`: it reads t
 failed log and the diff, reruns the failed jobs once when the diff
 does not explain the failure, and writes the fix's short plan,
 landing in that pull request, when it does or the rerun fails too.
+A failure the diff does not explain on a pull request behind its base
+is refreshed, not rerun.
 An app that cannot send a failed run, with no Actions permission or
 no Workflow run event on its registration, or with them not yet
 accepted on its installation, is said once at the start of the
@@ -699,8 +714,10 @@ app's webhook**: `plans webhook` listens on the container behind the
 host's reverse proxy, checks each delivery's signature, notes each event in
 `plans/github/`, starts the assistant on it, and closes an issue when its
 pull request merges; a run that failed on the queue's own pull request
-arrives the same way, in any project with `land: pull-request`; `plans
-github` reads what was missed, says any list GitHub would not give it,
+arrives the same way, in any project with `land: pull-request`, and so
+does a pull request merged into a branch the queue's own open pull
+requests are on; a delivery the queue takes nothing from is answered and
+not kept; `plans github` reads what was missed, says any list GitHub would not give it,
 in its own output and in `plans` until a read gets everything, and does
 not move its line past what it missed; a listener an older copy of the
 plugin started is replaced by the first start that finds it; the assistant

@@ -538,6 +538,8 @@ export const QUEUE_IGNORES = [
   // What GitHub's webhook brought, and its listener (plans/github-watched.md).
   ".claude/github-*",
   ".claude/webhook.*",
+  // The refresh plans the owner was told of (plans/merged-pr-refreshes-the-rest.md, part 6).
+  ".claude/refreshes.*",
   // The agent a plain chat opens as (`sessionAgent`): Claude Code keeps the
   // file out of git only when it creates it itself.
   ".claude/settings.local.json",

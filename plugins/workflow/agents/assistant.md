@@ -274,11 +274,24 @@ line when the plan is planned and it is the commenter's call, else the
 question tool to ${user_config.owner}; `plan`, a brief started as exit
 4; `ready`, the Ready step, first line `Ready on GitHub, <d Month>.`;
 `review`, a short plan for a fix or an answer on the pull request;
+`merged`, a pull request merged into a branch the queue's own are
+on: its indented lines name them. For a `merged` note, write one refresh plan ("A refresh plan")
+for those under `behind` and `stacked on it`, and for one
+under `another person's, left` only when ${user_config.owner} said so
+in a chat; `plans first` it, on his standing word, and hand it on as
+any short plan. Several `merged` notes not handled are one plan. A
+refresh plan that waits with no Building line gains the pull
+requests it lacks, and no second is written;
 `failed`, a run that failed on the queue's own pull request: `gh run
 view <id> --json attempt,headSha` and `gh pr view <n> --json
-state,headRefOid,headRefName`; a pull request closed or past that
+state,headRefOid,headRefName,baseRefName`; a pull request closed or past that
 commit gets nothing. Else read `gh run view <id> --log-failed | tail -n
-200` and `gh pr diff <n>`. A failure the diff does not explain, on
+200` and `gh pr diff <n>`. A failure the diff does not explain on a
+pull request behind its base (`gh api
+repos/{owner}/{repo}/compare/<base>...<head> --jq .behind_by` over 0)
+is refreshed, not rerun, since a rerun runs the same commit against
+the old base: it goes into the refresh plan, as a `merged` line's
+would. A failure the diff does not explain, on
 attempt 1, is rerun once, `plans gh run rerun <id> --failed`; one it
 explains, a rerun's, or a rerun refused, is a short plan for the fix,
 `Lands: topic <the head branch>, waiting; lands in #<n>.` (`Lands:
@@ -286,7 +299,7 @@ fix.` on the day's fixes), started at once. Several `failed` lines on
 one commit that fail the same way are one failure: each run is rerun at
 most once, and one short plan is written. Then write `## Handled,
 <date>, session <id>` with a line of what you did, for `failed` which of
-the three.
+the four.
 
 ## What crosses chats
 
@@ -346,6 +359,30 @@ words": `| String | Where | Kind | Shown by | Rests on |`, or a line
 saying none changes. "Sources": addresses, or "None: every string
 follows a named rule or is free". Under six thousand characters; `Lands`
 and `Related` only with `land: pull-request`.
+
+## A refresh plan
+
+```
+# The queue's open pull requests carry <base> after #<n>
+
+Short plan, <date>, by the assistant with ${user_config.owner}; the executor builds it.
+Read with the plugin's docs/landing.md ("A refresh").
+
+Lands: refresh.
+
+## What was asked
+
+#<n> merged into <base> on <d Month>. Behind it: #<a> (<head>), #<b>
+(<head>). Stacked on it: #<c> (<head>). Left, <login>'s: #<d>.
+
+## Done when
+
+- Each pull request named has origin/<base> merged in and pushed to
+  its own branch, or is in "Built" with why not.
+```
+
+Named `plans/refresh-after-<n>.md`. With `behind: not read`, it
+names none. A failed run it answers is a line of "What was asked".
 
 ## The final message
 

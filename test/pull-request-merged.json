@@ -1,0 +1,20 @@
+{
+  "action": "closed",
+  "number": 41,
+  "pull_request": {
+    "number": 41,
+    "title": "Series keep their order on the phone",
+    "html_url": "https://github.com/o/r/pull/41",
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-11-15T10:26:00Z",
+    "closed_at": "2026-11-15T10:26:00Z",
+    "body": "For #12.\n\n## Changes\n",
+    "labels": [],
+    "head": { "ref": "series-order", "sha": "4f1c2b9a7e3d5c8b0a1f2e3d4c5b6a7980716253" },
+    "base": { "ref": "test", "sha": "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567" },
+    "user": { "login": "javi", "type": "User" }
+  },
+  "repository": { "full_name": "o/r" },
+  "sender": { "login": "javi", "type": "User" }
+}

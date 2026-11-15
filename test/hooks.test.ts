@@ -52,6 +52,10 @@ import {
   appLine,
   webhookLine,
   unreadLines,
+  behindOf,
+  landsOf,
+  landsWords,
+  landsUnread,
   listenerOlder,
   secret,
   notesWaiting,
@@ -144,6 +148,8 @@ import {
   WEBHOOK_EVENTS,
   githubEvents,
   itemsOfDelivery,
+  keeps,
+  listen,
   noteFor,
   verifyDelivery,
 } from "../plugins/workflow/scripts/github-webhook.mjs";
@@ -2170,7 +2176,7 @@ describe("plan-queue", () => {
       g(clone, "checkout", "-q", "--detach", "origin/test");
       writeFileSync(
         join(clone, ".gitignore"),
-        ".claude/executor.*\n.claude/planner.*\n.claude/worktrees/\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/settings.local.json\n",
+        ".claude/executor.*\n.claude/planner.*\n.claude/worktrees/\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/refreshes.*\n.claude/settings.local.json\n",
       );
       g(clone, "commit", "-q", "-am", "two kinds");
       const behind = g(clone, "rev-parse", "HEAD");
@@ -2204,7 +2210,7 @@ describe("plan-queue", () => {
       g(clone, "checkout", "-q", "--detach", "origin/test");
       writeFileSync(
         join(clone, ".gitignore"),
-        ".claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/settings.local.json\n",
+        ".claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/refreshes.*\n.claude/settings.local.json\n",
       );
       g(clone, "commit", "-q", "-am", "three kinds");
       const behind = g(clone, "rev-parse", "HEAD");
@@ -3725,6 +3731,10 @@ describe("the queue's faults, closed", () => {
       const lands = (line: string) => stateOf(`${head}${line}\n\n## What was asked\n`)?.lands;
       expect(lands("Lands: fix.")).toEqual({ kind: "fix", now: false });
       expect(lands("Lands: fix, now.")).toEqual({ kind: "fix", now: true });
+      // plans/merged-pr-refreshes-the-rest.md, part 4.
+      expect(landsOf(`${head}Lands: refresh.\n`)).toEqual({ kind: "refresh" });
+      expect(landsWords({ kind: "refresh" })).toBe("a refresh");
+      expect(landsUnread(`${head}Lands: refresh.\n`)).toBe(false);
       expect(lands("Lands: topic pictures, waiting.")).toEqual({
         kind: "topic",
         name: "pictures",
@@ -3919,6 +3929,11 @@ describe("the queue's faults, closed", () => {
       );
     built("fix.md", "F", "Pushed straight to test as a fix, commit 61c4a812; checks.yml green.");
     built(
+      "refresh.md",
+      "R",
+      "Refreshed: #43 at 1a2b3c4d, #44 at 2b3c4d5e; left: #38, another person's.",
+    );
+    built(
       "x.md",
       "X",
       "On topic pictures, commit 1234abcd, branch pushed; its pull request waits.",
@@ -3935,6 +3950,7 @@ describe("the queue's faults, closed", () => {
       );
     ready("ready-topic.md", "Lands: topic pictures, ready.");
     ready("ready-fix.md", "Lands: fix, now.");
+    ready("ready-refresh.md", "Lands: refresh.");
     ready("no-line.md", "");
     // A topic opened by its ready plan alone: its Lands line names it.
     writeFileSync(
@@ -3954,6 +3970,8 @@ describe("the queue's faults, closed", () => {
       ]);
     const listed = runIn(dir, ["list"], { PATH: empty });
     expect(listed).toMatch(/plans\/fix\.md\s+61c4a812, on test, a fix\n/);
+    expect(listed).toMatch(/plans\/refresh\.md\s+a refresh\n/);
+    expect(listed).toMatch(/plans\/ready-refresh\.md\s+Plan only, 30 October, a refresh\n/);
     expect(listed).toMatch(/plans\/x\.md\s+topic pictures, waiting\n/);
     expect(listed).toMatch(/plans\/y\.md\s+#22\n/);
     expect(listed).toContain("Topics waiting for a pull request\n  pictures: plans/x.md");
@@ -3987,6 +4005,37 @@ describe("the queue's faults, closed", () => {
       "# R\n\nPlan only, 30 October 2026, for Javi.\n\nLands: topic Bad Name, ready.\n\n## What was asked\n",
     );
     expect(runIn(pushMode, ["list"], { PATH: empty })).not.toContain("Lands line not read");
+  });
+
+  // plans/merged-pr-refreshes-the-rest.md, part 6: when Javi next writes in his own assistant
+  // chat after a refresh was built, then its context names the refresh plan, once.
+  it("tells the owner's own assistant chat once of a refresh plan built", () => {
+    const dir = fixture("Refreshes", "land: pull-request\n");
+    writeFileSync(
+      join(dir, "plans", "refresh-after-41.md"),
+      "# The queue's open pull requests carry test after #41\n\nShort plan, 15 November 2026, by the assistant with Javi; the executor builds it.\n\nLands: refresh.\n\n## Built, 15 November 2026\n\nRefreshed: #43 at 1a2b3c4d; left: #38, another person's.\n\n## What was asked\n",
+    );
+    const env = { CLAUDE_PLUGIN_OPTION_OWNER: "Javi", WORKFLOW_STARTED: "" };
+    const prompt = (extra: Record<string, string> = {}) =>
+      runIn(
+        dir,
+        ["prompt"],
+        { ...env, ...extra },
+        {
+          session_id: `refreshes-${process.pid}`,
+          agent_type: "assistant",
+          prompt: "How are the pull requests?",
+        },
+      );
+    const told = join(dir, ".claude", "refreshes.told.json");
+    // A chat the queue started is told nothing, and nothing is marked.
+    expect(prompt({ WORKFLOW_STARTED: "assistant" })).toBe("");
+    expect(existsSync(told)).toBe(false);
+    const first = prompt();
+    expect(JSON.parse(first).hookSpecificOutput.additionalContext).toBe(
+      'Refreshed since Javi last wrote here: plans/refresh-after-41.md. Say to him first, in a line, which pull requests were brought up to date and which were left, from each plan\'s "Built".',
+    );
+    expect(prompt()).toBe("");
   });
 
   it("reads the run a fix pushed straight sets off after the pull requests' checks, in the pull request mode", () => {
@@ -8651,10 +8700,10 @@ describe("github webhook", () => {
       ["plan", 20, "henry"],
       ["mention", 12, "henry"],
       ["review", 40, "anton"],
-      ["merged", 12, "javi"],
+      ["merged", 41, "javi"],
       ["ready", 12, "anton"],
     ]);
-    expect(events[3]).toMatchObject({ pull: 41 });
+    expect(events[3]).toMatchObject({ issue: 12, head: "x" });
     // The same delivery twice is one event: GitHub's redelivery is safe.
     const twice = githubEvents(seen, [items[1], items[1]], context);
     expect(twice.events).toHaveLength(1);
@@ -8707,6 +8756,418 @@ describe("github webhook", () => {
       /^# GitHub #12: Series\n\nmention, 3 November 2026 \d\d:02, by henry \(write\): c2\n {4}@docs-claude can this also keep the order on the phone\?\n\n$/,
     );
     expect(noteFor(events[0])).not.toContain("# GitHub");
+  });
+
+  // plans/merged-pr-refreshes-the-rest.md, parts 1 to 3: a merge is one event, noted with what it
+  // leaves behind, and a delivery the queue takes nothing from is not kept.
+  describe("a merge", () => {
+    const merged = JSON.parse(
+      readFileSync(new URL("./pull-request-merged.json", import.meta.url), "utf8"),
+    );
+    const mergedItem = () => itemsOfDelivery("pull_request", merged, "m1");
+
+    it("itemsOfDelivery gives one closed item, merged, with its base and head", () => {
+      const items = mergedItem();
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        kind: "closed",
+        merged: true,
+        number: 41,
+        base: "test",
+        head: "series-order",
+        author: "javi",
+      });
+    });
+
+    it("githubEvents makes one merged event, told once, issues on or off, whoever merged", () => {
+      const fresh = { deliveries: [], issues: {}, pulls: {}, permissions: {}, readAt: "" };
+      const on = githubEvents(fresh, mergedItem(), { own: [], carried: [12] });
+      expect(on.events).toHaveLength(1);
+      expect(on.events[0]).toMatchObject({
+        kind: "merged",
+        number: 41,
+        issue: 12,
+        base: "test",
+        head: "series-order",
+        by: "javi",
+      });
+      expect(on.seen.merges).toEqual([41]);
+      const off = githubEvents(fresh, mergedItem(), { issuesOff: true });
+      expect(off.events.map((one) => [one.kind, one.number, one.issue])).toEqual([
+        ["merged", 41, 0],
+      ]);
+      // The same merge twice, or by a delivery and then a read, is one event.
+      expect(githubEvents(fresh, [...mergedItem(), ...mergedItem()], {}).events).toHaveLength(1);
+      const read = { ...mergedItem()[0], deliveryId: "", at: "2026-11-15T10:27:00Z" };
+      expect(githubEvents(on.seen, [read], {}).events).toEqual([]);
+      expect(githubEvents(fresh, [read], {}).events).toHaveLength(1);
+      // A comment seen after the merge does not hide a merge the webhook missed (Codex).
+      const later = { ...fresh, pulls: { 41: "2026-11-15T11:00:00Z" } };
+      expect(githubEvents(later, [read], {}).events.map((one) => one.kind)).toEqual(["merged"]);
+    });
+
+    it("behindOf sorts the queue's open pull requests into behind, stacked and another person's", () => {
+      const event = { number: 41, base: "test", head: "series-order" };
+      const pulls = [
+        { number: 40, headRefName: "a", baseRefName: "test", author: { login: "javi" } },
+        {
+          number: 43,
+          headRefName: "b",
+          baseRefName: "test",
+          author: { login: "app/docs-claude", is_bot: true },
+        },
+        { number: 44, headRefName: "c", baseRefName: "series-order", author: { login: "javi" } },
+        { number: 38, headRefName: "d", baseRefName: "test", author: { login: "anton" } },
+        { number: 50, headRefName: "e", baseRefName: "test", author: { login: "javi" } },
+      ];
+      const own = [40, "b", 44, 38];
+      expect(behindOf(event, pulls, own, "javi")).toEqual({
+        own: [
+          { number: 40, head: "a", login: "javi" },
+          { number: 43, head: "b", login: "app/docs-claude" },
+        ],
+        stacked: [{ number: 44, head: "c", login: "javi" }],
+        theirs: [{ number: 38, head: "d", login: "anton" }],
+      });
+      // The token's login unread: every person's is left.
+      expect(behindOf(event, pulls, own, "")).toEqual({
+        own: [{ number: 43, head: "b", login: "app/docs-claude" }],
+        stacked: [],
+        theirs: [
+          { number: 40, head: "a", login: "javi" },
+          { number: 44, head: "c", login: "javi" },
+          { number: 38, head: "d", login: "anton" },
+        ],
+      });
+    });
+
+    it("noteFor writes the merged line and what it left behind, and notesWaiting lists it", () => {
+      const [event] = githubEvents({}, mergedItem(), { issuesOff: true }).events;
+      const note = noteFor(
+        {
+          ...event,
+          behind: {
+            own: [
+              { number: 40, head: "series-order", login: "javi" },
+              { number: 43, head: "search-shortcut", login: "javi" },
+            ],
+            stacked: [{ number: 44, head: "series-order-phone", login: "javi" }],
+            theirs: [{ number: 38, head: "block-commands", login: "anton" }],
+          },
+        },
+        { first: true },
+      );
+      expect(note).toMatch(
+        /^# GitHub #41: Series keep their order on the phone\n\nmerged, 15 November 2026 \d\d:26, into test by javi: https:\/\/github\.com\/o\/r\/pull\/41\n {4}behind: #40 series-order, #43 search-shortcut\n {4}stacked on it: #44 series-order-phone\n {4}another person's, left: #38 block-commands \(anton\)\n\n$/,
+      );
+      expect(noteFor({ ...event, behind: { unread: true } })).toMatch(
+        /^merged, .*\n {4}behind: not read\n\n$/,
+      );
+      const dir = mkdtempSync(join(tmpdir(), "notes-merged-"));
+      writeFileSync(join(dir, "41.md"), note);
+      expect(notesWaiting(dir)).toEqual(["plans/github/41.md"]);
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("keeps only a delivery the queue takes something from", () => {
+      const body = JSON.stringify(merged);
+      expect(keeps("pull_request", body)).toBe(true);
+      expect(keeps("workflow_job", JSON.stringify({ action: "completed", workflow_job: {} }))).toBe(
+        false,
+      );
+      expect(
+        keeps("workflow_run", JSON.stringify({ action: "requested", workflow_run: { id: 1 } })),
+      ).toBe(false);
+      expect(keeps("pull_request", JSON.stringify({ ...merged, action: "synchronize" }))).toBe(
+        false,
+      );
+      expect(keeps("pull_request", "{not json")).toBe(false);
+      expect(keeps("pull_request", "null")).toBe(false);
+    });
+
+    it("the listener answers a delivery it keeps nothing of, and runs nothing for it", async () => {
+      const port = await new Promise<number>((done) => {
+        const probe = createServer();
+        probe.listen(0, "127.0.0.1", () => {
+          const { port } = probe.address() as { port: number };
+          probe.close(() => done(port));
+        });
+      });
+      const kept: string[] = [];
+      let heard = 0;
+      let after = 0;
+      const server = listen({
+        port,
+        secret: "s3cret",
+        keep: (id: string) => kept.push(id),
+        heard: () => heard++,
+        after: () => after++,
+      });
+      try {
+        await new Promise((done) => setTimeout(done, 100));
+        const post = (event: string, body: string, id: string) =>
+          fetch(`http://127.0.0.1:${port}/`, {
+            method: "POST",
+            body,
+            headers: {
+              "X-Hub-Signature-256": sign("s3cret", body),
+              "X-GitHub-Event": event,
+              "X-GitHub-Delivery": id,
+            },
+          });
+        const job = JSON.stringify({ action: "completed", workflow_job: { id: 1 } });
+        expect((await post("workflow_job", job, "j1")).status).toBe(202);
+        await new Promise((done) => setTimeout(done, 50));
+        expect(kept).toEqual([]);
+        expect(after).toBe(0);
+        expect(heard).toBe(1);
+        expect((await post("pull_request", JSON.stringify(merged), "m1")).status).toBe(202);
+        await new Promise((done) => setTimeout(done, 50));
+        expect(kept).toEqual(["m1"]);
+        expect(after).toBe(1);
+        expect(heard).toBe(2);
+      } finally {
+        await new Promise((done) => server.close(done));
+      }
+    });
+
+    describe("in a project", () => {
+      let stub: string;
+      const project = (issues: boolean) => {
+        const dir = mkdtempSync(join(tmpdir(), "merged-"));
+        execFileSync("git", ["init", "-q"], { cwd: dir });
+        // The app's close needs the repository; a start with no origin fetches nothing.
+        if (issues)
+          execFileSync("git", ["remote", "add", "origin", "https://github.com/o/r.git"], {
+            cwd: dir,
+          });
+        mkdirSync(join(dir, ".claude", "github-inbox"), { recursive: true });
+        mkdirSync(join(dir, "plans"));
+        writeFileSync(
+          join(dir, ".claude", "workflow.md"),
+          `---\nname: Runs\nbranch: test\nland: pull-request\n---\n\n# Runs\n${issues ? "\n## Issues\n\nTopics here are GitHub issues.\n" : ""}`,
+        );
+        for (const [name, number, branch] of [
+          ["search-shortcut", 43, "search-shortcut"],
+          ["series-order-phone", 44, "series-order-phone"],
+        ] as const)
+          writeFileSync(
+            join(dir, "plans", `${name}.md`),
+            `# ${name}\n\nPlan only, 14 November 2026, for Javi.\n\n## Built, 14 November 2026\n\nPull request #${number} (https://github.com/o/r/pull/${number}) to test from branch ${branch}, commit 4f1c2b9a; draft.\n`,
+          );
+        return dir;
+      };
+      const run = (dir: string, args: string[], extra: Record<string, string> = {}) =>
+        spawnSync("node", [join(here, "plan-queue.mjs"), ...args], {
+          encoding: "utf8",
+          env: {
+            PATH: process.env.PATH || "",
+            WORKFLOW_ROOT: dir,
+            CLAUDE_PROJECT_DIR: dir,
+            WORKFLOW_GH: join(stub, "gh"),
+            WORKFLOW_CLAUDE: join(stub, "claude"),
+            STUB_ROWS: join(stub, "rows.json"),
+            STUB_ASKED: join(dir, "asked.log"),
+            WORKFLOW_STARTS_LOG: join(stub, "starts.log"),
+            WORKFLOW_USAGE_FILE: join(stub, "usage.json"),
+            WORKFLOW_WEBHOOK_SECRET: "",
+            WORKFLOW_SECRETS_FILE: "",
+            WORKFLOW_APP_ID: "",
+            WORKFLOW_APP_KEY: "",
+            CLAUDE_PLUGIN_OPTION_OWNER: "Javi",
+            CLAUDE_PLUGIN_OPTION_MACHINE: "lab",
+            ...extra,
+          },
+        }).stdout;
+      const deliver = (dir: string, id: string, body: object) =>
+        writeFileSync(
+          join(dir, ".claude", "github-inbox", `${id}.json`),
+          JSON.stringify({ id, event: "pull_request", body: JSON.stringify(body) }),
+        );
+      beforeAll(() => {
+        stub = mkdtempSync(join(tmpdir(), "merged-stub-"));
+        writeFileSync(join(stub, "rows.json"), "[]");
+        writeFileSync(
+          join(stub, "claude"),
+          `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const rows = process.env.STUB_ROWS;
+if (args[0] === "agents") process.stdout.write(fs.readFileSync(rows, "utf8"));
+else {
+  const name = args[args.indexOf("--name") + 1];
+  const all = JSON.parse(fs.readFileSync(rows, "utf8"));
+  all.push({ sessionId: "stub-" + Date.now(), name, kind: "background", cwd: process.cwd() });
+  fs.writeFileSync(rows, JSON.stringify(all));
+}
+`,
+        );
+        writeFileSync(
+          join(stub, "gh"),
+          `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.STUB_ASKED, args.join(" ") + "\\n");
+const say = (value) => process.stdout.write(JSON.stringify(value));
+if (args[0] === "pr" && args.includes("merged"))
+  say(process.env.STUB_MERGED ? JSON.parse(process.env.STUB_MERGED) : []);
+else if (args[0] === "pr" && args.includes("open") && !args.join(" ").includes("baseRefName,author")) say([]);
+else if (args[0] === "pr" && args.includes("open"))
+  say([
+    { number: 43, headRefName: "search-shortcut", baseRefName: "test", author: { login: "javi" } },
+    { number: 44, headRefName: "series-order-phone", baseRefName: "series-order", author: { login: "javi" } },
+    { number: 38, headRefName: "block-commands", baseRefName: "test", author: { login: "anton" } },
+  ]);
+else if (args[0] === "api" && args[1] === "user") {
+  if (process.env.STUB_NO_LOGIN) process.exit(1);
+  process.stdout.write("javi\\n");
+}
+else if (args[0] === "api" && /collaborators/.test(args[1])) process.stdout.write("write");
+else say([]);
+`,
+        );
+        chmodSync(join(stub, "claude"), 0o755);
+        chmodSync(join(stub, "gh"), 0o755);
+      });
+      afterAll(() => rmSync(stub, { recursive: true, force: true }));
+
+      it(
+        "notes a merge with what it left behind and starts the assistant",
+        { timeout: 30_000 },
+        () => {
+          const dir = project(false);
+          try {
+            deliver(dir, "m1", merged);
+            const said = run(dir, ["github", "--inbox"]);
+            expect(said).toMatch(
+              /^GitHub: #41 merged into test, noted: 2 behind; assistant started\. /,
+            );
+            expect(readFileSync(join(dir, "plans", "github", "41.md"), "utf8")).toMatch(
+              /\nmerged, 15 November 2026 \d\d:26, into test by javi: https:\/\/github\.com\/o\/r\/pull\/41\n {4}behind: #43 search-shortcut\n {4}stacked on it: #44 series-order-phone\n\n$/,
+            );
+            // With issues off a waiting note is still listed.
+            writeFileSync(join(stub, "rows.json"), "[]");
+            expect(run(dir, ["list"], { WORKFLOW_LIVE: "[]" })).toContain(
+              "From GitHub, not handled\n  plans/github/41.md",
+            );
+            // A merge into a branch none of the queue's own is on: one line, no note.
+            deliver(dir, "m2", {
+              ...merged,
+              pull_request: {
+                ...merged.pull_request,
+                number: 45,
+                base: { ref: "main" },
+                head: { ref: "other" },
+              },
+            });
+            expect(run(dir, ["github", "--inbox"]).trim()).toBe(
+              "GitHub: #45 merged into main: none of the queue's own is behind.",
+            );
+            expect(existsSync(join(dir, "plans", "github", "45.md"))).toBe(false);
+            // The project's branch merged into another (a release): nothing is stacked on it.
+            deliver(dir, "m3", {
+              ...merged,
+              pull_request: {
+                ...merged.pull_request,
+                number: 47,
+                base: { ref: "main" },
+                head: { ref: "test" },
+              },
+            });
+            expect(run(dir, ["github", "--inbox"]).trim()).toBe(
+              "GitHub: #47 merged into main: none of the queue's own is behind.",
+            );
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        },
+      );
+
+      // Codex: a login not read leaves no person's pull request out; the merge is noted unread.
+      it(
+        "notes a merge as not read when the token's login cannot be read",
+        { timeout: 30_000 },
+        () => {
+          const dir = project(false);
+          try {
+            deliver(dir, "m1", merged);
+            expect(run(dir, ["github", "--inbox"], { STUB_NO_LOGIN: "1" })).toMatch(
+              /^GitHub: #41 merged into test, noted: behind not read[.;]/,
+            );
+            expect(readFileSync(join(dir, "plans", "github", "41.md"), "utf8")).toMatch(
+              /\n {4}behind: not read\n\n$/,
+            );
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        },
+      );
+
+      it(
+        "plans github reads the merges since its last read, none on a first read",
+        { timeout: 30_000 },
+        () => {
+          const dir = project(false);
+          try {
+            const STUB_MERGED = JSON.stringify([
+              {
+                number: 46,
+                title: "Other",
+                url: "https://github.com/o/r/pull/46",
+                body: "",
+                mergedAt: new Date(Date.now() - 60_000).toISOString(),
+                mergedBy: { login: "javi" },
+                headRefName: "other",
+                baseRefName: "main",
+              },
+            ]);
+            expect(run(dir, ["github"], { STUB_MERGED })).not.toContain("#46");
+            const seenFile = join(dir, ".claude", "github-seen.json");
+            const seen = JSON.parse(readFileSync(seenFile, "utf8"));
+            writeFileSync(
+              seenFile,
+              JSON.stringify({ ...seen, readAt: new Date(Date.now() - 3_600_000).toISOString() }),
+            );
+            expect(run(dir, ["github"], { STUB_MERGED })).toContain(
+              "GitHub: #46 merged into main: none of the queue's own is behind.",
+            );
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        },
+      );
+
+      it(
+        "with issues on, a merge whose body names an issue still closes it",
+        { timeout: 30_000 },
+        () => {
+          const dir = project(true);
+          try {
+            writeFileSync(
+              join(dir, ".claude", "app-token.json"),
+              JSON.stringify({
+                token: "app-tok",
+                expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+                repo: "o/r",
+                app: "12",
+              }),
+            );
+            deliver(dir, "m1", merged);
+            const said = run(dir, ["github", "--inbox"], {
+              WORKFLOW_APP_ID: "12",
+              WORKFLOW_APP_KEY: "key",
+            });
+            expect(said).toContain("GitHub: #12 closed, merged as #41.");
+            expect(said).toContain("GitHub: #41 merged into test, noted: 2 behind");
+            expect(readFileSync(join(dir, "asked.log"), "utf8")).toContain(
+              "issue close 12 --reason completed --comment Merged as #41.",
+            );
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        },
+      );
+    });
   });
 
   // plans/executor-never-watches-ci.md, part 1: a failed run on the queue's own pull request.
@@ -8933,7 +9394,7 @@ describe("github webhook", () => {
     });
 
     it("with issues off, githubEvents marks every delivery seen and tells only failed runs", () => {
-      const off = { ...context, failedOnly: true };
+      const off = { ...context, issuesOff: true };
       const run = itemsOfDelivery("workflow_run", recorded, "w1");
       const { events, seen: next } = githubEvents(seen, [items[1], ...run], off);
       expect(events.map((one) => one.kind)).toEqual(["failed"]);
@@ -9172,7 +9633,8 @@ else say([]);
               `#!/usr/bin/env node
 const args = process.argv.slice(2);
 const say = (value) => process.stdout.write(JSON.stringify(value));
-if (args[0] === "pr" && args[1] === "list") {
+if (args[0] === "pr" && args[1] === "list" && args.includes("merged")) say([]);
+else if (args[0] === "pr" && args[1] === "list") {
   if (process.env.REFUSE_PR) {
     process.stderr.write("GraphQL: Resource not accessible by personal access token (repository.pullRequests)\\n");
     process.exit(1);
@@ -9422,35 +9884,39 @@ if (args[0] === "pr" && args[1] === "list") {
       expect(listenerOlder({ pid: 1, port: 1, code: 101 }, 100)).toBe(false);
     });
 
-    it("replaces a listener an older copy started, and leaves one of its own copy", async () => {
-      const code = statSync(join(here, "plan-queue.mjs")).mtimeMs;
-      expect(plans("webhook").status).toBe(0);
-      const first = record();
-      expect(first.code).toBe(code);
-      // Its own copy's: left, its pid unchanged.
-      expect(plans("webhook").status).toBe(0);
-      expect(record().pid).toBe(first.pid);
-      // An older copy's, by a lower code: stopped, and another started with this copy's.
-      writeFileSync(
-        join(dir, ".claude", "webhook.json"),
-        JSON.stringify({ ...first, code: code - 1000 }),
-      );
-      const again = plans("webhook");
-      expect(again.status).toBe(0);
-      expect(again.stdout).toMatch(new RegExp(`^The webhook: listening on ${port} since `));
-      const second = record();
-      expect(second.pid).not.toBe(first.pid);
-      expect(second.code).toBe(code);
-      await new Promise((done) => setTimeout(done, 300));
-      expect(() => process.kill(first.pid, 0)).toThrow();
-      // One with no code at all, as every listener before this copy wrote: replaced too.
-      const { code: _drop, ...bare } = second;
-      writeFileSync(join(dir, ".claude", "webhook.json"), JSON.stringify(bare));
-      expect(plans("webhook").status).toBe(0);
-      expect(record().pid).not.toBe(second.pid);
-      expect(record().code).toBe(code);
-      expect(plans("webhook", "--stop").stdout.trim()).toBe("The webhook: stopped.");
-    });
+    it(
+      "replaces a listener an older copy started, and leaves one of its own copy",
+      { timeout: 30_000 },
+      async () => {
+        const code = statSync(join(here, "plan-queue.mjs")).mtimeMs;
+        expect(plans("webhook").status).toBe(0);
+        const first = record();
+        expect(first.code).toBe(code);
+        // Its own copy's: left, its pid unchanged.
+        expect(plans("webhook").status).toBe(0);
+        expect(record().pid).toBe(first.pid);
+        // An older copy's, by a lower code: stopped, and another started with this copy's.
+        writeFileSync(
+          join(dir, ".claude", "webhook.json"),
+          JSON.stringify({ ...first, code: code - 1000 }),
+        );
+        const again = plans("webhook");
+        expect(again.status).toBe(0);
+        expect(again.stdout).toMatch(new RegExp(`^The webhook: listening on ${port} since `));
+        const second = record();
+        expect(second.pid).not.toBe(first.pid);
+        expect(second.code).toBe(code);
+        await new Promise((done) => setTimeout(done, 300));
+        expect(() => process.kill(first.pid, 0)).toThrow();
+        // One with no code at all, as every listener before this copy wrote: replaced too.
+        const { code: _drop, ...bare } = second;
+        writeFileSync(join(dir, ".claude", "webhook.json"), JSON.stringify(bare));
+        expect(plans("webhook").status).toBe(0);
+        expect(record().pid).not.toBe(second.pid);
+        expect(record().code).toBe(code);
+        expect(plans("webhook", "--stop").stdout.trim()).toBe("The webhook: stopped.");
+      },
+    );
 
     it("exits 1 when no listener is up after the wait", async () => {
       // The port taken by another server, so the listener cannot bind it.

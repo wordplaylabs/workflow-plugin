@@ -243,6 +243,23 @@ on the machine that planned them.
   plans/refresh-only-your-own.md, plans/plans-as-github-issues.md.
   - ~~The executor refreshes only its own person's pull requests, with
     the checks alone.~~ (Javi, 30 October)
+- `merge-refreshes-the-rest` **A pull request merged into a branch
+  brings the queue's other open pull requests on it up to date: the
+  merge reaches the assistant, which writes one refresh plan, put
+  first.** (Javi, 15 November) In the project that asked, five merges
+  in a day left three of the queue's pull requests conflicting and two
+  red on a rule the branch had already fixed, each found only when he
+  asked. GitHub's Update branch and Mergify's `update` merge the base
+  into a pull request that is behind, and Bulldozer does it when the
+  base moves; behind and not only conflicting is Renovate's
+  `behind-base-branch`, since a pull request's checks ran against the
+  base as it was. One plan for all, as the three the assistant wrote
+  there by hand; another person's is left (`refresh-only-your-own`).
+  A rerun keeps the commit and ref of its first run (GitHub's
+  "Re-running workflows and jobs"), so a failure the diff does not
+  explain on a pull request behind its base is refreshed. Workflow job
+  is not read: its run's failure arrives when the run ends, and a
+  rerun needs that. plans/merged-pr-refreshes-the-rest.md.
 - `draft-until-reviewed` **A topic's pull request opens as a draft and
   stays one until its owner has reviewed it himself.** (Javi, 30 October)
   No pull request asks anyone else's time until he has reviewed it;
@@ -439,6 +456,8 @@ on the machine that planned them.
   section of a plan written by hand, where the line is not read, and the
   place worked out per shape was wrong in three commits running.
   plans/put-first-any-header-place.md.
+  15 November: a refresh plan is put first by the assistant on his
+  standing word. plans/merged-pr-refreshes-the-rest.md.
 - `related-line` **In pull request mode, `plans` says what each brief and
   ready plan looks related to, and the author answers with a `Related`
   line.** (Javi, 30 October) GitHub links a `#<n>` and writes a backlink
@@ -506,6 +525,8 @@ on the machine that planned them.
   line has no Checks and the handbook's token does. Refused by both, it
   is said in `plans`, as `gh` names what a token lacks.
   plans/checks-read-with-the-app.md.
+  15 November: behind its base, a failure the diff does not explain is
+  refreshed, not rerun. plans/merged-pr-refreshes-the-rest.md.
   - ~~The checks are watched after every push and fixed before the
     next plan.~~ (Javi, 28 October)
 - `plans-reach-an-executor` **Ready plans never wait with no executor: a
@@ -704,6 +725,9 @@ on the machine that planned them.
   Bazel's client stops a server of another version, since a listener
   alive since before an update ran the old code for nine hours in the
   project that asked. plans/checks-read-with-the-app.md.
+  15 November: a merge is an event too, issues on or off, and a delivery
+  nothing is taken from is not kept, since each was a file of 8 to 28 KB
+  in the project that asked. plans/merged-pr-refreshes-the-rest.md.
 - `days-fixes` **The day's fixes are one pull request, `Small fixes, <d
   Month yyyy>`, never two in a day.** (Javi, 30 October) A daily pull
   request for the small fixes rather than a message for the group, which

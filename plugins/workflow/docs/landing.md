@@ -9,8 +9,8 @@ the push runs as `plans gh` (`gh pr create`, `gh pr edit`, `gh pr ready
 --undo`); the push stays on `GH_TOKEN`.
 
 **The `Lands` line**, under the plan's header paragraph, is one of
-`Lands: fix.`, `Lands: fix, now.`, `Lands: topic <name>, waiting.` and
-`Lands: topic <name>, ready.`, a topic's with `; lands in #<n>.` or
+`Lands: fix.`, `Lands: fix, now.`, `Lands: refresh.`, `Lands: topic
+<name>, waiting.` and `Lands: topic <name>, ready.`, a topic's with `; lands in #<n>.` or
 `; stacked on #<n>.` after its state when the author names the pull
 request, kept when the line is rewritten. A plan with none is `topic
 <the plan's file name without .md>, ready`. Follow the line; its author
@@ -85,14 +85,31 @@ own that GitHub reports as conflicting (`gh pr view <n> --json
 mergeable,baseRefName,headRefName,headRefOid`, `mergeable`
 `CONFLICTING`; one still `UNKNOWN` is asked again once the others are
 done, and named if it stays so), a pull request before the ones stacked
-on it. Start from its head as GitHub has it, `git switch -C <head
-branch> origin/<head branch>`; a local branch holding commits that head
+on it, by "A pull request is refreshed". Then `git checkout --detach
+origin/<branch>`.
+
+**A pull request is refreshed**: start from its head as GitHub has it,
+`git switch -C <head branch> origin/<head branch>`; a local branch holding commits that head
 lacks is left and named. Merge its base, `origin/<baseRefName>`, in (one
 stacked on a pull request just refreshed merges that one's new head),
 the conflicts settled from the two plans; run the project's checks, not
 the suites, since its CI runs on the push; push it with `git push origin
 <head branch>`, never to the branch. Its plan's "Built" gets `Refreshed <date>: merged <base>, commit <sha>, <files>`. One that cannot be settled
-is left and named. Then `git checkout --detach origin/<branch>`.
+is left and named.
+
+**A refresh**, `Lands: refresh.`, is the assistant's plan after a
+merge (decisions.md#merge-refreshes-the-rest): no branch, commit,
+review or pull request of its own. After "At a batch's start", each
+pull request the plan names that is still open and behind its base
+(`git rev-list --count origin/<head>..origin/<base>` over 0), or
+conflicting, is refreshed by "A pull request is refreshed"; one it
+names as stacked on the merged one was retargeted at the batch's
+start. A plan that names none takes every one of the queue's own but
+another person's (`gh pr view <n> --json author`, neither a bot nor the
+token's own login), which is left and named.
+Draft or ready, the state stays. "Built" opens with `Refreshed:
+#<n> at <sha>, #<m> at <sha>; left: #<k>, <why>.`, or `Refreshed:
+nothing was behind.`, and says `Codex review: not run (a refresh).`
 
 **"Before the push" runs once per plan**, a fix's included.
 

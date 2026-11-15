@@ -67,6 +67,7 @@ import { appSlug, installationToken, repoOfRemote } from "./github-app.mjs";
 import {
   FAILED_CONCLUSIONS,
   NOTHING_SEEN,
+  WEBHOOK_EVENTS,
   githubEvents,
   itemsOfDelivery,
   labelsOf,
@@ -6397,7 +6398,7 @@ export function hasIssues(body = proj().body || "", land = proj().land) {
 
 /** `plans webhook`'s refusal with no secret here. */
 export function noSecretWords(env = process.env, project = proj().name) {
-  return `The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub with the address routed to this container and a secret, and ${setWhere("WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT", env, project)}`;
+  return `The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub, subscribed to ${eventsWords()}, with the address routed to this container and a secret, and ${setWhere("WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT", env, project)}`;
 }
 
 /**
@@ -7131,9 +7132,19 @@ export async function webhookCommand(args = [], env = process.env) {
   return { said: "", status: 0, server };
 }
 
+/**
+ * The events the app is subscribed to, as `noAppWords` and `noSecretWords`
+ * say them: "the events Issues, … and Workflow run", from the webhook's own
+ * list (plans/webhook-events-from-the-parser.md).
+ */
+function eventsWords() {
+  const labels = WEBHOOK_EVENTS.map((e) => e.label);
+  return `the events ${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+}
+
 /** `plans gh`'s refusal with no app here (plans/plans-as-github-issues.md, part 1). */
 export function noAppWords(repo = "", env = process.env, project = proj().name) {
-  return `The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on ${repo || "this repository"}, and ${setWhere("WORKFLOW_APP_ID and WORKFLOW_APP_KEY", env, project)}`;
+  return `The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; ${eventsWords()}), install it on ${repo || "this repository"}, and ${setWhere("WORKFLOW_APP_ID and WORKFLOW_APP_KEY", env, project)}`;
 }
 
 /**

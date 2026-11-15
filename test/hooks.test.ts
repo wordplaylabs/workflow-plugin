@@ -132,6 +132,7 @@ import {
 } from "../plugins/workflow/scripts/seen.mjs";
 import { appJwt, repoOfRemote } from "../plugins/workflow/scripts/github-app.mjs";
 import {
+  WEBHOOK_EVENTS,
   githubEvents,
   itemsOfDelivery,
   noteFor,
@@ -8097,7 +8098,7 @@ describe("plans gh", () => {
       "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY in ~/.config/workflow/docs.env on the host, then rebuild the container.",
     );
     expect(noSecretWords(mounted, "Docs")).toBe(
-      "The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub with the address routed to this container and a secret, and set WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT in ~/.config/workflow/docs.env on the host, then rebuild the container.",
+      "The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub, subscribed to the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run, with the address routed to this container and a secret, and set WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT in ~/.config/workflow/docs.env on the host, then rebuild the container.",
     );
     expect(noAppWords("o/r", mounted, "My Docs")).toContain("~/.config/workflow/my-docs.env");
   });
@@ -8108,7 +8109,7 @@ describe("plans gh", () => {
       "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
     );
     expect(noSecretWords(other, "Docs")).toBe(
-      "The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub with the address routed to this container and a secret, and set WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
+      "The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub, subscribed to the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run, with the address routed to this container and a secret, and set WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
     );
   });
 
@@ -8345,6 +8346,54 @@ describe("github webhook", () => {
     const sha1 = `sha1=${createHmac("sha1", "s3cret").update(body).digest("hex")}`;
     expect(verifyDelivery("s3cret", body, sha1)).toBe(false);
     expect(verifyDelivery("", body, sign("", body))).toBe(false);
+  });
+
+  it("WEBHOOK_EVENTS names every event itemsOfDelivery branches on, each giving an item", () => {
+    // One sample delivery a listed event; each gives the queue an item.
+    const repository = { full_name: "o/r" };
+    const samples: Record<string, object> = {
+      issues: { action: "opened", issue: { number: 1, title: "T", user: { login: "a" } } },
+      issue_comment: { action: "created", issue: { number: 1 }, comment: { body: "b" } },
+      pull_request: { action: "closed", pull_request: { number: 2, merged: true } },
+      pull_request_review: { action: "submitted", pull_request: { number: 2 }, review: {} },
+      pull_request_review_comment: { action: "created", pull_request: { number: 2 }, comment: {} },
+      workflow_run: {
+        action: "completed",
+        repository,
+        workflow_run: { id: 9, conclusion: "failure", head_repository: repository },
+      },
+    };
+    const listed = WEBHOOK_EVENTS.map((e) => e.event);
+    for (const event of listed) {
+      expect(samples[event], event).toBeDefined();
+      expect(itemsOfDelivery(event, samples[event], "d"), event).toHaveLength(1);
+    }
+    // An event the parser compares against and the list lacks fails here. Every use of `event` in
+    // its body is `event === "<name>"`, so a branch written another way fails too, until this
+    // test reads it (/code-review).
+    const source = String(itemsOfDelivery);
+    const body = source.slice(source.indexOf("{")).replace(/\/\/.*$/gm, "");
+    const uses = body.match(/(?<![.\w])event\b/g) || [];
+    const branched = [...body.matchAll(/(?<![.\w])event === "(\w+)"/g)].map((m) => m[1]);
+    expect(uses.length).toBe(branched.length);
+    expect(new Set(branched)).toEqual(new Set(listed));
+    // The handbook's rule names the same events, as the two lines do (/code-review).
+    const labels = WEBHOOK_EVENTS.map((e) => e.label);
+    const handbook = readFileSync(
+      new URL("../plugins/workflow/docs/workflow.md", import.meta.url),
+      "utf8",
+    ).replace(/\s+/g, " ");
+    expect(handbook).toContain(
+      `subscribed to the events the webhook reads: ${labels.slice(0, -1).join(", ")} and ${labels.at(-1)};`,
+    );
+    expect(WEBHOOK_EVENTS.map((e) => e.label)).toEqual([
+      "Issues",
+      "Issue comment",
+      "Pull request",
+      "Pull request review",
+      "Pull request review comment",
+      "Workflow run",
+    ]);
   });
 
   const at = (minute: number) => `2026-11-03T21:${String(minute).padStart(2, "0")}:00Z`;
@@ -9047,7 +9096,7 @@ else say([]);
       });
       expect(done.status).toBe(1);
       expect(done.stdout.trim()).toBe(
-        "The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub with the address routed to this container and a secret, and set WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
+        "The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub, subscribed to the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run, with the address routed to this container and a secret, and set WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
       );
       expect(existsSync(join(dir, ".claude", "webhook.json"))).toBe(false);
     });

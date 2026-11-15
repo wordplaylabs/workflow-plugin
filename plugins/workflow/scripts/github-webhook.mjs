@@ -29,6 +29,22 @@ export const labelsOf = (thing) =>
   (thing?.labels || []).map((label) => label?.name || label).filter(Boolean);
 
 /**
+ * **The events the webhook reads**, `event` as GitHub sends it in
+ * `X-GitHub-Event` and `label` as the app's settings name it, in the order
+ * the lines that set up the app give them: `noAppWords` and `noSecretWords`
+ * build their list from this, and a test ties it to `itemsOfDelivery`'s
+ * branches (plans/webhook-events-from-the-parser.md).
+ */
+export const WEBHOOK_EVENTS = Object.freeze([
+  { event: "issues", label: "Issues" },
+  { event: "issue_comment", label: "Issue comment" },
+  { event: "pull_request", label: "Pull request" },
+  { event: "pull_request_review", label: "Pull request review" },
+  { event: "pull_request_review_comment", label: "Pull request review comment" },
+  { event: "workflow_run", label: "Workflow run" },
+]);
+
+/**
  * **A delivery as the queue's items**, one shape for a delivery and for
  * `plans github`'s read: `{ deliveryId, kind, number, title, labels,
  * author, at, text, url, merged, pull, label, head }`, `kind` one of `opened`

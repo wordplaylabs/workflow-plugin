@@ -830,7 +830,9 @@ write and is subscribed to the events the webhook reads: Issues, Issue
 comment, Pull request, Pull request review, Pull request review comment
 and Workflow run; without Actions and Workflow run no failed run reaches
 the queue, and without one of the others its notes do not. `plans gh`
-with no app says the same. Any of the four variables left out of
+with no app says the same, and `plans webhook` with no secret names the
+same events, both from the webhook's own list. Any of the four
+variables left out of
 the environment is read, when the queue uses it, from the private dotenv
 file that `WORKFLOW_SECRETS_FILE` names (a relative path from the
 checkout's root), and never put into the environment, so the key stays

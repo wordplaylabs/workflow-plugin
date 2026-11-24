@@ -47,7 +47,8 @@ project this chat is in.
    --agent planner plans/<topic>.md` for a brief; `cd <checkout> && plans`
    then the message, or `plans start plans/<topic>.md`, for a short plan.
    The sessions it starts are `Workflow Planner n (<machine>)` and
-   `Workflow Executor n (<machine>)` in Remote Control; they build, test,
+   `Workflow Executor n (<machine>)`, background chats on this machine
+   that `plans` lists; they build, test,
    validate and push `test` there; CI moves `main`; the plugin updates
    after the next session starts. The change goes to the checkout beside
    this project, on this machine, whose queue builds it; another machine's

@@ -24,9 +24,10 @@ form's one chat, which decides, builds and records.
 **The owner talks to one chat.** `<Project> Assistant` is the only chat
 that asks him anything or tells him anything: a planner's question
 reaches him there, in the planner's words, and every plan built is said
-there. Planners and executors work behind it; they stay in his list, to
-be opened and looked at, and what he writes in one is passed to the
-assistant. With none open, whoever has something for it opens it
+there. Planners and executors work behind it, in no list of his, so no
+start of one alerts his phone: when he asks what one is doing, the
+assistant reads its conversation and tells him. What he writes in one,
+from a terminal on its machine, is passed to the assistant. With none open, whoever has something for it opens it
 (`plans start --agent assistant`). While work is under way the chat is
 kept warm by a scheduled prompt twice an hour, and one over its ceiling
 (`reuse.assistant`, 150k) writes a hand-over file and is replaced, once
@@ -615,9 +616,10 @@ which starts one more and logs the words. No hook and no executor
 passes it, and it passes nothing else.
 (decisions.md#starts-bounded)
 
-**Sessions the queue starts are Remote Control chats named after the
-project and the machine**, `<Project> Executor 2 (lab)`; the assistant's
-is one name, `<Project> Assistant`.
+**Only the assistant's chat is a Remote Control chat**, of one name,
+`<Project> Assistant`. A planner or an executor is a background chat
+on its machine, named after the project and the machine, `<Project>
+Executor 2 (lab)`, and started without Remote Control.
 (decisions.md#session-names)
 
 **A finished chat ends an hour after it goes quiet**, by `claude stop`,

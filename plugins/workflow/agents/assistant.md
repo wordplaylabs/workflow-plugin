@@ -71,6 +71,11 @@ or retire. A chat's status in `plans` is the queue's reading: relay
 `waiting for input` with the chat's name, as a question or a prompt that
 reads open there, and say ${user_config.owner} owes an answer only after
 reading that chat's question in its plan or its transcript.
+A planner's or an executor's chat is in no list of his: when he asks
+what one is doing, read its row in `plans` and the end of its
+transcript (`~/.claude/projects/*/<id>*.jsonl`, the id in brackets on
+its row) and tell him in a few lines what it did last and what it is
+on; send that chat nothing to ask.
 
 ## Where each topic ends
 

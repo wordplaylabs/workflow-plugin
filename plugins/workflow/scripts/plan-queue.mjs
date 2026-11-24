@@ -38,8 +38,8 @@
 // reset instead; no start after one that died within ten minutes for
 // another reason; no start once the last five of a kind ended with nothing
 // done, until the owner says to start one; a pause switch.
-// Every session the queue starts is a Remote Control chat, so none runs
-// unwatched. No model call here; a hook that fails does nothing, which is
+// The assistant chat is a Remote Control chat; planners and executors are
+// background chats `plans` lists, so none runs unwatched. No model call here; a hook that fails does nothing, which is
 // the behavior without it. Session state lives in the OS temp directory;
 // the lock, the pause and the deferral in the project's `.claude/` (ignored
 // by git); the usage numbers and the starts' log in the plugin's data
@@ -2597,7 +2597,7 @@ export function canStart({
     // running, so the id an agent ends it by stays.
     return {
       refuse: true,
-      why: `An executor is alive: ${alive}. Message it in Remote Control, or have the assistant end it (plans end ${String(first.sessionId).slice(0, 8)}), then start again.`,
+      why: `An executor is alive: ${alive}. Have the assistant message it or end it (plans end ${String(first.sessionId).slice(0, 8)}), then start again.`,
     };
   }
   const replacing = new Set(replace.map((one) => one.sessionId));
@@ -4563,12 +4563,15 @@ function startHere(
   // its link and by `--add-dir`, which also takes every value up to the next
   // flag.
   const tree = kind === "executor" ? executorTree(number) : "";
+  // **Only the assistant's chat is a Remote Control chat**
+  // (decisions.md#session-names): a planner or an executor is a background
+  // chat on the machine, in no list of the owner's, so its start alerts no
+  // phone.
   const args = [
     ...mcp,
     ...(tree ? ["--add-dir", join(root, "plans")] : []),
     "--bg",
-    "--remote-control",
-    decision.name,
+    ...(kind === "assistant" ? ["--remote-control", decision.name] : []),
     "--name",
     decision.name,
     "--agent",

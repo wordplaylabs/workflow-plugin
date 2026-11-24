@@ -491,6 +491,22 @@ describe("the plugin's queue in any project", () => {
     );
   });
 
+  // plans/quiet-worker-starts.md, part 5.
+  it("the assistant reads a worker's chat for the owner", () => {
+    const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
+    const assistant = readFileSync(join(plugin, "agents/assistant.md"), "utf8").replace(
+      /\s+/g,
+      " ",
+    );
+    expect(assistant).toContain("A planner's or an executor's chat is in no list of his");
+    expect(assistant).toContain(
+      "when he asks what one is doing, read its row in `plans` and the end of its transcript (`~/.claude/projects/*/<id>*.jsonl`",
+    );
+    expect(assistant).toContain(
+      "tell him in a few lines what it did last and what it is on; send that chat nothing to ask.",
+    );
+  });
+
   // plans/agents-pass-messages-directly.md, parts 1 to 4.
   it("passes the agents' messages to each other, never through the owner", () => {
     const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;

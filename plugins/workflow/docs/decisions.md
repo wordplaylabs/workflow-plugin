@@ -100,14 +100,17 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/related-plans-share-a-pull-request-follow-up-6.md.
 - `one-chat` **The owner talks to one assistant chat; planners and
   executors work behind it, never ask him and never report to him, and
-  stay openable.** (Javi, 24 November) He had to know which chat did
+  are in no list of his.** (Javi, 24 November) He had to know which chat did
   what, and a planner with everything read sent him to open another
   chat, which he could not. Roo Code's orchestrator hands work to its
   other modes and takes back their summaries, VS Code's plan agent
   hands off to the implementing one, and Aider's editor model is never
   addressed: the roles are machinery behind one conversation, and the
-  separate contexts stay (`plan-then-build`). Openable, so a stuck chat
-  can be looked at; the assistant speaks up for a question, a failure, a
+  separate contexts stay (`plan-then-build`). A worker's start alerted
+  his phone for as long as its chat was in the Claude app's list, and he
+  does not need to know one started; a stuck chat is looked at through
+  the assistant, which reads its conversation for him. The assistant
+  speaks up for a question, a failure, a
   decision taken and each plan built. One chat that takes everything
   fills within a day, and he chose to keep it where it is; a scheduled
   `/compact` reaches a background chat as a plain message (tried 24
@@ -118,7 +121,9 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   The workers keep nothing that was for him (a task list, files sent, a
   message written to be read): what one makes for him to see is kept
   beside its plan and the assistant brings it up.
-  plans/one-assistant-chat.md.
+  plans/one-assistant-chat.md, plans/quiet-worker-starts.md.
+  - ~~Planners and executors stay openable, in his chat list.~~
+    (Javi, 24 November)
 - `new-topic-to-assistant` **Every new topic starts in the assistant's
   chat, and what he writes in a worker's chat is passed there.** (Javi, 24 November, `one-chat`) A planner's chat holds the plans
   it wrote until an executor takes them; a new topic there would mix two
@@ -575,12 +580,23 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/loop-guard-counts-failures.md, plans/parallel-executors.md.
   - ~~A tripwire at twenty-four starts of a kind a day.~~ (Javi, 27
     October)
-- `session-names` **Every session the queue starts is a Remote Control
-  chat named after the project and the machine; the assistant's is one
-  name, `<Project> Assistant`.** (Javi, 24 November, `one-chat`) The owner finds each chat on his phone by its name, and no
-  two sessions on any machine share one; the assistant is his one chat,
-  so it has no number. plans/session-names-across-machines.md,
-  plans/one-assistant-chat.md.
+- `session-names` **Only the assistant's chat is a Remote Control
+  chat, of one name, `<Project> Assistant`; a planner or an executor
+  is a background chat named after the project and the machine, and
+  started without Remote Control.** (Javi, 24 November, `one-chat`)
+  The Claude app alerts for each chat that joins its list, and he
+  asked not to be told that a worker started. A chat started with
+  `--bg` alone registers nothing with the app, and `claude agents`
+  and the other chats on the machine still reach it by its name
+  (tried in Claude Code 2.1.331, where his phone alerted for the two
+  test chats in the list and not for the one outside it); no two
+  sessions on any machine share a name; the assistant is his one
+  chat, so it has no number. GitHub Actions tells a person that a run
+  of theirs ended, never that it started.
+  plans/session-names-across-machines.md, plans/one-assistant-chat.md,
+  plans/quiet-worker-starts.md.
+  - ~~Every session the queue starts is a Remote Control chat.~~
+    (Javi, 24 November)
 - `chat-ends-after-an-hour` **A finished chat ends an hour after it goes
   quiet.** (Javi, 27 October) The cache lives an hour; Claude Code's own
   supervisor stops a done background session on its own clock, about an

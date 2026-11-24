@@ -2234,7 +2234,7 @@ describe("plan-queue", () => {
       const decision = canStart({ sessions: [one], lock: null });
       expect(decision).toMatchObject({ refuse: true });
       expect("why" in decision && decision.why).toBe(
-        "An executor is alive: Executor 2 [aacbea39], busy, in public-sources-edits on codex-answers. Message it in Remote Control, or have the assistant end it (plans end aacbea39), then start again.",
+        "An executor is alive: Executor 2 [aacbea39], busy, in public-sources-edits on codex-answers. Have the assistant message it or end it (plans end aacbea39), then start again.",
       );
     });
     it("starts with none alive and a released lock", () => {
@@ -2856,6 +2856,8 @@ describe("the planner queue", () => {
       put("q-old-brief.md", brief("24 October 2026"));
       const out = dry();
       expect(out).toContain('"--agent" "workflow:planner" "--effort" "high"');
+      expect(out).toContain('"--bg" "--name" "Test Planner 1 (lab)"');
+      expect(out).not.toContain('"--remote-control"');
       expect(out).toContain(JSON.stringify(plannerPrompt("plans/q-old-brief.md")));
       for (const name of ["q-old-brief.md", "q-taken.md", "q-late.md"])
         rmSync(join(plansDir(), name), { force: true });
@@ -4855,19 +4857,22 @@ describe("the queue's faults, closed", () => {
           WORKFLOW_STARTS_LOG: log,
           WORKFLOW_USAGE_FILE: join(b, ".claude", "usage.json"),
         });
-      expect(dry()).toContain(
-        `Would run: claude "--add-dir" "${join(b, "plans")}" "--bg" "--remote-control" "B Executor 1 (lab)"`,
+      const first = dry();
+      expect(first).toContain(
+        `Would run: claude "--add-dir" "${join(b, "plans")}" "--bg" "--name" "B Executor 1 (lab)"`,
       );
       // A session of the same name in another checkout still takes its number.
-      expect(
-        runIn(b, ["start", "--dry", "plans/x.md"], {
-          WORKFLOW_LIVE: JSON.stringify([
-            { sessionId: "elsewhere", name: "B Executor 1 (lab)", kind: "background", cwd: "/x" },
-          ]),
-          WORKFLOW_STARTS_LOG: log,
-          WORKFLOW_USAGE_FILE: join(b, ".claude", "usage.json"),
-        }),
-      ).toContain('"--remote-control" "B Executor 2 (lab)"');
+      const second = runIn(b, ["start", "--dry", "plans/x.md"], {
+        WORKFLOW_LIVE: JSON.stringify([
+          { sessionId: "elsewhere", name: "B Executor 1 (lab)", kind: "background", cwd: "/x" },
+        ]),
+        WORKFLOW_STARTS_LOG: log,
+        WORKFLOW_USAGE_FILE: join(b, ".claude", "usage.json"),
+      });
+      expect(second).toContain('"--bg" "--name" "B Executor 2 (lab)"');
+      // An executor is a background chat in no list of the owner's
+      // (decisions.md#session-names).
+      for (const line of [first, second]) expect(line).not.toContain('"--remote-control"');
       writeFileSync(join(a, ".claude", "executor.pause"), JSON.stringify({ at: "now" }));
       expect(dry()).toContain('"B Executor 1 (lab)"');
     });
@@ -12525,6 +12530,7 @@ describe("an executor builds in its own worktree", () => {
     const one = checkout("Dry");
     const said = one.queue(["start", "--dry"]);
     expect(said).toContain(`Would run: claude "--add-dir" "${join(one.dir, "plans")}" "--bg"`);
+    expect(said).not.toContain('"--remote-control"');
     expect(said).toContain("Would run it in .claude/worktrees/executor-1.");
     expect(existsSync(one.tree)).toBe(false);
   });

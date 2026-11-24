@@ -172,35 +172,9 @@ Sources as its "Where to look".
 
 ## The final message
 
-**A plan with an `Issue` line** goes behind its issue, as the project's
-app ("A topic the people discuss is a GitHub issue"): the body written to
-`plans/<topic>/issue.md`, a hand-opened issue keeping its title and its
-words above the headings, nothing else:
-
-```
-## Decided
-- <A thing already settled, one line, its reason; the plan's Decided.>
-
-## What will be built
-- <A decision, one line, with the product or rule it rests on; The short version.>
-
-## Not in this
-- <The plan's Not in this plan, one line each.>
-
-The plan behind this: <the Detail address, or "the first comment">.
-Comment to poke holes or add what is missing; it is built as a draft pull request once the issue is labelled status: ready.
-```
-
-Both files pass the **Issues** heading's `Check` command first (with
-none, read them for a host address, a secret or a personal email). Then
-`plans gh issue edit <n> --body-file plans/<topic>/issue.md
---remove-label "status: planning" --add-label "status: planned"`, and
-the plan, status sections cut, in `<details><summary>The whole
-plan</summary>` … `</details>`, written to
-`plans/<topic>/plan-comment.md` and posted with `plans gh issue comment
-<n> --body-file` (`--edit-last` when it changes), or the `Detail` step
-run and its address in the body. Such a plan waits for `status: ready`;
-say the issue's address.
+**A plan with an `Issue` line** goes behind its issue: read "A plan with
+an `Issue` line" in `${CLAUDE_PLUGIN_ROOT}/docs/github.md` and follow it.
+Such a plan waits for `status: ready`; say the issue's address.
 
 **Any other plan** is handed to the executor ("The queue"): run `plans
 start plans/<topic>.md` and do what its line says: send the message it

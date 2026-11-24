@@ -456,16 +456,12 @@ describe("the plugin's queue in any project", () => {
     expect(landing).toContain(
       "On a rewrite (`gh pr view <n> --json body`) the owner's paragraphs and sections are kept as in a topic's.",
     );
-    // /code-review: an earlier template's headings are not the owner's.
-    expect(landing).toContain(
-      "`## New`, `## Changed`, `## Retired`, `## Also`, `## Decisions` and `## Screenshots`, an earlier template's, are the template's too, and are left out.",
-    );
     // Codex's C1: the old attribution is not kept inside the owner's last section.
     expect(landing).toContain(
       "On a rewrite, the attribution lines at the old body's end belong to none of the owner's sections: the new body ends with them once.",
     );
     expect(decisions.replace(/\s+/g, " ")).toContain(
-      "8 November, later: a section the owner adds anywhere in the body, a topic's or the day's fixes, is kept on every rewrite (Javi).",
+      "A section the owner adds anywhere in the body, a topic's or the day's fixes, is kept on every rewrite (Javi).",
     );
   });
 
@@ -1198,7 +1194,7 @@ describe("the handbook holds every rule the plugin cites", () => {
     "`land: pull-request` lands by pull request",
   ];
   const SECTIONS = [
-    "The three agents",
+    "The agents",
     "The project file",
     "Decisions",
     "The queue",
@@ -1334,10 +1330,10 @@ describe("a brief or a plan is a prompt", () => {
     expect(rule).toContain("When <what the person does>, then <what they see>");
     expect(rule).toMatch(/"\*\*When\*\* I connect Google[^"]*, \*\*then\*\* a toast/);
     expect(rule).toContain("names the test that checks it");
-    const plain = /\*\*Asked in plain words\.\*\*.*?\(decisions\.md#asked-in-plain-words\)/.exec(
+    const report = /\*\*An agent's report is short\.\*\*.*?\(decisions\.md#report-is-short\)/.exec(
       docs,
     )![0];
-    expect(plain).toContain("A behavior is described as When … then …");
+    expect(report).toContain("a behavior as When … then …");
     const example = /For example, the brief that asked for this rule: ```(.*?)```/.exec(docs)![1];
     const done = example.slice(
       example.indexOf("## Done when"),
@@ -1425,7 +1421,7 @@ describe("an idea is asked about before anything is written", () => {
 
   it("writes an issue nobody plans yet with no label and no plan line", () => {
     const issues = /^## GitHub issues\n([\s\S]*?)(?=^## )/m
-      .exec(read("agents/assistant.md"))![1]
+      .exec(read("docs/github.md"))![1]
       .replace(/\s+/g, " ");
     expect(issues).toContain(
       "With an **Issues** heading and `land: pull-request`, a topic the people discuss is an issue",
@@ -2248,7 +2244,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     readFileSync(new URL(`../plugins/workflow/${path}`, import.meta.url), "utf8");
 
   it("has the executor stack on use, never on a shared file, and refresh a conflicting pull request", () => {
-    const mode = /# Landing by pull request[\s\S]*?\n\*\*"Before the push"/
+    const mode = /# Landing by pull request[\s\S]*?\n\*\*A topic's plan\*\*/
       .exec(read("docs/landing.md"))![0]
       .replace(/\s+/g, " ");
     expect(mode).not.toContain("--name-only");
@@ -2291,7 +2287,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
       "merge `origin/<name>` the same way, run the checks and push once more",
     );
     // The refresh, the waiting topic and the day's fixes branch merge, then push plainly.
-    const refresh = part("**Then a conflicting pull request is refreshed**", '**"Before the push"');
+    const refresh = part("**Then a conflicting pull request is refreshed**", "**A topic's plan**");
     expect(refresh).toContain("Merge its base, `origin/<baseRefName>`, in");
     expect(refresh).toContain("`git push origin <head branch>`, never to the branch");
     expect(refresh).toContain("`Refreshed <date>: merged <base>, commit <sha>, <files>`"); // plans/also-knows-whose-commit.md
@@ -2314,7 +2310,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
 
   // plans/refresh-only-your-own.md: only this person's pull requests, with the checks alone.
   it("has the executor refresh and retarget only its own person's pull requests, with the checks", () => {
-    const mode = /# Landing by pull request[\s\S]*?\n\*\*"Before the push"/
+    const mode = /# Landing by pull request[\s\S]*?\n\*\*A topic's plan\*\*/
       .exec(read("docs/landing.md"))![0]
       .replace(/\s+/g, " ");
     // plans/plans-as-github-issues.md: the pull requests open as the project's
@@ -2336,7 +2332,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
 
   it("has the docs, the planner and the assistant name a plan rested on only when it is used", () => {
     expect(read("docs/workflow.md").replace(/\s+/g, " ")).toContain(
-      "**How plans group into pull requests is the project's rule, under `## Pull requests` in its file**, read by the author of a `Lands` line; the plugin keeps only what the queue cannot do without: a plan that rests on an open draft pull request of the queue's own lands in it, and one that rests on another person's pull request is stacked on it, since the queue never pushes to another's branch.",
+      "**How plans group into pull requests is the project's rule, under `## Pull requests` in its file**, read by the author of a `Lands` line; the plugin suggests one in `/workflow:setup` and keeps only what the queue cannot do without: a plan that rests on an open draft pull request of the queue's own lands in it, and one that rests on another person's pull request is stacked on it, since the queue never pushes to another's branch.",
     );
     // Without the heading, what the queue did before: stacked on a ready one, a Related line for a shared file.
     expect(read("docs/workflow.md").replace(/\s+/g, " ")).toContain(
@@ -2378,7 +2374,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
   // plans/draft-takes-its-follow-ups.md: a plan resting on an open draft of
   // the queue's own lands in it, listed with that draft's topic, not a new one.
   it("lands a plan resting on the queue's own open draft in that draft, and stacks it on any other", () => {
-    const mode = /# Landing by pull request[\s\S]*?\n\*\*"Before the push"/
+    const mode = /# Landing by pull request[\s\S]*?\n\*\*A topic's plan\*\*/
       .exec(read("docs/landing.md"))![0]
       .replace(/\s+/g, " ");
     const rests = mode.slice(

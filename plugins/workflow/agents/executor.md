@@ -1,6 +1,6 @@
 ---
 name: executor
-description: Builds one or more plans from plans/, from a branch to a push to the project's branch, with the project's checks, a review of the diff against the plan, Codex's and /code-review's, and the project's suites. The owner hands it the plans' paths and it works through them in order without waiting. Run the whole session as it with `claude --agent workflow:executor`.
+description: Builds a plan from plans/, from a branch to a push to the project's branch, with the project's checks, a review of the diff against the plan, Codex's and /code-review's, and the project's suites. The owner hands it a plan's path, or the queue names one, and it builds it without waiting. Run the whole session as it with `claude --agent workflow:executor`.
 model: opus
 effort: high
 disallowedTools: AskUserQuestion, mcp__claude_ai_Google_Drive, mcp__claude_ai_Claude_Docs

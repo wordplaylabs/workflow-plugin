@@ -1,11 +1,14 @@
 # The workflow
 
-Three agents and a plan queue, in any project; the owner's part is the
-decisions. Each rule is named by its bold lead-in, which the agent files
-cite; they hold the steps, and why each rule was decided is its entry in
-`decisions.md`, cited at the end of its paragraph.
+Two forms, in any project: the queue, where an assistant answers and
+routes, planners write plans and executors build them, as many at once
+as the project's `executors` says; and the compact form's one maker.
+The owner's part is the decisions. Each rule is named by its bold
+lead-in, which the agent files cite; they hold the steps, and why each
+rule was decided is its entry in `decisions.md`, cited at the end of
+its paragraph.
 
-## The three agents
+## The agents
 
 **Plan, then build, in two sessions.** A change of any size is planned by
 one session and built by another, with the context cleared between: the
@@ -31,8 +34,7 @@ find by opening a file the plan or the project file names is left out;
 and a string the scripts parse (a section heading, a line `plans`
 reads, a message's first line) is written out exactly, in backticks.
 The prompt the queue starts a chat with is one line: the path and what
-it is (`Plan plans/<x>.md: it is a brief.`, `Build plans/a.md, then
-plans/b.md.`, `Follow-ups ready: plans/<x>.md.`), and a hook's words
+it is (`Plan plans/<x>.md: it is a brief.`, `Build plans/<x>.md.`, `Follow-ups ready: plans/<x>.md.`), and a hook's words
 are the state and the facts, with the rule named by its heading in the
 agent file where the agent must act. (decisions.md#agent-file-is-instructions)
 
@@ -111,8 +113,8 @@ agents' messages to the owner. "**When** I connect Google from the
 account page, **then** a toast at the bottom says "Google is connected"
 and goes after a few seconds." Each scenario in a plan's "Done when"
 names the test that checks it or says it is looked at on screen, and for
-one looked at on screen the executor names the screenshot that shows it,
-which the reviewer reads; the executor writes one test per scenario where a test fits; a
+one looked at on screen the executor names the screenshot that shows it;
+the executor writes one test per scenario where one fits; a
 check by command (a test, a lint, a grep) stays a command.
 (decisions.md#behavior-as-scenario)
 
@@ -147,10 +149,8 @@ build, plan or file asks nothing, and a doubt between the two is asked
 (the assistant's "Where each topic ends"). (decisions.md#idea-asked-first)
 
 **Every new topic starts in the assistant's chat.** A planner's chat holds
-the plans it wrote until an executor's `## Building` line takes each; an
-executor's "Needs a decision" items go to the assistant ("Handed to the
-assistant"); work for the project a plan came from goes back as a brief.
-The owner carries no message between agents, and no chat sends him a
+the plans it wrote until an executor's `## Building` line takes each. The
+owner carries no message between agents, and no chat sends him a
 command to run. (decisions.md#new-topic-to-assistant)
 
 **The chat he said it in writes it, and the agents pass the rest.** A
@@ -182,9 +182,7 @@ name in the code, nothing in backticks; the header is the topic in a word
 or two; each label is what he gets, each description what it costs; the
 recommended option first and marked; one decision per question, up to four
 a call. `scripts/plain-words.mjs` refuses a question that names code or is
-one sentence. Every final message leads the same way: what happened for
-him and what waits on him, then the record. A behavior is described as
-When … then …, what he does and what he sees. Not this: header `Connect`,
+one sentence. Not this: header `Connect`,
 question `Should the connect script keep the terminal open after the
 hand-over, or exit on Ctrl+C?`, options `Keep open` / `Exit`. But this:
 header `Hand-over`, question `This is about what a reader sees after they
@@ -235,9 +233,7 @@ reply: \javi              # the command the author answers notes with
 **`form: compact` is the compact form**: one chat, `workflow:maker`,
 decides and builds, and the queue's hooks do nothing. A project moves
 between the forms by this line alone; `branch` may be omitted, and the
-maker then commits nothing; it reads no `land`. There are two forms,
-this and the queue; how many executors the queue builds with is its
-`executors`, never a form. (decisions.md#compact-form)
+maker then commits nothing; it reads no `land`. (decisions.md#compact-form)
 
 **A project's chats open as its agent, from the project's own
 settings.** A plain `claude` in a project with a project file opens as
@@ -255,8 +251,7 @@ project file opens as Claude Code's own.
 **`land: pull-request` lands by pull request.** A plan's author writes
 where it lands in a `Lands` line under its header paragraph; absent the
 key, the executor pushes everything to the branch and the line means
-nothing. A topic's pull request opens as a draft and stays ready once
-the owner marks it (below); `docs/landing.md` holds the executor's steps.
+nothing; `docs/landing.md` holds the executor's steps.
 (decisions.md#land-by-pull-request)
 
 - **A topic** (`Lands: topic <name>, ready.` or `, waiting.`): one
@@ -285,12 +280,11 @@ a bullet only where it shows it; a bullet that replaces another
 person's call says so by name; the commits no plan here accounts for
 as bullets with their author; then where to try it; on one screen,
 pictures aside. The decisions stay in the catalogue, whose diff the
-pull request shows. "Before the push" runs once per plan; the merge is
-the people's, and no agent merges. (decisions.md#short-description)
+pull request shows. The merge is the people's, and no agent merges. (decisions.md#short-description)
 
 **How plans group into pull requests is the project's rule, under
 `## Pull requests` in its file**, read by the author of a `Lands` line;
-the plugin keeps only what the queue cannot do without: a plan that
+the plugin suggests one in `/workflow:setup` and keeps only what the queue cannot do without: a plan that
 rests on an open draft pull request of the queue's own lands in it, and
 one that rests on another person's pull request is stacked on it, since
 the queue never pushes to another's branch. To rest on a pull request is
@@ -324,8 +318,8 @@ refreshed at his next message in his own assistant chat.
 has reviewed it himself, and ready once he marks it**: he marks it ready
 on GitHub, the one act that asks anyone else's reading, and the plugin
 refuses an agent's `gh pr ready` that would mark one; a later plan's work
-joins it as it is, its checks run again, and the merge stays his. The day's fixes pull
-request opens ready. (decisions.md#draft-until-reviewed)
+joins it as it is, its checks run again, and the merge stays his.
+(decisions.md#draft-until-reviewed)
 
 **`mcp` names the MCP configs a chat here needs**, which `plans chat` and
 every chat the queue starts pass on the command line; `plans chat` opens
@@ -351,11 +345,6 @@ and **Pull requests** (how plans group into pull requests); the body may
 also name the tools that publish under the owner's name, which no agent
 calls. (decisions.md#body-headings)
 
-**`## Pull requests` says how plans group into pull requests**, read by
-whoever writes a `Lands` line; the plugin suggests one in
-`/workflow:setup` and holds no rule of its own.
-(decisions.md#pull-requests-heading)
-
 **A project is set up in a short interview**, `/workflow:setup`, asked
 once with its kind's defaults (`kinds.md`), each thing's cost said; run
 again, it keeps the answers. (decisions.md#setup-interview)
@@ -379,9 +368,14 @@ statement or ending the rule. The tier is read there and nowhere else: a
 parenthesis inside the statement (`**Per-step (per row) toggle.**`) or in
 the middle of the body is never one, and a fenced example is no rule. An
 entry may open with an id, ``- `presenter-bold` **The presenter's name is
-bold.** (Javi, 2026-10-21)``, cited as `file#id`; it names the plan that
-decided it, and a rule that replaces one keeps the old line struck
-through under it. What is not there was not decided.
+bold.** (Javi, 2026-10-21)``, cited as `file#id`; it names the plans that
+decided it. A change to a rule rewrites its entry, the rule and its
+reasons as they stand, and adds no dated note; a rule that reverses an
+earlier call keeps that line struck through under it, and one that only
+sharpens it keeps none. How a rule was decided before is never lost:
+every change to an entry is in the repository's history, read with
+`git log -p -- <the catalogue's file>` and searched for the entry's id.
+What is not there was not decided.
 (decisions.md#catalogue-is-the-record)
 
 **The catalogue is only for well-formed opinions, researched or given by
@@ -402,15 +396,14 @@ override naming no inherited id, an entry at the agent's choice.
 named product (`as GitHub does`), a written source (`per <source>`) or a
 measurement (`observed in <x>`) is replaced only by a better-grounded one,
 named. `the agent's choice` is retired: an entry at it is a fault, until
-it is re-tiered, confirmed as a person's call or deleted. A replaced rule stays
+it is re-tiered, confirmed as a person's call or deleted. A reversed rule stays
 struck through under its replacement; a retired one says "retired".
 (decisions.md#tier-says-who)
 
 **A decision has a name; a part has none.** Nobody owns a file, a screen
 or a feature: anyone changes anything through a plan, the reviews and a
 pull request, where a disagreement is settled. A rule with a person's
-name is their call: a change to it brings its reason, the group's
-message goes out, and the description names who decided the rule it
+name is their call: a change to it brings its reason, and the description names who decided the rule it
 replaces. **People** names calls, not parts.
 (decisions.md#decision-has-a-name)
 
@@ -434,12 +427,11 @@ principle it follows. Only a string that carries a decision is researched;
 only a new screen or flow is asked about first, any other control after
 the research, when it leaves a choice the house rules do not settle. For
 a new screen or flow, an executor does not ask: it researches how the
-product people know does it, follows it, and names it in Built; a choice
-the research leaves, it decides ("An executor never waits on the owner").
-The executor types nothing outside "The words", and the plan review checks the
-diff against it. Each string's row gives its kind, the catalogue file or
-section that governs it, and what shows it, and the plan review checks the
-diff shows it so. (decisions.md#string-rests-on-source)
+product people know does it, follows it, and names it in Built ("An
+executor never waits on the owner").
+The executor types nothing outside "The words"; each string's row gives
+its kind, the catalogue file or section that governs it, and what shows
+it, and the plan review checks the diff against it. (decisions.md#string-rests-on-source)
 
 **A rule whose reason is gone is put to the owner, not followed**: keep,
 change or retire, by the question tool, the rule standing until he
@@ -458,7 +450,7 @@ catalogue with no `paths` governs every `ui` path), which
 each entry, and the hook's instruction, shown once per session; and, for an edit whose text draws a control or carries
 words a person could read, a small model's naming of the catalogue's files
 or sections it touches, loaded beside them (one call per distinct text,
-about 1.5k tokens and seven seconds a call, sixty a session, twenty
+sixty a session, twenty
 seconds each, a log line per call; none without a catalogue); and the
 `design-research` skill, when nothing covers a thing.
 (decisions.md#found-three-ways)
@@ -468,11 +460,6 @@ entry added or changed in the catalogue, answered by the entry or a
 `decisions: none (<why>)` line; a rule without its tier and date; an entry
 at the agent's choice dated today. Each is refused once.
 (decisions.md#audit-checks)
-
-**The talk setup retires into the plugin.** A talk is the maker with a
-project file (`mcp`, `inherits`, `tools`, `catalogue`, no `branch`),
-opened by `plans chat`, its slide steps a skill of the talk workspace.
-(decisions.md#talk-setup-retires)
 
 ## The queue
 
@@ -493,9 +480,8 @@ the author answers with a `Related` line.
 **A plan put first is built next.** On the owner's word, or, for a
 refresh plan, the assistant's on his standing word, `plans first
 <path>` writes `First: <date> <time>.` above the first `## ` section of a
-waiting plan or brief, where the queue reads it: under the header
-paragraph, or straight above that section when the header sits under one;
-the queue puts the files so marked ahead of the
+waiting plan or brief, where the queue reads it, whatever the header's
+shape; the queue puts the files so marked ahead of the
 rest, the latest marked on top, then oldest first, a handed-over plan
 still before all, and `plans` says `first since` on each. The executor
 takes it at the point between two plans and never stops the one in
@@ -509,18 +495,13 @@ while its file waits; `plans first --undo <path>` takes it out.
 **A queue has as many executors as its project file's `executors`
 says**, one by default, numbered; each works in its own worktree, holds
 its number's lock (`.claude/executor.<n>.lock`) and builds one plan at a
-time, and the lowest-numbered free one takes the next plan it may build;
-it edits only its own worktree and `plans/`. Its Stop hook holds the stop on a red or
+time, and the lowest-numbered free one takes the next plan it may build.
+Its Stop hook holds the stop on a red or
 unfinished `run` of its push, or a pull request of the plans it took
 with a failed check no webhook brings to the assistant, whose fix is pushed
 where the red one was, before anything else, then names
-the next plan free for it to a session it may reuse (a context under the
-ceiling the queue works out for this project and agent: the wash of
-"context-cost" from inputs measured in its transcripts, raised by what
-the chat read or wrote of the files the plan names, the project
-file's `reuse` (200k for an
-executor, 160k for a planner by default) only while it has under five
-sessions of the agent, and never over 480k; a cache still warm), else
+the next plan free for it to a session it may reuse ("A chat is kept
+while it is cheaper than a fresh one"), else
 retires it and starts the next executor in its number, judged at every
 stop while a plan waits, the plan it was named included. A plan the usage limit cuts
 off, `plans end --now` ends, or whose executor a start finds with no
@@ -528,8 +509,7 @@ process, is handed over (work committed, a
 "Handing over" section naming the branch and the worktree, stop) and
 is resumed in the worktree it was built in; twice at the same step, or six times, it
 is written "Built" with the item and handed to the assistant.
-(decisions.md#executor-pool, decisions.md#context-cost,
-decisions.md#shared-is-what-is-held)
+(decisions.md#executor-pool)
 
 **A plan waits on another** when it rests on it (its header
 paragraph names it and it is not built), lands on its topic, or
@@ -578,6 +558,19 @@ one under "Starts are bounded", two at one moment starting one.
 `plans` says under its executors that the next hook or timer starts one,
 or why none does. (decisions.md#plans-reach-an-executor)
 
+**A chat is kept while it is cheaper than a fresh one**: a finished
+session takes the next plan or brief while its context is under the
+ceiling the queue works out for this project and agent, the wash of
+`context-cost` from inputs measured in its transcripts, raised by what
+the chat read or wrote of the files the work names (at most each
+file's size), never over 480k, its cache still warm; the project
+file's `reuse` (200k for an executor, 160k for a planner by default)
+serves only while the project has under five sessions of the agent.
+`plans cost` measures it: each session's turns, context and cost by
+agent, from the transcripts, at the prices the script names with the
+date they were read. (decisions.md#context-cost,
+decisions.md#shared-is-what-is-held, decisions.md#reuse-check-cheap)
+
 **Starts are bounded**: at most `executors` at a time; none while the five-hour
 window is above 80 percent or the seven-day above 95, deferred to the
 reset; none after a quick death; none once the last five of a kind, in
@@ -589,11 +582,6 @@ assistant or a planner runs `plans start --owner-said "<his words>"`,
 which starts one more and logs the words. No hook and no executor
 passes it, and it passes nothing else.
 (decisions.md#starts-bounded)
-
-**`plans cost` measures the queue**: each session's turns, context and
-cost by agent, from the transcripts, at the prices the script names with
-the date they were read, and the inputs the reuse ceiling is worked out
-from. (decisions.md#context-cost, decisions.md#reuse-check-cheap)
 
 **Sessions the queue starts are Remote Control chats named after the
 project and the machine**, `<Project> Executor 2 (lab)`.
@@ -650,9 +638,8 @@ start --agent planner` starts a planner under the executor's bounds.
 (decisions.md#briefs-queued)
 
 **A planner with room left takes the next brief**: the oldest brief it
-is under its ceiling for, the ceiling raised by what the brief shares
-with it (what the chat read or wrote of the files the brief names, in
-tokens, at most each file's size); else it retires, and `plans start`
+is under its ceiling for, in a session it may reuse ("A chat is kept
+while it is cheaper than a fresh one"); else it retires, and `plans start`
 leaves a brief with a live planner only
 when it is under its ceiling for that brief and not waiting on a
 question, by message when it is idle and by its Stop hook when it is
@@ -661,8 +648,7 @@ who holds it and until when, its Planning line ends the lease, a brief
 sent by message is named by no other planner's stop while its holder
 lives, and at the lease's end the timer starts a fresh planner on it
 unless its holder is still busy with room, which takes it at its stop
-while the lease renews (decisions.md#brief-leased). A chat holds every plan it
-wrote until a Building line takes it.
+while the lease renews (decisions.md#brief-leased).
 (decisions.md#planner-takes-next-brief)
 
 **Asked once.** A decision a plan leaves to the owner is asked by its
@@ -675,8 +661,7 @@ says in its chat to build it now (his word goes in "Decided" first), and
 the tool hook refuses a Building line on it. The planner writes "Decided"
 only once every decision is answered, which lets the plan go at once, and
 sends it to the executor. Talking does not restart the window; another
-question does. A brief waiting on the planner's chat is not held by its
-question: it goes to a fresh planner within the window. Past it, or once the planner's chat has ended, the executor
+question does. Past it, or once the planner's chat has ended, the executor
 builds each undecided decision by its recommended option and writes it in
 "Decided" as taken for the owner, unanswered, which the assistant lists
 in the log; a later, different answer is
@@ -702,8 +687,7 @@ Never decided this way: a merge, a push to the default or a production
 branch, a forced push, the reversal of a rule with a person's name, a
 change outside the plan; each is a "Needs a decision" item for the
 assistant. The planner and the assistant still ask him, since they hold
-no build; an incomplete install stops an executor as it stops any
-agent. (decisions.md#executor-never-waits)
+no build. (decisions.md#executor-never-waits)
 
 **The group's message.** A change to another person's part (a rule whose
 tier carries their name, or a thing **People** gives them) is built as
@@ -738,10 +722,8 @@ stage is one `status:` label, `planning`, `planned`, `ready`, `building`.
 app's webhook**: `plans webhook` listens on the container behind the
 host's reverse proxy, checks each delivery's signature, notes each event in
 `plans/github/`, starts the assistant on it, and closes an issue when its
-pull request merges; a run that failed on the queue's own pull request
-arrives the same way, in any project with `land: pull-request`, and so
-does a pull request merged into a branch the queue's own open pull
-requests are on; a delivery the queue takes nothing from is answered and
+pull request merges; a failed run and a merge arrive the same way in
+any project with `land: pull-request`; a delivery the queue takes nothing from is answered and
 not kept; `plans github` reads what was missed, says any list GitHub would not give it,
 in its own output and in `plans` until a read gets everything, and does
 not move its line past what it missed; a listener an older copy of the
@@ -883,8 +865,7 @@ comment, Pull request, Pull request review, Pull request review comment
 and Workflow run; without Actions and Workflow run no failed run reaches
 the queue, and without one of the others its notes do not. `plans gh`
 with no app says the same, and `plans webhook` with no secret names the
-same events, both from the webhook's own list. A listener whose app
-lacks Actions or Workflow run says so ("A push is not waited on"). Any
+same events, both from the webhook's own list. Any
 of the four variables left out of
 the environment is read, when the queue uses it, from the private dotenv
 file that `WORKFLOW_SECRETS_FILE` names (a relative path from the

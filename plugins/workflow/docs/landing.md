@@ -48,14 +48,12 @@ refresh it is left and named, `left: #<k>, executor-<n> is building on it`.
   (decisions.md#stack-only-on-use). **A draft of this queue's own** takes
   it: the plan lands in that pull request whatever its `Lands` line
   names, its topic that head branch. **Another person's** is stacked on
-  ("No branch yet"), as `topic <the plan's file name without .md>` (with
-  `-2` when that is the head branch) when its `Lands` line names that
-  pull request's topic. One of the queue's own marked ready goes by the
+  ("No branch yet"). One of the queue's own marked ready goes by the
   project's **Pull requests** heading: lands in it (ready as he left
   it) when the heading says related plans share a pull request, else
-  stacked on it as `topic <the plan's file name without .md>` (with `-2`
-  when that is the head branch) when its `Lands` line names that pull
-  request's topic. A plan sent to another topic has its `Lands` line
+  stacked on it. A stacked plan is built as `topic <the plan's file name
+  without .md>` (with `-2` when that is the head branch) when its
+  `Lands` line names that pull request's topic. A plan sent to another topic has its `Lands` line
   rewritten to it. A plan that shares files with an open pull request
   goes where its `Lands` line says; its author read the project's
   **Pull requests** heading.
@@ -113,8 +111,6 @@ token's own login), which is left and named.
 Draft or ready, the state stays. "Built" opens with `Refreshed:
 #<n> at <sha>, #<m> at <sha>; left: #<k>, <why>.`, or `Refreshed:
 nothing was behind.`, and says `Codex review: not run (a refresh).`
-
-**"Before the push" runs once per plan**, a fix's included.
 
 **A topic's plan**: one commit per plan on the topic's branch, squashed
 back to the plan's tip, so a commit another person pushed stays theirs;
@@ -268,9 +264,7 @@ to a Claude session left out>
   the new body unchanged; with nothing there, the body opens with the
   three lines that apply. So is every `## ` section whose heading the
   template does not name: it follows To try it, word for word, in the
-  order the body has it. `## New`, `## Changed`, `## Retired`, `## Also`,
-  `## Decisions` and `## Screenshots`, an earlier template's, are the
-  template's too, and are left out. Write no opening paragraph of your
+  order the body has it. Write no opening paragraph of your
   own: the title is the summary.
 - **For** and **Related**: `For #<n>.` for each plan's `Issue` line, no
   closing keyword; the plans' `Related` lines as written (`Related:

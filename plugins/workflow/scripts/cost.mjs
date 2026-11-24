@@ -1,5 +1,5 @@
-// **`plans cost` measures the queue** (plans/reuse-ceiling-per-agent.md, part
-// 6): each session's turns, context and cost by agent, from the transcripts
+// `plans cost` measures what **A chat is kept while it is cheaper than a fresh
+// one** rests on (plans/reuse-ceiling-per-agent.md, part 6): each session's turns, context and cost by agent, from the transcripts
 // of this checkout, at the prices below with the date they were read. The
 // reuse ceilings rest on these numbers (docs/decisions.md#context-cost), so
 // they are measured again, not remembered.

@@ -22,7 +22,7 @@ executor does before a build and before a push.
 
 ## What it is
 
-A Claude Code plugin: three agents and a plan queue, so that the person's
+A Claude Code plugin: a plan queue and its agents, so that the person's
 part of building software is the decisions.
 
 - **The assistant** answers questions from the repository, with sources,
@@ -35,6 +35,8 @@ part of building software is the decisions.
 - **The executor** builds plans in order on a branch of its own, has the
   diff reviewed three ways, runs the project's checks and suites, pushes,
   and starts the next plan.
+- **The maker**, for a project whose changes are small and many: one chat
+  that decides, builds and records, with no queue.
 - **Issues**, where a project turns them on: a topic the people discuss
   is a GitHub issue the project's own app writes, the plan behind it, and
   it is built once the issue is labelled `status: ready`. The app's

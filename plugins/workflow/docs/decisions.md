@@ -5,9 +5,11 @@ asks of every project: one entry per rule of the handbook
 (`docs/workflow.md`), which cites each as `decisions.md#<id>`, with its
 tier and date, its reason and the plans that decided it. The rules are
 in the handbook; why each was decided is here. The plans are in `plans/`
-on the machine that planned them.
+on the machine that planned them. An entry says its rule as it stands;
+how it was decided before is in this file's history (`git log -p --
+plugins/workflow/docs/decisions.md`, searched for the entry's id).
 
-## The three agents
+## The agents
 
 - `plan-then-build` **A change is planned by one session and built by
   another, with the context cleared between.** (per Anthropic's best
@@ -63,12 +65,12 @@ on the machine that planned them.
   screen has the screenshot that shows it, which the plan review reads
   (Javi, 2 November). plans/behavior-as-when-then.md,
   plans/behavior-as-when-then-follow-up-2.md.
-- `reading-beside-a-build` **The planner and the assistant read beside a
-  build, from the project's branch when the tree is dirty.** (Javi, 27
-  October) One checkout serves every agent, so a plan written while an
-  executor is mid-change must not rest on its half-built files.
-  24 November: nobody builds in the checkout; the rule covers a tree
-  someone left dirty. plans/executors-build-in-worktrees.md.
+- `reading-beside-a-build` **The checkout is for reading: the planner and
+  the assistant read the project there, from the project's branch when
+  the tree is dirty.** (Javi, 27 October) A plan must not rest on
+  half-built files; nobody builds in the checkout since each executor
+  has a worktree, so the rule covers a tree someone left dirty.
+  plans/executors-build-in-worktrees.md.
 - `bounded-sweeps` **The planner and the assistant read the specifics
   themselves and hand out only bounded, read-only sweeps.** (Javi, 27
   October) A subagent's summary drops the detail a plan names, and a
@@ -90,11 +92,11 @@ on the machine that planned them.
 - `idea-asked-first` **An idea is asked about before anything is
   written: an issue, a brief or not yet.** (Javi, 4 November) Ideas went
   from a sentence in the chat to a built draft pull request before he had
-  sat with them, and several of 3 November's felt premature once he
-  looked; one question puts the friction where the idea is, and a fix,
-  which has nothing to sit with, asks nothing. plans/ask-before-briefing.md.
-  7 November: the issue option only with `land: pull-request`, since
-  issues need pull requests (Javi).
+  sat with them, and several felt premature once he looked; one question
+  puts the friction where the idea is, and a fix, which has nothing to
+  sit with, asks nothing. The issue is offered only with `land:
+  pull-request`, since issues need pull requests.
+  plans/ask-before-briefing.md,
   plans/related-plans-share-a-pull-request-follow-up-6.md.
 - `new-topic-to-assistant` **Every new topic starts in the assistant's
   chat.** (Javi, 30 October) A planner's chat holds the plans it wrote
@@ -109,10 +111,9 @@ on the machine that planned them.
 - `handed-to-the-assistant` **An executor's and a planner's follow-ups go
   to this project's assistant chat on this machine, started when there is
   none.** (Javi, 31 October) Four follow-ups and several decisions went
-  into a final message nobody acted on once the to-do page was gone.
-  plans/agents-pass-messages-directly.md.
-  14 November: the ask size is gone, and a plan with a decision taken is
-  handed on like one with items (executor-never-waits).
+  into a final message nobody acted on once the to-do page was gone. A
+  plan with a decision taken for the owner goes too, as one with items,
+  so the assistant logs it. plans/agents-pass-messages-directly.md,
   plans/executor-never-waits.md.
 - `asked-in-plain-words` **A question to the owner is written for a
   reader on a phone with none of the chat in front of him.** (Javi, 28
@@ -131,7 +132,10 @@ on the machine that planned them.
   absent, the full form.** (Javi, 27 October) A project whose changes are
   small and many does not pay for a queue; the two forms share the
   catalogue, the headings and the branch, so a project moves between
-  them by one line. plans/sizes-and-decisions.md.
+  them by one line. A talk is this form with a project file (`mcp`,
+  `inherits`, `tools`, `catalogue`, no `branch`), opened by `plans chat`,
+  its slide steps a skill of its own workspace (Javi, 27 October).
+  plans/sizes-and-decisions.md, plans/sizes-and-decisions-follow-up.md.
 - `chats-open-as-the-agent` **A project's chats open as its agent, set
   in the project's own local settings, never by the plugin.** (per
   Claude Code's changelog, 2.1.323, 14 November) Claude Code deprecated
@@ -141,14 +145,7 @@ on the machine that planned them.
   Claude Code's default (tried on 2.1.325). The local file, since
   whether a person has the plugin is theirs, a tracked file changed at
   a session's start would dirty the checkout, and Claude Code gives
-  that file to one person's overrides for one project. The form picks
-  the agent as `plans chat` does; only a project with a project file
-  gets one, as "A project with no project file is not the workflow's"
-  has it. A project set up earlier gets the key at its next session's
-  start, as it gets a new ignore line. Any other agent named in any
-  settings file is somebody's own and stays; the plugin's own two named
-  in the shared or user settings are its default copied there after the
-  notice, so the form still picks (the assistant's check, 14 November).
+  that file to one person's overrides for one project.
   plans/agent-set-by-the-project.md.
 - `land-by-pull-request` **With `land: pull-request`, a plan lands by its
   `Lands` line: a topic's pull request, the day's fixes or straight to
@@ -194,9 +191,9 @@ on the machine that planned them.
   informative body, GitHub's "How to write the perfect pull request"
   says what the change does and shows it. A bullet that replaces
   another person's call names them; the commits no plan here accounts
-  for stay, as bullets with their author. 8 November, later: a section
-  the owner adds anywhere in the body, a topic's or the day's fixes, is
-  kept on every rewrite (Javi).
+  for stay, as bullets with their author. A section the owner adds
+  anywhere in the body, a topic's or the day's fixes, is kept on every
+  rewrite (Javi).
   plans/short-pull-request-descriptions.md,
   plans/short-pull-request-descriptions-follow-up.md.
   - ~~The description is the catalogue's diff: New, Changed and Retired,
@@ -270,10 +267,9 @@ on the machine that planned them.
   progress, visible to anyone and asking nothing of a reviewer. Once
   ready, a joining plan's push runs its checks again and the merge stays
   his, so making it a draft again only had him press Ready for review
-  once more, three times on one pull request in a day. The old reason,
-  that a draft hides a pull request whose checks never finish, the Stop
-  hook answers, since it reads a draft's checks as any open pull
-  request's. plans/owner-reviews-before-anyone-else.md,
+  once more, three times on one pull request in a day; the Stop hook
+  reads a draft's checks as any open pull request's.
+  plans/owner-reviews-before-anyone-else.md,
   plans/no-agent-marks-ready.md, plans/draft-says-nothing-about-itself.md,
   plans/ready-stays-ready.md.
   - ~~A plan that joins a pull request its owner marked ready runs `gh pr
@@ -291,40 +287,24 @@ on the machine that planned them.
   plans/deny-key-review-findings.md.
 - `body-headings` **The project file's body headings are the executor's
   steps for this project: Before a build, While working, Before the push,
-  After the push, Reading, Products, People, Pull requests.** (Javi, 27
-  October) A project's own steps belong in its file, so no agent or
-  script names a project's specifics. plans/sizes-and-decisions.md,
-  plans/land-by-pull-request.md. 7 November: Pull requests added,
+  After the push, Reading, Products, People, Issues, Pull requests.**
+  (Javi, 27 October) A project's own steps belong in its file, so no
+  agent or script names a project's specifics.
+  plans/sizes-and-decisions.md, plans/land-by-pull-request.md,
   plans/related-plans-share-a-pull-request.md.
 - `setup-interview` **A project is set up in a short interview,
   `/workflow:setup`, with the defaults of its kind.** (Javi, 27 October)
   A project file written by hand drifted from what the queue reads; the
-  interview asks once and says what each thing turned on costs.
-  plans/project-setup-interview.md. 7 November: in a project landing by
-  pull request it asks how plans group into pull requests and writes the
-  answer under `## Pull requests`,
-  plans/related-plans-share-a-pull-request.md. 7 November: the Issues
-  question opens with two sentences of context, and its No option says
-  the plans folder, not its path, as the plain-words check needs.
-  plans/related-plans-share-a-pull-request-follow-up.md. 7 November: the
-  Issues question recommends issues when someone besides the owner builds
-  here, as the Landing question does (Javi).
-  plans/related-plans-share-a-pull-request-follow-up-2.md. 7 November: No
-  on a run again turns issues off, and the file's answer counts only from
-  a file already landing by pull request or with issues on (Javi).
-  plans/related-plans-share-a-pull-request-follow-up-3.md. 7 November:
-  pushing straight on a run again turns issues off, since issues assume
-  pull requests (Javi).
-  plans/related-plans-share-a-pull-request-follow-up-4.md. 7 November:
-  any run again that ends without pull requests takes out issues and the
-  Pull requests heading, and the queue reads issues only with pull
-  requests on (Javi's choice of follow-up-4).
-  plans/related-plans-share-a-pull-request-follow-up-5.md.
-  7 November: the agents read issues as on only with pull requests;
-  setup's final message names a Pull requests heading it took out.
-  plans/related-plans-share-a-pull-request-follow-up-6.md.
-  14 November: setup writes the agent a plain chat opens as.
-  plans/agent-set-by-the-project.md.
+  interview asks once and says what each thing turned on costs. In a
+  project landing by pull request it asks how plans group into pull
+  requests and writes the answer under `## Pull requests`; it offers
+  issues only with pull requests, recommended when someone besides the
+  owner builds here, and keeps them only so, since issues assume pull
+  requests: a run again that ends without pull requests takes out issues
+  and the Pull requests heading, and says so. It writes the agent
+  a plain chat opens as. plans/project-setup-interview.md,
+  plans/related-plans-share-a-pull-request.md and its follow-ups 1 to
+  6, plans/agent-set-by-the-project.md.
 - `connectors-off` **A project turns off the claude.ai connectors it does
   not use, whole, in its own settings.** (Javi, 27 October) The account's
   connectors otherwise reach every chat in every project; a project
@@ -340,8 +320,12 @@ on the machine that planned them.
   bold list item with its tier and date, read there and nowhere else.**
   (Javi, 27 October) What is not there was not decided, as far as the
   next agent can tell; one place to read a tier means one reader for the
-  audit, the hook and the lint. plans/sizes-and-decisions.md,
-  plans/tier-pattern-and-readme.md.
+  audit, the hook and the lint. An entry is rewritten when its rule
+  changes (Javi, 24 November): in a month the plugin's own catalogue had
+  grown to 61 KB, a quarter of it dated notes telling how each fix was
+  reached, which no agent needs to follow the rule.
+  plans/sizes-and-decisions.md, plans/tier-pattern-and-readme.md,
+  plans/workflow-sweep-docs.md.
 - `only-well-formed-opinions` **The catalogue is only for well-formed
   opinions, researched or given by a person; anything not in it is
   assumed to have no reason and is free to change.** (Javi, 30 October)
@@ -384,12 +368,12 @@ on the machine that planned them.
 - `string-rests-on-source` **A string rests on what produced it: an
   entry or house rule, a product looked up, a person, or free.** (Javi,
   29 October) Even simple text goes through the research, so a grounded
-  answer exists before he asks why; since 30 October only a string that
-  carries a decision is researched and recorded.
-  plans/every-word-researched.md, plans/question-only-for-a-new-screen.md.
-  2 November: each string's row gives its kind and what shows it, as
-  Polaris's and Primer's lint rules name the component to use in place of
-  a raw element, and the plan review checks the diff.
+  answer exists before he asks why; only a string that carries a
+  decision is researched and recorded. Each string's row gives its kind
+  and what shows it, as Polaris's and Primer's lint rules name the
+  component to use in place of a raw element, and the plan review checks
+  the diff. plans/every-word-researched.md,
+  plans/question-only-for-a-new-screen.md,
   plans/catch-inconsistent-ui-at-build.md.
 - `reason-gone-ask` **A rule whose reason is gone is put to the owner,
   not followed.** (Javi, 27 October) A deleted component or a fixed bug
@@ -403,26 +387,19 @@ on the machine that planned them.
 - `found-three-ways` **A decision is found again by the everywhere rules
   loaded always, the edit-time hook and the `design-research` skill.**
   (Javi, 27 October) A rule the agent never sees before the edit is a
-  rule it breaks. plans/sizes-and-decisions.md.
-  2 November: a one-file catalogue with no `paths` governs every `ui`
-  path, so the list is kept once; the instruction is shown once a
-  session, as the rules are. plans/catalogue-hook-and-audit.md.
-  2 November: a small model names the catalogue's parts an edit touches,
-  since a rule in a file the path and the keywords never reach is a rule
-  the executor breaks; bounded as every loop over model calls is.
-  plans/catch-inconsistent-ui-at-build.md.
+  rule it breaks. A one-file catalogue with no `paths` governs every `ui`
+  path, so the list is kept once, and the hook's instruction is shown
+  once a session, as the rules are; a small model names the catalogue's
+  parts an edit touches, since a rule in a file the path and the
+  keywords never reach is one the executor breaks, bounded as every loop
+  over model calls is. plans/sizes-and-decisions.md,
+  plans/catalogue-hook-and-audit.md, plans/catch-inconsistent-ui-at-build.md.
 - `audit-checks` **The audit's checks are refused once each, and the
   second stop passes.** (Javi, 27 October) A check that refuses forever
-  loops; once is enough to make the agent look.
-  plans/sizes-and-decisions.md, plans/log-only-decisions-with-a-reason.md.
-  2 November: a catalogue counts as written to only when an entry was
-  added, changed or removed; a frontmatter or prose line is no decision.
-  plans/catalogue-hook-and-audit.md.
-- `talk-setup-retires` **The talk setup retires into the plugin: the
-  maker with a project file, its slide steps a skill of the talk
-  workspace.** (Javi, 27 October) One mechanism serves the talks and the
-  projects; the plugin never names PowerPoint's steps.
-  plans/sizes-and-decisions-follow-up.md.
+  loops; once is enough to make the agent look. A catalogue counts as
+  written to only when an entry was added, changed or removed, since a
+  frontmatter or prose line is no decision. plans/sizes-and-decisions.md,
+  plans/log-only-decisions-with-a-reason.md, plans/catalogue-hook-and-audit.md.
 
 ## The queue
 
@@ -434,77 +411,51 @@ on the machine that planned them.
   plans/handed-plan-stays-in-queue.md, plans/dropped-plan-state.md.
 - `plan-put-first` **A plan or a brief the owner puts first is taken
   next, at the point between two plans, and the mark is a line in its
-  file.** (Javi, 13 November) In a project a one-line fix that alone
-  held a pull request's merge waited behind five larger plans, and the
-  assistant's message asking for it first was recorded nowhere a fresh
-  executor reads. One mark, the latest on top, as GitHub's merge queue
-  has one "Jump the queue" and Slurm's `scontrol top` moves a job to
-  the front, rather than levels (Buildkite's numeric priority,
-  Mergify's priority rules), which ask a rank of every plan. Unlike
-  GitHub's jump, which rebuilds what is in progress, nothing under way
-  is stopped, as Buildkite's priority orders only jobs not yet
-  assigned. The line is in the file by plan-state-in-file, and the
-  hook refuses a Building line out of turn as it does on a plan still
-  asking. plans/priority-queue.md.
-  14 November: the planner's tool hook refuses a write that leaves a
-  waiting file without its First line: `plans first` keeps the file's
-  times, so Claude Code's stale-file check does not see its write, and a
-  planner that read the brief before the mark wrote its plan over it.
-  And `plans first` takes one path. plans/put-first-review-fixes.md.
-  14 November: the refusal names the one place the queue reads the line
-  for that file, worked out as `plans first` works it out, in the rule's
-  own words: under the header paragraph, or, when the header sits under a
-  `## ` section, above that section; naming both had the first refused
-  again for the second shape. plans/put-first-refusal-place.md,
-  plans/put-first-refusal-one-place.md.
-  14 November: the line has one place for every shape of header, above
-  the first `## ` section, where the queue reads it as it reads `Lands`;
-  the rule, the refusal and the planner's file say those words. "Above
-  the section that header sits under" sent a planner to the second
-  section of a plan written by hand, where the line is not read, and the
-  place worked out per shape was wrong in three commits running.
-  plans/put-first-any-header-place.md.
-  15 November: a refresh plan is put first by the assistant on his
-  standing word. plans/merged-pr-refreshes-the-rest.md.
+  file, above its first `## ` section.** (Javi, 13 November) In a
+  project a one-line fix that alone held a pull request's merge waited
+  behind five larger plans, and the assistant's message asking for it
+  first was recorded nowhere a fresh executor reads. One mark, the
+  latest on top, as GitHub's merge queue has one "Jump the queue" and
+  Slurm's `scontrol top` moves a job to the front, rather than levels
+  (Buildkite's numeric priority, Mergify's priority rules), which ask
+  a rank of every plan; nothing under way is stopped, as Buildkite's
+  priority orders only jobs not yet assigned. The line has one place
+  for every shape of header, where the queue reads it as it reads
+  `Lands`: a place worked out per shape was wrong in three commits
+  running and sent a planner to a section the queue does not read. The
+  planner's tool hook refuses a write that leaves a waiting file
+  without its line, since `plans first` keeps the file's times and
+  Claude Code's stale-file check does not see its write. A refresh
+  plan is put first by the assistant on his standing word.
+  plans/priority-queue.md, plans/put-first-review-fixes.md,
+  plans/put-first-any-header-place.md,
+  plans/merged-pr-refreshes-the-rest.md.
 - `related-line` **In pull request mode, `plans` says what each brief and
   ready plan looks related to, and the author answers with a `Related`
   line.** (Javi, 30 October) GitHub links a `#<n>` and writes a backlink
   on the other pull request, so its people see it where they read.
   plans/land-by-pull-request.md.
-- `executor-pool` **A queue has as many executors as its project
-  file says, one by default; each builds one plan at a time, the
-  lowest-numbered free one takes the next, and its Stop hook holds
-  the stop on a red run or pull request, then reuses or retires the
+- `executor-pool` **A queue has as many executors as its project file
+  says, one by default; each builds one plan at a time, the
+  lowest-numbered free one takes the next, and its Stop hook holds the
+  stop on a red run or pull request, then reuses or retires the
   session.** (Javi, 24 November) The executors were the bottleneck:
   every ready plan waited behind the one in hand. A number of the
-  queue, not a third form beside the maker and the queue. As a
-  Jenkins node has a number of executors, each listed by its number.
-  plans/parallel-executors.md. 27 October: every turn re-reads the whole context at
-  the cache-read price and a fresh session's first turn is 50k tokens,
-  so a session is reused only while it is cheaper than a fresh one.
-  plans/cache-aware-queue.md, plans/base-at-building-line.md.
-  5 November: the ceiling is judged at every stop while plans wait, the
-  plans the session was named included; an executor named three plans at
-  187k declined them and stopped at 202k, and the hook passed, since it
-  judged only plans not yet told. plans/executor-over-ceiling-hands-on.md.
-  5 November (Javi): with two ceilings, a session that declined a related
-  plan is not kept for it while an unrelated one waits; `related` is read
-  over the plans not yet named when any are. plans/executor-over-ceiling-hands-on.md.
-  6 November: the third compaction's hand-over is retired with the
-  compaction count; a plan is handed over by the usage limit's cutoff and
-  by plans end --now alone. plans/simpler-agents.md.
-  6 November (Javi): the ceiling is worked out for this project and agent
-  from its transcripts and raised by what each waiting plan shares with
-  the batch; the related pair retires (context-cost).
-  plans/adaptive-reuse.md.
-  6 November: a session named plans that stops without taking them is
-  retired on every waiting plan, whatever its context
-  (plans-reach-an-executor). plans/executor-takes-next-ready-plan.md.
-  14 November: the hold is on a project's `run`, and on a pull request's
-  failed checks only where no webhook brings them (`push-not-waited-on`).
-  24 November: with more than one executor, a Stop hook holds only on
-  the pull requests of the plans its session took.
-  plans/parallel-executors.md.
+  queue, not a third form beside the maker and the queue, as a Jenkins
+  node has a number of executors. Every turn
+  re-reads the whole context at the cache-read price, so a session is
+  reused only while it is cheaper than a fresh one (`context-cost`),
+  judged at every stop while plans wait, the plans it was named
+  included: an executor named three plans at 187k declined them and
+  stopped at 202k, and the hook passed, since it judged only plans not
+  yet told. A plan is handed over by the usage limit's cutoff and by
+  `plans end --now` alone. The hold is on the project's `run`, and on a
+  pull request's failed checks only where no webhook brings them
+  (`push-not-waited-on`); with more than one executor, only on the pull
+  requests of the plans its session took. plans/parallel-executors.md,
+  plans/cache-aware-queue.md, plans/base-at-building-line.md,
+  plans/executor-over-ceiling-hands-on.md, plans/simpler-agents.md,
+  plans/executor-never-watches-ci.md.
   - ~~One checkout has one executor, and its Stop hook holds the stop
     on a red run or pull request, then reuses or retires the
     session.~~ (Javi, 27 October; one checkout held one build)
@@ -522,84 +473,68 @@ on the machine that planned them.
   reaches the assistant by the webhook.** (Javi, 14 November) The pull
   request's run repeated what "Before the push" had just run, four
   minutes a plan in the project that asked; GitHub tells a person of
-  the runs they set off and lets them hear of the failed ones only;
-  the assistant reruns once what the diff does not explain, since a
-  hosted runner fails on its own some days. What CI alone can do is
-  the project's `run`. plans/executor-never-watches-ci.md.
-  15 November: a run is taken whatever set it off, and read back by
+  the runs they set off and lets them hear of the failed ones only. The
+  assistant reruns once what the diff does not explain, since a hosted
+  runner fails on its own some days, and refreshes a pull request
+  behind its base rather than rerun it. What CI alone can do is the
+  project's `run`. A run is taken whatever set it off and read back by
   `gh run list`, which needs the token's Actions read alone: in the
-  project that asked, the token could not read a pull request's checks
-  and the read brought nothing. Failed is failure, timed out or startup
-  failure, or a status of failure or error, in the webhook and the Stop
-  hook alike: a cancelled check was superseded or stopped by a person
-  (17 of that project's last 100 runs), one that needs action waits on
-  a person, on the pull request's page, and only GitHub marks one
-  stale. A check by another service, which no Actions event carries, is
-  named by the Stop hook also while a webhook listens: GitHub itself
-  notifies of Actions runs alone, and the token already reads checks.
-  plans/failed-runs-the-webhook-misses.md.
-  15 November, later: an app registered before its line named Actions
-  and Workflow run sent no failed run, and with its listener alive
-  nothing read them. The listener asks GitHub what the app's
-  registration and installation have, tells the owner once what to add
-  or to accept, as `gh` names a missing scope and the command that
-  adds it, and reads failed runs every five minutes meanwhile: the
-  project that asked runs its checks in about four, and its token
-  cannot read a pull request's checks, so the Stop hook's read would
-  bring nothing there. plans/app-old-registration-said.md.
-  15 November, later still: the Stop hook's read of checks falls to the
-  app's token when GitHub refuses the person's, since in the project
-  that asked the app could read them and the token could not; the
-  person's is tried first, because an app registered by the plugin's
-  line has no Checks and the handbook's token does. Refused by both, it
-  is said in `plans`, as `gh` names what a token lacks.
-  plans/checks-read-with-the-app.md.
-  15 November: behind its base, a failure the diff does not explain is
-  refreshed, not rerun. plans/merged-pr-refreshes-the-rest.md.
+  project that asked, the token could not read a pull request's checks.
+  A cancelled check is no failure: it was superseded or stopped by a
+  person (17 of that project's last 100 runs); one that needs action
+  waits on a person, and only GitHub marks one stale. A check by another service, which no Actions
+  event carries, is named by the Stop hook also while a webhook
+  listens, since GitHub notifies of Actions runs alone. An app
+  registered before its line named Actions and Workflow run sent no
+  failed run, so the listener asks GitHub what the app's registration
+  and installation have, tells the owner once what to add or accept,
+  as `gh` names a missing scope, and reads failed runs every five
+  minutes meanwhile, that project's checks taking about four. The Stop
+  hook reads checks with the person's token, then the app's when GitHub
+  refuses it, since an app registered by the plugin's line has no
+  Checks and the handbook's token does; refused by both, `plans` says
+  so. plans/executor-never-watches-ci.md,
+  plans/failed-runs-the-webhook-misses.md,
+  plans/app-old-registration-said.md, plans/checks-read-with-the-app.md,
+  plans/merged-pr-refreshes-the-rest.md.
   - ~~The checks are watched after every push and fixed before the
     next plan.~~ (Javi, 28 October)
-- `plans-reach-an-executor` **Ready plans never wait with no executor: a
-  plan named to a session that stops without taking it goes to a fresh
-  executor, and a hook or timer that finds plans ready and none alive
-  starts one.** (Javi, 6 November) Eight plans sat two hours in a
-  project: an executor named nine plans built one and stopped, the hook
-  judged only the plans not yet told and passed, and nothing starts an
-  executor on its own. The planner's rule since 27 October, as SQS gives
-  a message received and not deleted to another consumer, and a
-  supervisor's restart of a worker that exits with work queued
-  (Kubernetes `restartPolicy: Always`; Sidekiq's orphaned jobs moved
-  back at startup and every five minutes). The queue is a file: the stop
-  is the acknowledgement, and what matters is that no plan is ignored.
-  plans/executor-takes-next-ready-plan.md.
-  14 November: an executor listed with no process is not alive. It
-  refused every start, and `plans end` would not end it; a start now
-  retires it and hands its plan over, as `plans end --now` does. Retakes
-  "An executor is not touched" of plans/waiting-means-a-question.md for
-  this case. plans/put-first-review-fixes.md.
-  14 November: a plan handed over too often goes to the assistant, and
-  the owner is not asked by the executor (executor-never-waits).
-  plans/executor-never-waits.md.
-  24 November: a free plan never waits while an executor is free;
-  `plans start` gives it to the lowest-numbered free executor, an idle
-  chat with room by the message it prints. plans/parallel-executors.md.
+- `plans-reach-an-executor` **A free plan never waits while an executor
+  is free: a plan named to a session that stops without taking it goes
+  to a fresh executor, `plans start` gives the next to the
+  lowest-numbered free executor, and a hook or timer that finds plans
+  ready and none alive starts one.** (Javi, 6 November) Eight plans sat
+  two hours in a project: an executor named nine plans built one and
+  stopped, the hook judged only the plans not yet told and passed, and
+  nothing started an executor on its own. The planner's rule since 27
+  October, as SQS gives a message received and not deleted to
+  another consumer, and a supervisor's restart of a worker that exits
+  with work queued (Kubernetes `restartPolicy: Always`; Sidekiq's
+  orphaned jobs moved back at startup and every five minutes). The
+  queue is a file: the stop is the acknowledgement, and what matters is
+  that no plan is ignored. An executor listed with no process is free:
+  it refused every start and `plans end` would not end it, so a start
+  retires it and hands its plan over, as `plans end --now` does. A plan
+  handed over too often goes to the assistant, the owner not asked
+  (`executor-never-waits`). plans/executor-takes-next-ready-plan.md,
+  plans/put-first-review-fixes.md, plans/executor-never-waits.md,
+  plans/parallel-executors.md.
 - `starts-bounded` **Starts are bounded, as every loop over model calls
   is.** (Javi, 27 October) A queue that starts sessions on its own must
-  not spend the subscription's window or loop on a session that dies.
-  plans/queue-faults-carried-over.md.
-  15 November (Javi): the day's bound counts the starts that ended with
-  nothing built, planned or written, five in a row, and the owner's yes
-  starts one more. In a project twenty-four executors that each built
-  and pushed, retiring at their ceiling, were refused a twenty-fifth as
-  a loop, and his yes had no way in. A circuit breaker opens on
-  failures in a row and a Kubernetes Job's `backoffLimit` counts failed
-  pods only; a breaker half open lets one trial through, and
-  `systemctl reset-failed` lets an administrator start a unit its start
-  limit refuses. An assistant's progress counts a note from GitHub it
-  handled, since answering a comment writes no plan.
-  plans/loop-guard-counts-failures.md.
-  24 November: at most `executors` at a time; the loop guard and the
-  quick death count no executor at work in another number.
-  plans/parallel-executors.md.
+  not spend the subscription's window or loop on a session that dies. At
+  most `executors` run at a time. The day's bound counts the starts that
+  ended with nothing built, planned or written, five in a row, and the
+  owner's yes starts one more (Javi): in a project twenty-four executors
+  that each built and pushed, retiring at their ceiling, were refused a
+  twenty-fifth as a loop, and his yes had no way in. A circuit breaker
+  opens on failures in a row and a Kubernetes Job's `backoffLimit`
+  counts failed pods only; a breaker half open lets one trial through,
+  and `systemctl reset-failed` lets an administrator start a unit its
+  start limit refuses. An assistant's progress counts a note from
+  GitHub it handled, since answering a comment writes no plan; the loop
+  guard and the quick death count no executor at work in another
+  number. plans/queue-faults-carried-over.md,
+  plans/loop-guard-counts-failures.md, plans/parallel-executors.md.
   - ~~A tripwire at twenty-four starts of a kind a day.~~ (Javi, 27
     October)
 - `session-names` **Every session the queue starts is a Remote Control
@@ -613,9 +548,9 @@ on the machine that planned them.
   lingered. plans/idle-chats-end.md.
 - `end-now` **`plans end <id> --now` ends a named chat whatever it is
   doing.** (Javi, 31 October) A stuck turn or a question no one will
-  answer otherwise holds its executor's lock for good. plans/end-a-stuck-chat.md.
-  24 November: the fresh executor starts in the ended one's number,
-  and the hand-over names its worktree. plans/parallel-executors.md.
+  answer otherwise holds its executor's lock for good. The fresh
+  executor starts in the ended one's number, and the hand-over names
+  its worktree. plans/end-a-stuck-chat.md, plans/parallel-executors.md.
 - `archiving` **Archiving a chat in the Claude app does not stop it.**
   (observed in Claude Code 2.1.113, 27 October) The app is a window into
   the session; the process's exit is what archives the chat.
@@ -661,27 +596,18 @@ on the machine that planned them.
   brief: the oldest it is under its ceiling for, the ceiling raised by
   what the brief shares with its plans.** (Javi, 6 November) For a
   planner the fresh start's writes outweigh the reread of a context three
-  times its size, so relatedness is the planner's cost argument, where it
-  was the executor's quality guard; under one ceiling the median planner
-  planned one brief and retired. plans/cache-aware-queue.md,
-  plans/reuse-ceiling-per-agent.md. 6 November: compactions no longer
-  enter the rule; under its ceiling for any brief the oldest, under its
-  ceiling for a related brief the oldest related one.
-  plans/simpler-agents.md. 6 November (Javi): relatedness, a yes or no,
-  becomes the tokens the brief shares, and the ceiling is worked out from
-  this project's planners (context-cost). plans/adaptive-reuse.md.
-  - ~~A planner with room left takes the next brief: under its ceiling
-    the oldest, under its related ceiling the oldest brief on the ground
-    of its plans.~~ (Javi, 5 November)
-  - ~~A planner with room left takes the next brief.~~ (Javi, 27
-    October; by the executor's rule)
+  times its size, so what a brief shares with the chat is the planner's
+  cost argument; under one ceiling the median planner planned one brief
+  and retired. The share is the tokens the chat holds of the brief's
+  files, and the ceiling is worked out from this project's planners
+  (`context-cost`). plans/cache-aware-queue.md,
+  plans/reuse-ceiling-per-agent.md, plans/simpler-agents.md,
+  plans/adaptive-reuse.md.
 - `brief-leased` **A brief left with a live planner is leased to it
-  for thirty minutes, by message when it is idle and by its Stop hook
-  when it is busy; one over its ceiling for the brief or waiting on a
-  question gets a fresh planner beside it at once, and a brief not taken
-  by the lease's end goes to a fresh planner unless a busy planner with
-  room still holds it, which takes it at its stop while the lease
-  renews.** (Javi, 6 November) Five briefs sat seven hours behind one
+  for thirty minutes, each brief its own lease; one over its ceiling or
+  waiting on a question gets a fresh planner at once, and a brief not
+  taken by the lease's end goes to a fresh planner unless its holder is
+  busy with room.** (Javi, 6 November) Five briefs sat seven hours behind one
   planner's question: a message reaches a busy session between its tool
   calls, where no hook judges it, and a chat blocked on a question
   receives nothing until it is answered, so a brief sent by message was
@@ -696,35 +622,28 @@ on the machine that planned them.
   at its stop whether to take the next brief or pass it on, and what
   matters is that no brief is ignored.
   plans/briefs-reach-a-free-planner.md, plans/brief-lease-per-brief.md.
-  - ~~A brief left with a live planner is leased to it for thirty
-    minutes, by message when it is idle and by its Stop hook when it is
-    busy; one over its ceiling for the brief or waiting on a question
-    gets a fresh planner beside it at once, and a brief not taken by the
-    lease's end goes to a fresh planner.~~ (Javi, 6 November)
 - `asked-once` **A decision a plan leaves to the owner is asked by its
   planner, once, and the plan is the planner's for thirty minutes.**
   (Javi, 28 October) Wait thirty minutes, then decide for him; a plan
-  asked in two rounds keeps its hold until the last.
-  plans/owner-questions-plain-and-once.md, plans/asking-window-ends.md,
-  plans/asking-plan-held-by-path.md, plans/asking-plan-guarded.md.
-  14 November (Javi): a question the plan did not foresee is decided by
-  the executor, not asked in its session (executor-never-waits).
-  plans/executor-never-waits.md.
+  asked in two rounds keeps its hold until the last. A question the plan
+  did not foresee is decided by the executor, not asked in its session
+  (`executor-never-waits`). plans/owner-questions-plain-and-once.md,
+  plans/asking-window-ends.md, plans/asking-plan-held-by-path.md,
+  plans/asking-plan-guarded.md, plans/executor-never-waits.md.
 - `executor-never-waits` **An executor never asks the owner and never
   waits on him: what it would ask it decides by the recommended option,
   checked with the plan's planner or the assistant, and logged for
-  him.** (Javi, 14 November) One checkout had one executor then, so one open
-  question held every plan behind it, and a night's executors waited on
-  him for hours. Anthropic's prompting guidance has an agent take local,
-  reversible actions on its own and not the hard to reverse or shared
-  ones, here the four it never takes, and not discard unfamiliar files,
-  hence the stash. The consent is his standing word, not the peer's
-  answer, which only grounds a choice among the plan's own options. The
-  tool is taken away in the agent file, since an instruction is
-  advisory. plans/executor-never-waits.md.
-  24 November: in its own worktree nothing is the owner's, so what an
-  executor that is gone left there is stashed whole and said in Built,
-  with no item. plans/executors-build-in-worktrees.md.
+  him.** (Javi, 14 November) One open question held every plan behind
+  it, and a night's executors waited on him for hours. Anthropic's
+  prompting guidance has an agent take local, reversible actions on its
+  own and not the hard to reverse or shared ones, here the four it
+  never takes, and not discard unfamiliar files: in its own worktree
+  nothing is the owner's, so what an executor that is gone left there is
+  stashed whole and said in Built, with no item. The consent is his
+  standing word, not the peer's answer, which only grounds a choice
+  among the plan's own options. The tool is taken away in the agent
+  file, since an instruction is advisory. plans/executor-never-waits.md,
+  plans/executors-build-in-worktrees.md.
 - `group-message` **A change to another person's part is built as any
   plan, marked `Touches <name>'s part`; no agent drafts a message for
   another person unless the owner asks for one.** (Javi, 2 November) He
@@ -767,27 +686,23 @@ on the machine that planned them.
   container, seen in Remote Control, not on a hosted runner, and at
   once rather than by a poll; the lab already fronts services with its
   proxy; GitHub signs each delivery, and Copilot and claude-code-action
-  answer only people with write access. plans/github-watched.md.
-  The listener counts as alive only when its record's pid is alive and
-  its port takes a connection, a stale record is removed before another
-  starts, and `plans webhook` exits 1 when none comes up (Javi, 12
-  November): the record outlives a container's reboot, where its pid can
-  name another process. plans/webhook-stale-record.md.
-  14 November: a failed run on the queue's own pull request is an event
-  too, `failed`, with issues on or off. plans/executor-never-watches-ci.md.
-  15 November: a failed run is an event whatever set it off.
-  plans/failed-runs-the-webhook-misses.md.
-  15 November: the listener reads what its app can send and, lacking
-  failed runs, reads them itself. plans/app-old-registration-said.md.
-  15 November: a list `plans github` could not read is said and its
-  line held, where it was read as empty and passed; and a listener
-  started by an older copy is replaced by a newer one's start, as
-  Bazel's client stops a server of another version, since a listener
-  alive since before an update ran the old code for nine hours in the
-  project that asked. plans/checks-read-with-the-app.md.
-  15 November: a merge is an event too, issues on or off, and a delivery
-  nothing is taken from is not kept, since each was a file of 8 to 28 KB
-  in the project that asked. plans/merged-pr-refreshes-the-rest.md.
+  answer only people with write access. The listener counts as alive
+  only when its record's pid is alive and its port takes a connection
+  (Javi), since the record outlives a container's reboot, where its pid
+  can name another process. A failed run, whatever set it off, and a
+  merge are events too, issues on or off; a delivery nothing is taken
+  from is not kept, each being 8 to 28 KB in the project that asked.
+  The listener reads what its app can send and, lacking failed runs,
+  reads them itself. A list `plans github` could not read is said and
+  its line held, where it was read as empty and passed; a listener an
+  older copy started is replaced by a newer one's start, as Bazel's
+  client stops a server of another version, since one alive since
+  before an update ran the old code for nine hours.
+  plans/github-watched.md, plans/webhook-stale-record.md,
+  plans/executor-never-watches-ci.md,
+  plans/failed-runs-the-webhook-misses.md,
+  plans/app-old-registration-said.md, plans/checks-read-with-the-app.md,
+  plans/merged-pr-refreshes-the-rest.md.
 - `days-fixes` **The day's fixes are one pull request, `Small fixes, <d
   Month yyyy>`, never two in a day.** (Javi, 30 October) A daily pull
   request for the small fixes rather than a message for the group, which
@@ -796,68 +711,35 @@ on the machine that planned them.
 - `context-cost` **A session's context is worth keeping only while it is
   cheaper than a fresh one, by the wash worked out for each project and
   agent from its transcripts, raised by what the work shares with the
-  chat, and never over 480k.** (Javi, 6 November) The wash
-  is (start + shared reading) x (1 + write price / (turns x read price)):
-  a kept context is re-read every turn at the read price, a fresh one
-  writes its 50k start and the reading it shares once at the one-hour
-  write price. Per Anthropic's pricing page
-  (platform.claude.com/docs/en/about-claude/pricing) read on 5 November
-  2026 (Fable 5.1 $10 input, $20 one-hour write, $0.25 read, $50 output a
-  million; Opus 5.5 $4, $8, $0.20, $20) and the transcripts of 27 October
-  to 4 November (34 planners of the project it was first written in,
-  median 36 turns, 54 percent of their cost cache writes; 39 executors,
-  68 percent cache reads): a
-  planner on Fable washes at 160k with nothing shared and 480k with 100k
-  shared; an executor on Opus at about 70k and 110k, and 200k stays the
-  owner's allowance of about $3 a plan for the batch's continuity. `plans
-  cost` measures it again. plans/cache-aware-queue.md,
-  plans/reuse-ceiling-per-agent.md. 6 November: compactions leave the
-  rule; of this queue's 60 sessions since 27 October none compacted
-  (plans cost), and the first project's Built sections record 0
-  compactions 56 times, so the context against the ceiling and the
-  cache's warmth are the whole rule, and plans cost keeps counting
-  compactions as the measurement that would show them back.
-  plans/simpler-agents.md. 6 November: the inputs are measured per
-  project and agent from the transcripts and cached, the fresh start as
-  the median first turn (here 49k for an executor over 40 sessions, 35k
-  for a planner over 21), the turns as the median (79, 26), the shared
-  reading in tokens of the named files; the wash is raised by what is
-  shared and decides alone (Javi: here it is 74k and 144k, under today's
-  numbers, so more chats start, taken for the formula's saving), today's
-  numbers serve only while an agent has under five sessions in the
-  project, and 480k is the cap, the quality limit no price measures
-  (Chroma's context rot, research.trychroma.com/context-rot).
-  plans/adaptive-reuse.md. 6 November: the shared reading is what the
-  chat read or wrote of each file the work names, counted by its tool
-  hook, at most the file's size (shared-is-what-is-held).
+  chat, and never over 480k.** (Javi, 6 November) The wash is (start +
+  shared reading) x (1 + write price / (turns x read price)): a kept
+  context is re-read every turn at the read price, a fresh one writes
+  its start and the reading it shares once at the one-hour write price,
+  per Anthropic's pricing page
+  (platform.claude.com/docs/en/about-claude/pricing), read on 5 November
+  2026. The inputs are measured per project and agent from the
+  transcripts and cached, the fresh start and the turns as medians, the
+  shared reading as what the chat holds of the files the work names (`shared-is-what-is-held`). The project file's
+  `reuse`, 200k for an executor and 160k for a planner, serves only
+  while an agent has under five sessions in the project; 480k is the
+  cap, the quality limit no price measures (Chroma's context rot,
+  research.trychroma.com/context-rot). Compactions are out of the rule:
+  none of this queue's first 60 sessions compacted, nor 56 of the first
+  project's builds, and `plans cost` still counts them. plans/cache-aware-queue.md, plans/reuse-ceiling-per-agent.md,
+  plans/simpler-agents.md, plans/adaptive-reuse.md,
   plans/shared-file-share.md.
-  - ~~A session's context is worth keeping only while it is cheaper than
-    a fresh one, and the wash is each agent's: an executor retires past
-    200k, a planner past 160k for a brief on other ground and past 480k
-    for one related to its plans.~~ (Javi, 5 November)
-  - ~~A session's context is worth keeping only while it is cheaper than
-    a fresh one.~~ (per Anthropic's pricing page, 27 October; one wash of
-    100k for both agents, counted with the fresh session's growth on one
-    side only)
 - `reuse-check-cheap` **The reuse check costs the agent nothing: the
   scripts measure from the transcripts into a cached summary, and the
   agent reads one verdict line.** (Javi, 6 November) A check that spent
-  tokens to save tokens would defeat its purpose; the measuring is a
-  stat per transcript when nothing changed, a re-read of the changed
-  ones otherwise, at most hourly from a hook and always from plans
-  cost. plans/adaptive-reuse.md.
-  6 November: a hook never measures; the plans commands refresh the
-  summary. plans/reuse-measured-outside-hooks.md.
-  6 November: a hook that finds the summary over an hour old starts
-  `plans cost` in the background and does not wait.
-  plans/hooks-refresh-reuse-in-background.md.
-  6 November: the background refresh measures only the reuse inputs, at
-  most hourly. plans/background-refresh-measures-only.md.
-  6 November: what a chat holds of each file is counted by the tool hook
-  from the tool's own result, never from a transcript
-  (shared-is-what-is-held). plans/shared-file-share.md.
-  6 November: a Read's hook is a bare node start (scripts/seen.mjs), and
-  plans sweeps the plugin's per-session temp files older than a day.
+  tokens to save tokens would defeat its purpose. A hook never measures:
+  one that finds the summary over an hour old starts `plans cost` in the
+  background, measuring only the reuse inputs, and does not wait; the
+  plans commands refresh it, a stat per transcript when nothing changed.
+  What a chat holds of each file is the tool hook's append-only log
+  (`shared-is-what-is-held`), a Read's hook a bare node start.
+  plans/adaptive-reuse.md, plans/reuse-measured-outside-hooks.md,
+  plans/hooks-refresh-reuse-in-background.md,
+  plans/background-refresh-measures-only.md, plans/shared-file-share.md,
   plans/shared-count-fixes.md.
 - `shared-is-what-is-held` **What a plan or brief shares with a chat is
   what the chat read or wrote of each file it names, at most the file's
@@ -865,15 +747,12 @@ on the machine that planned them.
   whole raised an executor's ceiling from 74k to 157k for a 331 KB test
   file it had changed a few hunks of (13k tokens held of 83k); the share
   is what a fresh chat would have to read again. The count is the tool
-  hook's, from each tool's result as the chat goes, into a file of the
-  session's beside its state, which the count never writes over: no
-  model call, no transcript read, nothing in the agent's context.
-  plans/shared-file-share.md.
-  6 November: the count is an append-only log a hook never reads, so
-  parallel hooks lose nothing; a Read runs a small script of its own; root
-  files count; the handed plan is measured first; a file changed with no
-  output is not held and a command's output is split evenly among the
-  files it names. plans/shared-count-fixes.md.
+  hook's, from each tool's result as the chat goes, into an append-only
+  log of the session's that a hook never reads, so parallel hooks lose
+  nothing: no model call, no transcript read, nothing in the agent's
+  context. A file changed with no output is not held, and a command's
+  output is split evenly among the files it names. plans/shared-file-share.md,
+  plans/shared-count-fixes.md.
 - `one-thread` **The executor works in one thread, with a subagent only
   in four named cases.** (per Anthropic's multi-agent research post, 27
   October) A plan's steps share one context, coding has few parallel
@@ -914,11 +793,11 @@ on the machine that planned them.
   file holds a host's address, a personal email, the home lab's domain,
   a token or the name of a project the workflow runs in; a project's
   specifics are in its own project file, and `test/public.test.ts`
-  refuses each. 14 November: the repository moved to the first
-  project's organization so that a machine's token could push, and its
-  address, wordplaylabs/workflow-plugin, now holds that name. The check
-  allows the address written exactly so and refuses the name in any
-  other form (Javi): the address shows the name to anyone who opens the
+  refuses each. The repository is in the first project's organization,
+  so that a machine's token could push, and its address,
+  wordplaylabs/workflow-plugin, holds that name: the check allows the
+  address written exactly so and refuses the name in any other form
+  (Javi), since the address shows the name to anyone who opens the
   repository, and the old address worked only by GitHub's redirect,
   which GitHub deletes when a repository is created there.
   plans/plugin-address-in-files.md.
@@ -938,19 +817,15 @@ on the machine that planned them.
   nobody. The check stands alone and is declared in the manifest, the
   one file read whenever the plugin loads; its file list is held to
   `git ls-files` by a test, as INSTALL.md's settings are to the
-  handbook's. plans/install-checks-itself.md. 3 November: the fix puts
-  the files back in place from the marketplace's clone, `git archive |
-  tar`, or updates when the clone has moved on; deleting the copy took
-  the scripts from every chat still running on it, and a `--plugin-dir`
-  root is a source checkout. Tried by a test on a throwaway clone.
-  plans/install-fix-safe.md. 3 November, later: the fallback for a
-  missing check decides as the check does, in the hook's shell and in
-  `plans`, from the copy's own path; a copy that the install record does
-  not name is an older version and gets no command; the yes option says
-  what the line's fix does, and the recheck looks at the copy the fix
-  changed. plans/install-fix-every-path.md. 6 November: the line
-  carries the question and the steps, said once by the script; each
-  agent file keeps one sentence. plans/simpler-agent-files.md.
+  handbook's. The fix puts the files back from the marketplace's clone,
+  `git archive | tar`, or updates when the clone has moved on, since
+  deleting the copy took the scripts from every chat still running on
+  it; a `--plugin-dir` root is a source checkout, and a copy the
+  install record does not name is an older version and gets no command.
+  The line
+  carries the question and the steps, said once by the script.
+  plans/install-checks-itself.md, plans/install-fix-safe.md,
+  plans/install-fix-every-path.md, plans/simpler-agent-files.md.
 - `plans-in-the-terminal` **`plans` is a command in the owner's
   terminal, written by a SessionStart hook to `~/.local/bin`.** (Javi, 8
   November) Claude Code puts a plugin's `bin/` on the Bash tool's PATH
@@ -958,16 +833,14 @@ on the machine that planned them.
   written by hand; `~/.local/bin` is where Claude Code's installer, uv
   and pipx put a user's commands, and the install record is what the
   install check already calls installed, so the wrapper reads it at each
-  call rather than being rewritten after an update. The hook says a
-  missing PATH entry rather than editing a shell file, as `uv tool
-  install` warns and only `uv tool update-shell` edits. 8 November,
-  later: the PATH line went to whichever chat wrote the file, a queue
-  chat after a rebuild, so it is said in the owner's chats at each start
-  while PATH lacks the directory, as uv and pipx warn at each install,
-  and the queue marks every chat it launches; a copy the record names
-  that was removed gave Node's trace, so the wrapper checks for
-  `bin/plans` first and says the update command.
-  plans/plans-on-the-terminal-path.md,
+  call rather than being rewritten after an update. A missing PATH entry
+  is said, not edited into a shell file, as `uv tool install` warns and
+  only `uv tool update-shell` edits; it is said in the owner's chats at
+  each start while it holds, as uv and pipx warn at each install, since
+  said once it went to whichever chat wrote the file, a queue chat after
+  a rebuild. A copy the record names that was removed gave Node's trace,
+  so the wrapper checks for `bin/plans` first and says the update
+  command. plans/plans-on-the-terminal-path.md,
   plans/plans-on-the-terminal-path-follow-up.md.
 - `push-token` **A push needs a token in the container.** (Javi, 27
   October) The queue's chats run where no VS Code window may be, and VS
@@ -975,17 +848,16 @@ on the machine that planned them.
   Workflows scope lets a plan that changes `.github/workflows/` push. The
   app's key and the webhook's secret may instead be in a private file
   that `WORKFLOW_SECRETS_FILE` names, read only when used, so no other
-  program's environment holds them (Javi, 6 November). In a
-  devcontainer the host's file has one fixed place per project,
-  `~/.config/workflow/<project>.env`, made empty when missing so the
-  container starts with the app off (Javi, 6 November).
+  program's environment holds them (Javi); in a devcontainer the host's
+  file has one fixed place per project, `~/.config/workflow/<project>.env`,
+  made empty when missing so the container starts with the app off. The
+  app has Actions read and write, so a failed run reaches the queue and
+  the assistant can rerun it, and `plans gh` with no app names its
+  permissions and the events the webhook reads, so an app registered by
+  that line sends every delivery the queue takes.
   plans/push-to-github.md, plans/secrets-from-a-file.md,
-  plans/secrets-file-made-on-host.md.
-  15 November: the app has Actions read and write, so a failed run
-  reaches the queue and the assistant can rerun it, and `plans gh` with
-  no app names its permissions and the events the webhook reads, so an
-  app registered by that line sends every delivery the queue takes.
-  plans/executor-never-watches-ci.md, plans/app-words-name-failed-runs.md.
+  plans/secrets-file-made-on-host.md, plans/executor-never-watches-ci.md,
+  plans/app-words-name-failed-runs.md.
 - `screenshots-attach` **Screenshots on a pull request go up through `gh
   pr create --attach` and `gh pr edit --attach`, from gh 2.99.** (as
   GitHub CLI does, 31 October) GitHub's changelog of 1 September 2026

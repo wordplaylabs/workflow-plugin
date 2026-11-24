@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Code hook (docs/workflow.md, "The three agents", "Asked in plain
+// Claude Code hook (docs/workflow.md, "The agents", "Asked in plain
 // words"): the owner reads a question on his phone, in the question tool's
 // dialog, with none of the chat in front of him, so a question that names
 // code, or is a single sentence, is sent back to be rewritten.

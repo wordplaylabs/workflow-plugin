@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { kindsFor, menuOf, nameWords } from "../plugins/workflow/scripts/catalogue-context.mjs";
 
@@ -438,14 +438,28 @@ tools:
     const tree = join(proj, ".claude", "worktrees", "executor-1");
     git("worktree", "add", "-q", "--detach", tree, "HEAD");
     const edit = (dir: string) =>
-      run(
-        context,
-        [],
-        { tool_input: { file_path: join(dir, "src", "Card.tsx"), content: "<h2>{title}</h2>" } },
-        { CLAUDE_PROJECT_DIR: dir },
-      );
-    expect(edit(proj)).toContain("A card's title is one line.");
-    expect(edit(tree)).toContain("A card's title is one line.");
+      JSON.parse(
+        run(
+          context,
+          [],
+          { tool_input: { file_path: join(dir, "src", "Card.tsx"), content: "<h2>{title}</h2>" } },
+          { CLAUDE_PROJECT_DIR: dir },
+        ),
+      ).hookSpecificOutput.additionalContext as string;
+    const opened = (ctx: string) =>
+      /Open before changing the control: (.+?) \(\d+ rules?;/.exec(ctx)?.[1] ?? "";
+    const inCheckout = edit(proj);
+    expect(inCheckout).toContain("A card's title is one line.");
+    // When the same edit is in the checkout, then the line names the label as before.
+    expect(opened(inCheckout)).toBe("../shared/decisions.md");
+    const inTree = edit(tree);
+    expect(inTree).toContain("A card's title is one line.");
+    // When the edit is in the worktree, then the line names the inherited file
+    // by its absolute path, and that path exists.
+    const path = opened(inTree);
+    expect(isAbsolute(path)).toBe(true);
+    expect(path.endsWith("/shared/decisions.md")).toBe(true);
+    expect(existsSync(path)).toBe(true);
   });
 });
 

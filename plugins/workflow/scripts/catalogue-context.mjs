@@ -82,17 +82,17 @@ export function frontmatter(text) {
 }
 
 /**
- * The catalogue's files: name, where it came from, paths globs, signal
- * patterns and entries ({id, rule, tag, key}). `locations` is a directory, or
- * a list of `{path, label, own}`, the inherited first and the project's own
- * last; a project entry whose id an inherited entry carries replaces it, and
- * says which it overrides.
+ * The catalogue's files: name, where it came from, the path to open it by,
+ * paths globs, signal patterns and entries ({id, rule, tag, key}).
+ * `locations` is a directory, or a list of `{path, label, own, away}`, the
+ * inherited first and the project's own last; a project entry whose id an
+ * inherited entry carries replaces it, and says which it overrides.
  */
 function readCatalogue(locations) {
   const list =
     typeof locations === "string" ? [{ path: locations, label: "", own: true }] : locations;
   const files = [];
-  for (const { path, label = "", own = true } of list) {
+  for (const { path, label = "", own = true, away = false } of list) {
     for (const { path: full, name } of catalogueFiles(path)) {
       const text = readFileSync(full, "utf8");
       const { paths, signals } = frontmatter(text);
@@ -134,10 +134,14 @@ function readCatalogue(locations) {
             section: sectionAt(line - 1),
           });
       }
+      const fileLabel = path.endsWith(".md") ? label : label ? `${label}/${name}` : name;
       files.push({
         name,
-        label: path.endsWith(".md") ? label : label ? `${label}/${name}` : name,
+        label: fileLabel,
         own,
+        // Read in the checkout from an executor's worktree, the file is opened
+        // by its absolute path, which its label does not give from there.
+        open: away ? full : fileLabel,
         title,
         single: path.endsWith(".md"),
         paths,
@@ -432,7 +436,7 @@ function contextFor(
         : byPath
           ? "it governs this file"
           : "its rules name this control";
-    pointers.push(`${f.label} (${f.entries.length} rules; ${why})`);
+    pointers.push(`${f.open} (${f.entries.length} rules; ${why})`);
     if (byPath && !hits.length && !kindEntries.length) f.entries.forEach(take);
   }
   if (!pointers.length) return !call && draws(text) ? nothingCovers(catalogue, who, executor) : "";
@@ -469,23 +473,24 @@ function shownPath(sessionId) {
 }
 
 /**
- * The project's catalogue locations, the inherited first: `{path, label, own}`.
- * `dir` is the tree read and `home` the checkout: from an executor's
+ * The project's catalogue locations, the inherited first: `{path, label, own,
+ * away}`. `dir` is the tree read and `home` the checkout: from an executor's
  * worktree, a path that leaves the project (`../.claude/decisions`), or one
- * git does not carry into the worktree, is the checkout's.
+ * git does not carry into the worktree, is the checkout's, and `away` is true,
+ * since the label would point beside the worktree.
  */
 export function locations(proj, dir = root, home = dir) {
   const at = (p) => {
-    if (isAbsolute(p)) return p;
+    if (isAbsolute(p)) return { path: p, away: false };
     const here = resolve(dir, p);
-    return normalize(p).split(/[\\/]/)[0] === ".." || !existsSync(here) ? resolve(home, p) : here;
+    const path =
+      normalize(p).split(/[\\/]/)[0] === ".." || !existsSync(here) ? resolve(home, p) : here;
+    return { path, away: path !== here };
   };
   const label = (p) => p.replace(/\/$/, "");
   return [
-    ...proj.inherits.map((p) => ({ path: at(p), label: label(p), own: false })),
-    ...(proj.catalogue
-      ? [{ path: at(proj.catalogue), label: label(proj.catalogue), own: true }]
-      : []),
+    ...proj.inherits.map((p) => ({ ...at(p), label: label(p), own: false })),
+    ...(proj.catalogue ? [{ ...at(proj.catalogue), label: label(proj.catalogue), own: true }] : []),
   ].filter(({ path }) => {
     try {
       statSync(path);

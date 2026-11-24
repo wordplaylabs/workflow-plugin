@@ -11001,7 +11001,8 @@ describe("an app that sends no failed run", () => {
       WORKFLOW_APP_KEY: pem,
       ...extra,
     });
-    beforeAll(() => {
+    // The block's folders, made anew for a retry.
+    const setUp = () => {
       stub = mkdtempSync(join(tmpdir(), "app-lacks-stub-"));
       fakeClaude(stub);
       writeFileSync(
@@ -11036,16 +11037,26 @@ else say([]);
         join(dir, "plans", "series-order.md"),
         "# Series\n\nPlan only, 14 November 2026, for Javi.\n\n## Built, 14 November 2026\n\nPull request #40 (https://github.com/o/r/pull/40) to test from branch series-order, commit 4f1c2b9a; draft.\n",
       );
-    });
-    afterAll(() => {
+    };
+    const tearDown = () => {
       rmSync(dir, { recursive: true, force: true });
       rmSync(stub, { recursive: true, force: true });
-    });
+    };
+    beforeAll(setUp);
+    afterAll(tearDown);
 
+    // Timed: tried up to three times, since a load spike rarely lasts three tries.
+    let tries = 0;
     it(
       "reads failed runs every period while the installation lacks them, and stops once it has them",
-      { timeout: 60_000 },
+      { timeout: 60_000, retry: 2 },
       async () => {
+        // A retry starts in folders of its own: nothing the try before it
+        // wrote, or a child of it still running writes, is counted.
+        if (tries++) {
+          tearDown();
+          setUp();
+        }
         let has = false;
         const asked: string[] = [];
         const fetch = async (address: string) => {

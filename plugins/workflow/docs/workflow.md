@@ -610,9 +610,10 @@ owner's word. (decisions.md#end-now)
 **An executor builds in its own worktree**,
 `.claude/worktrees/executor-<n>`, which the queue makes with git,
 starts the executor's chat in and keeps between plans; `plans/` in it
-is a link to the checkout's, a project that tracks `plans/` in git is
-refused, and the git-ignored files it needs come by
-`.worktreeinclude`, the `.env` files with none. The queue's files stay
+is a link to the checkout's, a project that tracks `plans/` or
+`.claude/settings.local.json` in git is refused, and the git-ignored
+files it needs come by `.worktreeinclude`, the `.env` files with none,
+and an untracked project file always. The queue's files stay
 in the checkout, which nobody builds in: `plans start` moves it to
 `origin/<branch>` when its tracked files are unchanged and it holds
 no commit of its own, and names any untracked file the move would

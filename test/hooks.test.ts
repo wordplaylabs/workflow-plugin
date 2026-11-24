@@ -11972,9 +11972,14 @@ describe("an executor builds in its own worktree", () => {
       stdio: ["ignore", "pipe", "pipe"],
     }).trim();
   /** A checkout with one commit as origin/test, a ready plan and a `claude` that records its starts. */
-  const checkout = (name: string, ignores = "") => {
+  const checkout = (name: string, ignores = "", separate = false) => {
     const dir = temp(`tree-${name.toLowerCase()}-`);
-    g(dir, "init", "-q");
+    g(
+      dir,
+      "init",
+      "-q",
+      ...(separate ? ["--separate-git-dir", join(temp("tree-git-"), "git")] : []),
+    );
     mkdirSync(join(dir, ".claude"));
     mkdirSync(join(dir, "apps", "a"), { recursive: true });
     writeFileSync(join(dir, ".claude", "workflow.md"), `---\nname: ${name}\nbranch: test\n---\n`);
@@ -12041,6 +12046,17 @@ else if (args.includes("--bg")) {
     expect(checkoutOf(none)).toBe(none);
   });
 
+  it("checkoutOf reads a repository made with a separate git folder", () => {
+    const repo = temp("tree-separate-");
+    const elsewhere = join(temp("tree-gitdir-"), "git");
+    g(repo, "init", "-q", "--separate-git-dir", elsewhere);
+    g(repo, "commit", "-q", "--allow-empty", "-m", "one");
+    const linked = join(repo, ".claude", "worktrees", "w");
+    g(repo, "worktree", "add", "-q", "--detach", linked, "HEAD");
+    expect(realpathSync(checkoutOf(linked))).toBe(realpathSync(repo));
+    expect(checkoutOf(repo)).toBe(repo);
+  });
+
   it("a dry start names --add-dir and the worktree, and makes nothing", () => {
     const one = checkout("Dry");
     const said = one.queue(["start", "--dry"]);
@@ -12099,6 +12115,64 @@ else if (args.includes("--bg")) {
     expect(existsSync(one.tree)).toBe(false);
     expect(readFileSync(one.rows, "utf8")).toBe("[]");
   });
+
+  it(
+    "a start in a repository with a separate git folder moves the checkout, not the git folder",
+    { timeout: 30_000 },
+    () => {
+      const one = checkout("Separate", "", true);
+      const said = one.queue(["start"]);
+      expect(said).toContain("The checkout is at test");
+      expect(said).toContain("Separate Executor 1 (lab) was started on: plans/x.md");
+      expect(realpathSync(checkoutOf(one.tree))).toBe(realpathSync(one.dir));
+    },
+  );
+
+  it("refuses a start while .claude/settings.local.json is tracked, and makes nothing", () => {
+    const one = checkout("Settings");
+    writeFileSync(join(one.dir, ".claude", "settings.local.json"), "{}\n");
+    g(one.dir, "add", "-f", ".claude/settings.local.json");
+    g(one.dir, "commit", "-q", "-m", "settings");
+    expect(one.queue(["start"])).toContain(
+      ".claude/settings.local.json is tracked by git, and an executor's worktree writes its number there: take it out of git (git rm --cached .claude/settings.local.json) and ignore it, then start again.",
+    );
+    expect(existsSync(one.tree)).toBe(false);
+    expect(readFileSync(one.rows, "utf8")).toBe("[]");
+  });
+
+  it(
+    "an untracked project file is carried into the worktree, and a newer one again; a tracked one is the branch's",
+    { timeout: 30_000 },
+    () => {
+      const one = checkout("Carried");
+      g(one.dir, "rm", "-q", "--cached", ".claude/workflow.md");
+      g(one.dir, "commit", "-q", "-m", "untracked");
+      g(one.dir, "update-ref", "refs/remotes/origin/test", "HEAD");
+      const file = join(one.dir, ".claude", "workflow.md");
+      one.queue(["start"]);
+      const carried = join(one.tree, ".claude", "workflow.md");
+      expect(readFileSync(carried, "utf8")).toBe(readFileSync(file, "utf8"));
+      expect(g(one.tree, "status", "--porcelain")).toBe("");
+      writeFileSync(file, "---\nname: Carried\nbranch: test\nexecutors: 2\n---\n");
+      // Older than the worktree's copy, as a restored file can be: carried all the same.
+      const earlier = new Date(Date.now() - 3_600_000);
+      utimesSync(file, earlier, earlier);
+      writeFileSync(one.rows, "[]");
+      // The loop guard holds a second start within ten minutes: the owner's word lets it.
+      one.queue(["start", "--owner-said", "start it again"]);
+      expect(readFileSync(carried, "utf8")).toContain("executors: 2");
+
+      const two = checkout("Kept");
+      writeFileSync(
+        join(two.dir, ".claude", "workflow.md"),
+        "---\nname: Kept\nbranch: test\n# changed, not committed\n---\n",
+      );
+      two.queue(["start"]);
+      expect(readFileSync(join(two.tree, ".claude", "workflow.md"), "utf8")).toBe(
+        "---\nname: Kept\nbranch: test\n---\n",
+      );
+    },
+  );
 
   it(
     "an executor edits only its worktree and plans/, a plan through the link being that plan",

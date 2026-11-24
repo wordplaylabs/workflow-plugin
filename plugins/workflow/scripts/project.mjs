@@ -8,6 +8,7 @@ import {
   existsSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -350,6 +351,13 @@ export function defaultBranch(root, { checkedOut = false } = {}) {
  * ends `/.git/worktrees/<name>`, the folder before that `/.git/`; else the
  * folder itself, a checkout, a submodule (whose `gitdir:` is under
  * `.git/modules/`) or no repository alike. One small file read, no process.
+ * A repository made with a separate git folder (plans/executors-build-in-
+ * worktrees-follow-up.md) records nowhere where its checkout is, and `git
+ * worktree list` names the git folder for it; so a `gitdir:` folder holding a
+ * `commondir` file is a linked worktree's, and a worktree at
+ * `<checkout>/.claude/worktrees/<name>`, where the queue makes them, belongs
+ * to that checkout when the checkout's `.git` names the same git folder. Any
+ * other gives the folder itself.
  */
 export function checkoutOf(dir) {
   let text = "";
@@ -360,8 +368,20 @@ export function checkoutOf(dir) {
     return dir;
   }
   const gitdir = /^gitdir:\s*(.+?)\s*$/m.exec(text)?.[1];
-  const match = gitdir && /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.exec(resolve(dir, gitdir));
-  return match ? match[1] : dir;
+  if (!gitdir) return dir;
+  const match = /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.exec(resolve(dir, gitdir));
+  if (match) return match[1];
+  const parent = /^(.*)[\\/]\.claude[\\/]worktrees[\\/][^\\/]+$/.exec(resolve(dir))?.[1];
+  if (!parent) return dir;
+  try {
+    const own = resolve(dir, gitdir);
+    const common = resolve(own, readFileSync(join(own, "commondir"), "utf8").trim());
+    const named = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(join(parent, ".git"), "utf8"))?.[1];
+    return named && realpathSync(resolve(parent, named)) === realpathSync(common) ? parent : dir;
+  } catch {
+    // No `commondir`, no checkout `.git` file, or a folder gone: the folder's own.
+    return dir;
+  }
 }
 
 /**

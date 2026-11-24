@@ -4688,6 +4688,8 @@ function executorNumber(input) {
 
 const TRACKED_PLANS =
   "plans/ holds files tracked by git, and an executor's worktree would carry its own copy of them: take the folder out of git (git rm -r --cached plans) and ignore it, then start again.";
+const TRACKED_SETTINGS =
+  ".claude/settings.local.json is tracked by git, and an executor's worktree writes its number there: take it out of git (git rm --cached .claude/settings.local.json) and ignore it, then start again.";
 
 /**
  * **An executor builds in its own worktree** (plans/executors-build-in-
@@ -4695,24 +4697,34 @@ const TRACKED_PLANS =
  * `origin/<branch>` with plain git when `git worktree list` lacks it, and
  * left as it is when there, since the executor's "Start clean" deals with
  * what is in it. Its `plans` is a link to the checkout's; the git-ignored
- * files it lacks come by `.worktreeinclude`, the `.env` files with none; and
+ * files it lacks come by `.worktreeinclude`, the `.env` files with none, and
+ * an untracked project file always, so the executor and its hooks read one
+ * file at one path (plans/executors-build-in-worktrees-follow-up.md); and
  * its number reaches the chat by the tree's `.claude/settings.local.json`
  * `env`, since `claude --bg` hands the chat to a process started before the
- * launch, with the daemon's environment. The path, or the refusal's line.
+ * launch, with the daemon's environment, which is why a tracked one refuses
+ * the start: the worktree would start dirty. The path, or the refusal's line.
  */
 function ensureTree(n) {
   // Tracked in the checkout's index or at the branch the worktree is made from.
-  let tracked = "";
-  for (const args of [
-    ["ls-files", "--", "plans"],
-    ["ls-tree", "-r", "--name-only", `origin/${branch()}`, "--", "plans"],
-  ])
-    try {
-      tracked ||= git(args, { timeout: 4000 });
-    } catch {
-      // Unread: the worktree's own add says what is wrong.
-    }
-  if (tracked) return TRACKED_PLANS;
+  const tracked = (path) => {
+    let listed = "";
+    for (const args of [
+      ["ls-files", "--", path],
+      ["ls-tree", "-r", "--name-only", `origin/${branch()}`, "--", path],
+    ])
+      try {
+        listed ||= git(args, { timeout: 4000 });
+      } catch {
+        // Unread: the worktree's own add says what is wrong.
+      }
+    return Boolean(listed);
+  };
+  if (tracked("plans")) return TRACKED_PLANS;
+  // Git's paths, with `/` on every system.
+  const settingsFile = ".claude/settings.local.json";
+  const projectPath = ".claude/workflow.md";
+  if (tracked(settingsFile)) return TRACKED_SETTINGS;
   const path = executorTree(n);
   // By real paths, as git may list a linked checkout's; a listed folder gone
   // from the disk is pruned and made again.
@@ -4741,32 +4753,46 @@ function ensureTree(n) {
   if (!there) symlinkSync(join(root, "plans"), link);
   else if (realPath(link) !== realPath(join(root, "plans")))
     return `.claude/worktrees/executor-${n}/plans is a folder of its own, not the link to the checkout's plans/: move what is in it to plans/ and remove it, then start again.`;
-  if (spawnSync("git", ["check-ignore", "-q", "plans"], { cwd: path }).status !== 0) {
-    const where = spawnSync("git", ["rev-parse", "--git-path", "info/exclude"], {
-      cwd: path,
-      encoding: "utf8",
-    });
-    if (where.status === 0) {
-      const file = resolve(path, where.stdout.trim());
-      mkdirSync(dirname(file), { recursive: true });
-      const text = existsSync(file) ? readFileSync(file, "utf8") : "";
-      writeFileSync(file, `${text}${text && !text.endsWith("\n") ? "\n" : ""}/plans\n`);
+  // An untracked project file is carried, and ignored like the link, so the
+  // worktree starts clean.
+  const projectFile = existsSync(join(root, projectPath)) && !tracked(projectPath);
+  for (const entry of projectFile ? ["plans", projectPath] : ["plans"])
+    if (spawnSync("git", ["check-ignore", "-q", entry], { cwd: path }).status !== 0) {
+      const where = spawnSync("git", ["rev-parse", "--git-path", "info/exclude"], {
+        cwd: path,
+        encoding: "utf8",
+      });
+      if (where.status === 0) {
+        const file = resolve(path, where.stdout.trim());
+        mkdirSync(dirname(file), { recursive: true });
+        const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+        writeFileSync(file, `${text}${text && !text.endsWith("\n") ? "\n" : ""}/${entry}\n`);
+      }
     }
-  }
-  for (const file of carried()) {
+  for (const file of new Set(projectFile ? [...carried(), projectPath] : carried())) {
     const from = join(root, file);
     const to = join(path, file);
     try {
-      if (existsSync(to) && statSync(to).mtimeMs >= statSync(from).mtimeMs) continue;
+      // The project file is the checkout's, whatever its date: a restored
+      // older copy still carries a newly denied tool (Codex C1).
+      const same =
+        file === projectPath
+          ? existsSync(to) && readFileSync(to, "utf8") === readFileSync(from, "utf8")
+          : existsSync(to) && statSync(to).mtimeMs >= statSync(from).mtimeMs;
+      if (same) continue;
       mkdirSync(dirname(to), { recursive: true });
       copyFileSync(from, to);
     } catch {
       // A file that cannot be copied is the build's to miss, not the start's.
     }
   }
+  // A kept worktree left on a branch that tracks the settings file is
+  // refused as the checkout is.
+  if (spawnSync("git", ["ls-files", "--error-unmatch", settingsFile], { cwd: path }).status === 0)
+    return TRACKED_SETTINGS;
   // Merged into what is there, written whole by a rename; a file that is
   // there and no JSON object is left as it is, never overwritten.
-  const settings = join(path, ".claude", "settings.local.json");
+  const settings = join(path, settingsFile);
   const local = existsSync(settings) ? readJson(settings) : {};
   if (local && typeof local === "object" && !Array.isArray(local)) {
     mkdirSync(dirname(settings), { recursive: true });
@@ -4811,13 +4837,18 @@ function carried() {
   return (ignored.stdout || "").split("\0").filter(Boolean);
 }
 
-/** The primary checkout, the one the hooks run from, even from inside a worktree; else the root. */
+/**
+ * The primary checkout, the one the hooks run from, even from inside a
+ * worktree; else the root. A repository with a separate git folder lists
+ * that folder first, no checkout (plans/executors-build-in-worktrees-
+ * follow-up.md): the root, which `checkoutOf` found, is the checkout then.
+ */
 function primaryCheckout() {
   try {
     const first = git(["worktree", "list", "--porcelain"])
       .split("\n")
       .find((line) => line.startsWith("worktree "));
-    if (first) return first.slice(9);
+    if (first && existsSync(join(first.slice(9), ".git"))) return first.slice(9);
   } catch {
     // Not a repository's worktree list: the root it was given.
   }

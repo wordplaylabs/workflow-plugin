@@ -576,8 +576,15 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   linked directories carry what a fresh checkout lacks. The number
   goes in the worktree's settings `env`, since `claude --bg` hands the
   chat to a process started before the launch, with the daemon's
-  environment (the plan's trial, 24 November).
-  plans/executors-build-in-worktrees.md.
+  environment (the plan's trial, 24 November), and a tracked local
+  settings file refuses the start, as a tracked `plans/` does: the
+  worktree would start dirty. An untracked project file is copied in
+  and kept out of git status like the `plans/` link, so the executor
+  and its hooks read one file at one path; and a repository with a
+  separate git folder, which records nowhere where its checkout is, is
+  read by where the queue puts a worktree.
+  plans/executors-build-in-worktrees.md,
+  plans/executors-build-in-worktrees-follow-up.md.
   - ~~A background session works in the checkout, one executor
     holding the lock.~~ (Javi, 27 October; a worktree per session
     made the queue lose track of what was built where)

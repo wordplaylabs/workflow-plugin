@@ -7,10 +7,12 @@ import {
   appendFileSync,
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   statSync,
   rmSync,
   utimesSync,
@@ -20,7 +22,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { QUEUE_IGNORES } from "../plugins/workflow/scripts/project.mjs";
+import { QUEUE_IGNORES, checkoutOf } from "../plugins/workflow/scripts/project.mjs";
 import {
   listToJudge,
   recordTool,
@@ -174,6 +176,27 @@ function wrote(sessionId: string, path: string) {
 }
 
 let repo: string;
+
+/**
+ * Gives a test repository the `origin/<branch>` an executor's worktree is
+ * made from: an empty commit, under the remote's name, once.
+ */
+function withOrigin(dir: string, branch = "test") {
+  const g = (...args: string[]) =>
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  try {
+    g("rev-parse", "-q", "--verify", `refs/remotes/origin/${branch}`);
+    return;
+  } catch {
+    // Not there yet.
+  }
+  g("commit", "-q", "--allow-empty", "-m", "start");
+  g("update-ref", `refs/remotes/origin/${branch}`, "HEAD");
+}
 
 function run(script: string, args: string[], input: object, env: Record<string, string> = {}) {
   return execFileSync("node", [script, ...args], {
@@ -1121,6 +1144,7 @@ describe("plan-queue", () => {
         const stateFile = join(tmpdir(), `workflow-queue-${id}.json`);
         try {
           execFileSync("git", ["init", "-q"], { cwd: dir });
+          withOrigin(dir);
           mkdirSync(join(dir, ".claude"));
           mkdirSync(join(dir, "plans"));
           writeFileSync(
@@ -2181,10 +2205,22 @@ describe("plan-queue", () => {
       rmSync(clone, { recursive: true, force: true });
     });
 
-    it("refuses on a branch", () => {
-      expect(syncIn(clone)).toMatch(
-        /^Not moved: the checkout is on branch \S+; it moves only when detached\.$/,
+    it("moves a clean checkout on a branch to origin/test, detached, and says one ahead", () => {
+      // plans/executors-build-in-worktrees.md, part 5: nobody builds in the checkout.
+      const on = g(clone, "symbolic-ref", "--short", "HEAD");
+      const test = g(clone, "rev-parse", "origin/test");
+      g(clone, "switch", "-q", "-c", "behind", first);
+      expect(syncIn(clone)).toBe(`The checkout is at test, ${test.slice(0, 8)}.`);
+      expect(g(clone, "rev-parse", "HEAD")).toBe(test);
+      expect(() => g(clone, "symbolic-ref", "-q", "HEAD")).toThrow();
+      g(clone, "switch", "-q", on);
+      writeFileSync(join(clone, "README"), "ahead\n");
+      g(clone, "commit", "-q", "-am", "ahead");
+      expect(syncIn(clone)).toBe(
+        "Not moved: the checkout is ahead of test; push or drop its commits first.",
       );
+      g(clone, "reset", "-q", "--hard", test);
+      g(clone, "branch", "-q", "-D", "behind");
     });
     it("names no queue in a project with no project file", () => {
       const bare = mkdtempSync(join(tmpdir(), "queue-bare-"));
@@ -2357,7 +2393,7 @@ describe("plan-queue", () => {
       try {
         g(clone, "switch", "-q", "-c", "side");
         expect(syncIn(clone)).toMatch(
-          /^git fetch failed \(.+\), so this is test as last fetched\. Not moved: the checkout is on branch side;/,
+          /^git fetch failed \(.+\), so this is test as last fetched\. The checkout is at test, /,
         );
       } finally {
         g(clone, "checkout", "-q", "--detach", "origin/test");
@@ -3721,6 +3757,7 @@ describe("the queue's faults, closed", () => {
       const said = runIn(dir, ["prompt"], env, {
         session_id: `related-hook-${process.pid}`,
         agent_type: "executor",
+        cwd: join(dir, ".claude", "worktrees", "executor-1"),
         prompt: "Build the plans.",
       });
       expect(said).toContain("plans/ready.md");
@@ -4446,7 +4483,13 @@ describe("the queue's faults, closed", () => {
             child.stdout.on("data", (chunk) => (out += chunk));
             child.on("error", fail);
             child.on("close", () => done(out));
-            child.stdin.end(JSON.stringify({ session_id: sessionId, agent_type: "executor" }));
+            child.stdin.end(
+              JSON.stringify({
+                session_id: sessionId,
+                agent_type: "executor",
+                cwd: join(dir, ".claude", "worktrees", "executor-1"),
+              }),
+            );
           });
         const outs = await Promise.all(ids.map(prompt));
         const blocked = outs.filter((out) => out.includes("Another executor is building"));
@@ -4500,6 +4543,7 @@ describe("the queue's faults, closed", () => {
     it("starts B beside A's live executor, A's lock and A's pause", () => {
       const a = fixture("A");
       const b = fixture("B");
+      withOrigin(b);
       const log = join(temp("queue-log-"), "starts.log");
       writeFileSync(
         log,
@@ -4518,7 +4562,9 @@ describe("the queue's faults, closed", () => {
           WORKFLOW_STARTS_LOG: log,
           WORKFLOW_USAGE_FILE: join(b, ".claude", "usage.json"),
         });
-      expect(dry()).toContain('Would run: claude "--bg" "--remote-control" "B Executor 1 (lab)"');
+      expect(dry()).toContain(
+        `Would run: claude "--add-dir" "${join(b, "plans")}" "--bg" "--remote-control" "B Executor 1 (lab)"`,
+      );
       // A session of the same name in another checkout still takes its number.
       expect(
         runIn(b, ["start", "--dry", "plans/x.md"], {
@@ -4583,6 +4629,7 @@ if (args[0] === "agents") {
       return { script, rows };
     };
     const startIn = (dir: string, env: Record<string, string>, args = ["plans/x.md"]) => {
+      withOrigin(dir);
       const { WORKFLOW_LIVE: _, ...rest } = process.env;
       return execFileSync("node", [join(here, queue), "start", ...args], {
         encoding: "utf8",
@@ -7132,6 +7179,7 @@ describe("a finished chat ends", () => {
       projects = mkdtempSync(join(tmpdir(), "ends-projects-"));
       log = join(dir, "stops.log");
       execFileSync("git", ["init", "-q"], { cwd: dir });
+      withOrigin(dir);
       mkdirSync(join(dir, ".claude"));
       mkdirSync(join(dir, "plans"));
       writeFileSync(join(dir, ".claude", "workflow.md"), "---\nname: Ends\nbranch: test\n---\n");
@@ -8177,6 +8225,7 @@ describe("asked once", () => {
         queue([mode], {
           session_id: ids.exec,
           agent_type: "workflow:executor",
+          cwd: join(dir, ".claude", "worktrees", "executor-1"),
           tool_name,
           tool_input,
         });
@@ -8256,7 +8305,10 @@ describe("asked once", () => {
           writeFileSync(file(), asks);
         }
         expect(
-          exec("tool", "Write", { file_path: join(dir, "notes.md"), content: `${line}\n` }),
+          exec("tool", "Write", {
+            file_path: join(dir, ".claude", "worktrees", "executor-1", "notes.md"),
+            content: `${line}\n`,
+          }),
         ).toBe("");
       });
 
@@ -10855,6 +10907,7 @@ describe("ready plans reach an executor", () => {
     const dir = mkdtempSync(join(tmpdir(), `queue-net-${name.toLowerCase()}-`));
     made.push(dir);
     execFileSync("git", ["init", "-q"], { cwd: dir });
+    withOrigin(dir);
     mkdirSync(join(dir, ".claude"));
     mkdirSync(join(dir, "plans"));
     writeFileSync(join(dir, ".claude", "workflow.md"), `---\nname: ${name}\nbranch: test\n---\n`);
@@ -11866,4 +11919,230 @@ describe("a plan put first, in a project", () => {
       );
     });
   });
+});
+
+// plans/executors-build-in-worktrees.md
+describe("an executor builds in its own worktree", () => {
+  const made: string[] = [];
+  afterAll(() => {
+    for (const dir of made) rmSync(dir, { recursive: true, force: true });
+  });
+  const temp = (prefix: string) => {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    made.push(dir);
+    return dir;
+  };
+  const g = (cwd: string, ...args: string[]) =>
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  /** A checkout with one commit as origin/test, a ready plan and a `claude` that records its starts. */
+  const checkout = (name: string, ignores = "") => {
+    const dir = temp(`tree-${name.toLowerCase()}-`);
+    g(dir, "init", "-q");
+    mkdirSync(join(dir, ".claude"));
+    mkdirSync(join(dir, "apps", "a"), { recursive: true });
+    writeFileSync(join(dir, ".claude", "workflow.md"), `---\nname: ${name}\nbranch: test\n---\n`);
+    writeFileSync(
+      join(dir, ".gitignore"),
+      `node_modules/\n.env\n.env.*\nplans/\n.claude/worktrees/\n${ignores}`,
+    );
+    writeFileSync(join(dir, "apps", "a", "index.js"), "\n");
+    writeFileSync(join(dir, "README.md"), "\n");
+    g(dir, "add", ".");
+    g(dir, "commit", "-q", "-m", "one");
+    g(dir, "update-ref", "refs/remotes/origin/test", "HEAD");
+    mkdirSync(join(dir, "plans"));
+    writeFileSync(join(dir, "plans", "x.md"), "# X\n\nPlan only, 24 November 2026, for Javi.\n");
+    const rows = join(dir, ".claude", "rows.json");
+    writeFileSync(rows, "[]");
+    const script = join(temp("tree-claude-"), "claude");
+    writeFileSync(
+      script,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "agents") process.stdout.write(fs.readFileSync(${JSON.stringify(rows)}, "utf8"));
+else if (args.includes("--bg")) {
+  const name = args[args.indexOf("--name") + 1];
+  const all = JSON.parse(fs.readFileSync(${JSON.stringify(rows)}, "utf8"));
+  all.push({ sessionId: "tree-" + Date.now(), name, kind: "background", cwd: process.cwd() });
+  fs.writeFileSync(${JSON.stringify(rows)}, JSON.stringify(all));
+}
+`,
+    );
+    chmodSync(script, 0o755);
+    const { WORKFLOW_LIVE: _, ...rest } = process.env;
+    const env = {
+      ...rest,
+      CLAUDE_PROJECT_DIR: dir,
+      WORKFLOW_ROOT: dir,
+      WORKFLOW_CLAUDE: script,
+      WORKFLOW_STARTS_LOG: join(dir, ".claude", "starts.log"),
+      WORKFLOW_USAGE_FILE: join(dir, ".claude", "usage.json"),
+    };
+    const queue = (args: string[], input: object = {}, extra: Record<string, string> = {}) =>
+      execFileSync("node", [join(here, "plan-queue.mjs"), ...args], {
+        input: JSON.stringify(input),
+        encoding: "utf8",
+        env: { ...env, ...extra },
+      });
+    return { dir, tree: join(dir, ".claude", "worktrees", "executor-1"), rows, queue };
+  };
+
+  it("checkoutOf gives the checkout for a linked worktree, and the folder itself otherwise", () => {
+    const repo = temp("tree-of-");
+    g(repo, "init", "-q");
+    g(repo, "commit", "-q", "--allow-empty", "-m", "one");
+    const linked = join(repo, ".claude", "worktrees", "w");
+    g(repo, "worktree", "add", "-q", "--detach", linked, "HEAD");
+    expect(checkoutOf(linked)).toBe(repo);
+    expect(checkoutOf(repo)).toBe(repo);
+    const sub = join(repo, "sub");
+    mkdirSync(sub);
+    writeFileSync(join(sub, ".git"), "gitdir: ../.git/modules/sub\n");
+    expect(checkoutOf(sub)).toBe(sub);
+    const none = temp("tree-none-");
+    expect(checkoutOf(none)).toBe(none);
+  });
+
+  it("a dry start names --add-dir and the worktree, and makes nothing", () => {
+    const one = checkout("Dry");
+    const said = one.queue(["start", "--dry"]);
+    expect(said).toContain(`Would run: claude "--add-dir" "${join(one.dir, "plans")}" "--bg"`);
+    expect(said).toContain("Would run it in .claude/worktrees/executor-1.");
+    expect(existsSync(one.tree)).toBe(false);
+  });
+
+  it(
+    "a start makes executor-1 at origin/test, links plans/, carries the .env files and starts the chat there",
+    { timeout: 30_000 },
+    () => {
+      const one = checkout("Made");
+      writeFileSync(join(one.dir, ".env"), "A=1\n");
+      writeFileSync(join(one.dir, "apps", "a", ".env"), "B=1\n");
+      mkdirSync(join(one.dir, "node_modules", "x"), { recursive: true });
+      writeFileSync(join(one.dir, "node_modules", "x", ".env"), "C=1\n");
+      expect(one.queue(["start"])).toContain("Made Executor 1 (lab) was started on: plans/x.md");
+      const list = g(one.dir, "worktree", "list", "--porcelain");
+      const entry = list.split("\n\n").find((block) => block.includes(one.tree)) || "";
+      expect(entry).toContain(`HEAD ${g(one.dir, "rev-parse", "origin/test")}`);
+      expect(entry).toContain("detached");
+      expect(lstatSync(join(one.tree, "plans")).isSymbolicLink()).toBe(true);
+      expect(realpathSync(join(one.tree, "plans"))).toBe(realpathSync(join(one.dir, "plans")));
+      expect(g(one.tree, "status", "--porcelain")).toBe("");
+      expect(readFileSync(join(one.tree, ".env"), "utf8")).toBe("A=1\n");
+      expect(existsSync(join(one.tree, "apps", "a", ".env"))).toBe(true);
+      expect(existsSync(join(one.tree, "node_modules", "x", ".env"))).toBe(false);
+      const settings = JSON.parse(
+        readFileSync(join(one.tree, ".claude", "settings.local.json"), "utf8"),
+      );
+      expect(settings.env.WORKFLOW_EXECUTOR).toBe("1");
+      expect(JSON.parse(readFileSync(one.rows, "utf8"))[0].cwd).toBe(realpathSync(one.tree));
+    },
+  );
+
+  it("a .worktreeinclude carries the files it lists and no others", { timeout: 30_000 }, () => {
+    const one = checkout("Include", "config/local.json\n");
+    writeFileSync(join(one.dir, ".worktreeinclude"), "config/local.json\n");
+    mkdirSync(join(one.dir, "config"));
+    writeFileSync(join(one.dir, "config", "local.json"), "{}\n");
+    writeFileSync(join(one.dir, ".env"), "A=1\n");
+    one.queue(["start"]);
+    expect(existsSync(join(one.tree, "config", "local.json"))).toBe(true);
+    expect(existsSync(join(one.tree, ".env"))).toBe(false);
+  });
+
+  it("refuses a start while plans/ holds a tracked file, and makes nothing", () => {
+    const one = checkout("Tracked");
+    g(one.dir, "add", "-f", "plans/x.md");
+    g(one.dir, "commit", "-q", "-m", "plans");
+    // The start's sync says its failed fetch first: the fixture has no remote.
+    expect(one.queue(["start"])).toContain(
+      "plans/ holds files tracked by git, and an executor's worktree would carry its own copy of them: take the folder out of git (git rm -r --cached plans) and ignore it, then start again.",
+    );
+    expect(existsSync(one.tree)).toBe(false);
+    expect(readFileSync(one.rows, "utf8")).toBe("[]");
+  });
+
+  it(
+    "an executor edits only its worktree and plans/, a plan through the link being that plan",
+    { timeout: 30_000 },
+    () => {
+      const one = checkout("Edits");
+      one.queue(["start"]);
+      const id = "e8100000-0000-0000-0000-000000000000";
+      const hook = (mode: string, file: string, extra: object = {}) =>
+        one.queue([mode], {
+          session_id: id,
+          agent_type: "workflow:executor",
+          cwd: one.tree,
+          tool_name: "Edit",
+          tool_input: { file_path: file, old_string: "a", new_string: "b" },
+          ...extra,
+        });
+      try {
+        const outside = join(one.dir, "README.md");
+        expect(JSON.parse(hook("tool", outside)).hookSpecificOutput.permissionDecisionReason).toBe(
+          `An executor edits only its own worktree, .claude/worktrees/executor-1, and plans/: ${outside} is outside both.`,
+        );
+        expect(hook("tool", join(one.tree, "README.md"))).toBe("");
+        const plan = join(one.tree, "plans", "x.md");
+        expect(hook("tool", plan)).toBe("");
+        writeFileSync(
+          plan,
+          `# X\n\n## Building, 24 November 2026, session ${id}\n\nPlan only, 24 November 2026, for Javi.\n`,
+        );
+        hook("wrote", plan);
+        const state = JSON.parse(readFileSync(join(tmpdir(), `workflow-queue-${id}.json`), "utf8"));
+        expect(state.held).toEqual(["plans/x.md"]);
+      } finally {
+        rmSync(join(tmpdir(), `workflow-queue-${id}.json`), { force: true });
+      }
+    },
+  );
+
+  it("blocks an executor's chat opened in the checkout", () => {
+    const one = checkout("Here");
+    const out = JSON.parse(
+      one.queue(["prompt"], {
+        session_id: "e8200000-0000-0000-0000-000000000000",
+        agent_type: "executor",
+        cwd: one.dir,
+        prompt: "Build.",
+      }),
+    );
+    expect(out).toEqual({
+      decision: "block",
+      reason:
+        "Executors build in the worktrees the queue makes (.claude/worktrees/executor-<n>), and this chat is in the checkout: plans start starts one. Do not build here; say so, and stop.",
+    });
+  });
+
+  it(
+    "plans lists the executor in executor-1 on its branch, its context from the worktree's transcript",
+    { timeout: 30_000 },
+    () => {
+      const one = checkout("Listed");
+      one.queue(["start"]);
+      g(one.tree, "switch", "-q", "-c", "topic");
+      const [row] = JSON.parse(readFileSync(one.rows, "utf8"));
+      const projects = temp("tree-projects-");
+      const folder = join(projects, row.cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+      mkdirSync(folder);
+      writeFileSync(
+        join(folder, `${row.sessionId}.jsonl`),
+        `${JSON.stringify({
+          type: "assistant",
+          timestamp: new Date().toISOString(),
+          message: { usage: { input_tokens: 10, cache_read_input_tokens: 40_990 } },
+        })}\n`,
+      );
+      const said = one.queue(["list"], {}, { WORKFLOW_PROJECTS: projects });
+      expect(said).toMatch(/Listed Executor 1 \(lab\) \[tree-\d*\], [^\n]*41k context/);
+      expect(said).toContain("in executor-1 on topic");
+    },
+  );
 });

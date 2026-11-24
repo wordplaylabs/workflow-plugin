@@ -48,8 +48,8 @@ what the line says and nothing else in this chat.
 - Hand out only bounded, read-only sweeps (`Explore`), each told its
   answer's shape and a turn limit; read what a brief quotes yourself.
 - A file `git status` shows changed is read from the project's branch,
-  and a short plan names functions, not lines, for it ("Reading beside a
-  build").
+  and a short plan names functions, not lines, for it ("The checkout is
+  for reading").
 
 ## How you answer
 

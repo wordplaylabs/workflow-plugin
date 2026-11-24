@@ -43,7 +43,9 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   closeSync,
+  copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readSync,
@@ -53,6 +55,7 @@ import {
   realpathSync,
   renameSync,
   statSync,
+  symlinkSync,
   unlinkSync,
   utimesSync,
   writeFileSync,
@@ -78,6 +81,7 @@ import {
 import {
   PROJECT_FILE,
   QUEUE_KINDS,
+  checkoutOf,
   compiles,
   connectorAlone,
   couldNameMcp,
@@ -106,10 +110,14 @@ const HOOK_MODES = ["prompt", "tool", "stop", "wrote", "cutoff", "session"];
  * `WORKFLOW_ROOT`, since the Bash tool may carry another project's
  * `CLAUDE_PROJECT_DIR`, so `cd <checkout> && plans start` acts there). The
  * processes the command spawns inherit the environment, and with it the root;
- * a hook never reads `WORKFLOW_ROOT`.
+ * a hook never reads `WORKFLOW_ROOT`. **The queue never moves**
+ * (plans/executors-build-in-worktrees.md, part 1): from an executor's
+ * worktree it is the checkout's, so the plans, the lock, the pause and the
+ * project file are in one place.
  */
-const root =
-  (hookRun() ? "" : process.env.WORKFLOW_ROOT) || process.env.CLAUDE_PROJECT_DIR || process.cwd();
+const root = checkoutOf(
+  (hookRun() ? "" : process.env.WORKFLOW_ROOT) || process.env.CLAUDE_PROJECT_DIR || process.cwd(),
+);
 const here = dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -1644,14 +1652,18 @@ export function sessionUsage(transcriptPath) {
 
 /**
  * A live row's transcript: `~/.claude/projects/<cwd, each character not a
- * letter or digit a dash>/<id>.jsonl`. `WORKFLOW_PROJECTS` for the tests.
+ * letter or digit a dash>/<id>.jsonl`, an executor's in its worktree's
+ * folder; when that folder lacks it, the checkout's.
+ * `WORKFLOW_PROJECTS` for the tests.
  */
 export function transcriptOf(
   row,
   projects = process.env.WORKFLOW_PROJECTS || join(homedir(), ".claude", "projects"),
 ) {
   if (!row?.cwd || !row.sessionId) return "";
-  return join(projects, row.cwd.replace(/[^a-zA-Z0-9]/g, "-"), `${row.sessionId}.jsonl`);
+  const own = join(projects, row.cwd.replace(/[^a-zA-Z0-9]/g, "-"), `${row.sessionId}.jsonl`);
+  const checkout = join(transcriptsDir(root, projects), `${row.sessionId}.jsonl`);
+  return existsSync(own) || !existsSync(checkout) ? own : checkout;
 }
 
 /** This checkout's transcript folder, named as `transcriptOf` names it. */
@@ -1660,6 +1672,26 @@ export function transcriptsDir(
   projects = process.env.WORKFLOW_PROJECTS || join(homedir(), ".claude", "projects"),
 ) {
   return join(projects, cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+}
+
+/**
+ * A checkout's transcript folder and those of its executors' worktrees
+ * (`<folder>--claude-worktrees-executor-<n>`), the checkout's first: the
+ * sessions the ceilings are measured from (plans/executors-build-in-
+ * worktrees.md, part 3).
+ */
+export function transcriptFolders(folder) {
+  const prefix = `${basename(folder)}--claude-worktrees-executor-`;
+  let trees = [];
+  try {
+    trees = readdirSync(dirname(folder))
+      .filter((name) => name.startsWith(prefix) && /^[1-9][0-9]*$/.test(name.slice(prefix.length)))
+      .sort()
+      .map((name) => join(dirname(folder), name));
+  } catch {
+    // No projects folder: the checkout's alone.
+  }
+  return [folder, ...trees];
 }
 
 /** How long a command takes the cached reuse inputs as they are; a hook, at any age. */
@@ -1703,18 +1735,25 @@ export function reuseInputs({
   const rows = cached?.rows && typeof cached.rows === "object" ? cached.rows : {};
   if (!refresh && cached?.measuredAt && now - cached.measuredAt < REUSE_REFRESH)
     return cached.inputs || {};
-  let names;
-  try {
-    names = readdirSync(dir).filter((name) => name.endsWith(".jsonl"));
-  } catch {
-    return cached?.inputs || {};
-  }
+  // The summary is named for the checkout's folder and covers its
+  // executors' worktrees' too; no folder read at all keeps what it held.
+  const paths = [];
+  let readAny = false;
+  for (const folder of transcriptFolders(dir))
+    try {
+      for (const name of readdirSync(folder))
+        if (name.endsWith(".jsonl")) paths.push(join(folder, name));
+      readAny = true;
+    } catch {
+      // A folder not there yet.
+    }
+  if (!readAny) return cached?.inputs || {};
   const next = {};
-  for (const name of names) {
-    const id = name.replace(/\.jsonl$/, "");
+  for (const path of paths) {
+    const id = basename(path).replace(/\.jsonl$/, "");
     let stat;
     try {
-      stat = statSync(join(dir, name));
+      stat = statSync(path);
     } catch {
       continue;
     }
@@ -1725,7 +1764,7 @@ export function reuseInputs({
     }
     // A transcript that cannot be read now keeps the row it had, with its old
     // stat, so the next refresh reads it again (Codex, 6 November).
-    const row = read(join(dir, name)) || (old?.agent ? old : null);
+    const row = read(path) || (old?.agent ? old : null);
     if (row) next[id] = row;
   }
   // When and over how many transcripts, which `plans` says beside the ceilings.
@@ -1850,7 +1889,7 @@ export function costCommand(
     refreshInputs({ refresh: true, dir: folder });
     return;
   }
-  const rows = measureAll(folder, { since });
+  const rows = transcriptFolders(folder).flatMap((one) => measureAll(one, { since }));
   const home = homedir();
   const shown = folder.startsWith(`${home}/`) ? `~${folder.slice(home.length)}` : folder;
   // **The reuse inputs, refreshed** (plans/adaptive-reuse.md, part 1), and
@@ -2866,12 +2905,12 @@ const START_WAIT = 10;
  * is asked once a second for ten seconds for a row of the new name. True when
  * seen; else the line to say, and nothing is logged.
  */
-function launch(args, name, kind) {
+function launch(args, name, kind, cwd = root) {
   const out = join(root, ".claude", `${kind}.started`);
   const fd = openSync(out, "w");
   try {
     const child = spawn(claudeBin(), args, {
-      cwd: root,
+      cwd,
       detached: true,
       stdio: ["ignore", fd, fd],
       env: launchEnv(kind),
@@ -4026,8 +4065,13 @@ function startHere(
   const mcp = probe
     ? []
     : proj().mcp.flatMap((p) => ["--mcp-config", isAbsolute(p) ? p : resolve(root, p)]);
+  // **An executor works in its worktree** (plans/executors-build-in-
+  // worktrees.md, part 3), reaching the checkout's plans/ by its link and by
+  // `--add-dir`, which also takes every value up to the next flag.
+  const tree = kind === "executor" && !probe ? executorTree(1) : "";
   const args = [
     ...mcp,
+    ...(tree ? ["--add-dir", join(root, "plans")] : []),
     "--bg",
     "--remote-control",
     decision.name,
@@ -4042,11 +4086,17 @@ function startHere(
   if (dry)
     return [
       `Would run: claude ${args.map((a) => JSON.stringify(a)).join(" ")}`,
+      ...(tree ? [`Would run it in ${relative(root, tree)}.`] : []),
       ...(decision.past ? [`Would start on ${owner()}'s word, past: ${decision.past}`] : []),
       ...(decision.replace || []).map(
         (old) => `Would retire ${old.name} [${String(old.sessionId).slice(0, 8)}]: ${old.why}.`,
       ),
     ].join("\n");
+  // The worktree is made before anyone is retired, so its refusal leaves all as it was.
+  if (tree) {
+    const made = ensureTree(1);
+    if (made !== tree) return made;
+  }
   // **A stale idle session is replaced**: retired and its lock released
   // before the launch, so the new executor's first prompt finds the lock
   // free; a launch that fails gives both back.
@@ -4063,7 +4113,7 @@ function startHere(
     replaced.some(({ old }) => old.sessionId === one.sessionId),
   );
   for (const [path, one] of handed) writeFileSync(join(root, path), one.text);
-  const seen = launch(args, decision.name, kind);
+  const seen = launch(args, decision.name, kind, tree || root);
   // A launch that failed keeps the deferral, and with it the timer's pid.
   if (seen !== true && seen !== "unread") {
     for (const { old, state, lock } of replaced) {
@@ -4191,6 +4241,164 @@ function git(args, options = {}) {
   }).trim();
 }
 
+/** An executor's worktree, `.claude/worktrees/executor-<n>`, as an absolute path. */
+function executorTree(n) {
+  return join(root, ".claude", "worktrees", `executor-${n}`);
+}
+
+/**
+ * The `<n>` of the `executor-<n>` worktree a folder is in, or 0 for any
+ * other folder, the checkout and Claude Code's own worktrees included.
+ */
+export function numberOf(cwd) {
+  if (!cwd) return 0;
+  // As given and by real paths, so a checkout reached through a link
+  // (macOS's /tmp, a linked home) still finds its worktrees.
+  const trees = join(root, ".claude", "worktrees");
+  for (const [base, dir] of [
+    [trees, cwd],
+    [realPath(trees), realPath(cwd)],
+  ]) {
+    const match = /^executor-([1-9][0-9]*)(?:[\\/]|$)/.exec(relative(base, dir));
+    if (match) return Number(match[1]);
+  }
+  return 0;
+}
+
+/**
+ * An executor session's number: its folder's, else the `WORKFLOW_EXECUTOR`
+ * its worktree's settings gave it, so a chat whose folder left the worktree
+ * (a `cd` into the added plans/) is still that executor.
+ */
+function executorNumber(input) {
+  return numberOf(input?.cwd) || Number(process.env.WORKFLOW_EXECUTOR) || 0;
+}
+
+const TRACKED_PLANS =
+  "plans/ holds files tracked by git, and an executor's worktree would carry its own copy of them: take the folder out of git (git rm -r --cached plans) and ignore it, then start again.";
+
+/**
+ * **An executor builds in its own worktree** (plans/executors-build-in-
+ * worktrees.md, part 2): `.claude/worktrees/executor-<n>`, made from
+ * `origin/<branch>` with plain git when `git worktree list` lacks it, and
+ * left as it is when there, since the executor's "Start clean" deals with
+ * what is in it. Its `plans` is a link to the checkout's; the git-ignored
+ * files it lacks come by `.worktreeinclude`, the `.env` files with none; and
+ * its number reaches the chat by the tree's `.claude/settings.local.json`
+ * `env`, since `claude --bg` hands the chat to a process started before the
+ * launch, with the daemon's environment. The path, or the refusal's line.
+ */
+function ensureTree(n) {
+  // Tracked in the checkout's index or at the branch the worktree is made from.
+  let tracked = "";
+  for (const args of [
+    ["ls-files", "--", "plans"],
+    ["ls-tree", "-r", "--name-only", `origin/${branch()}`, "--", "plans"],
+  ])
+    try {
+      tracked ||= git(args, { timeout: 4000 });
+    } catch {
+      // Unread: the worktree's own add says what is wrong.
+    }
+  if (tracked) return TRACKED_PLANS;
+  const path = executorTree(n);
+  // By real paths, as git may list a linked checkout's; a listed folder gone
+  // from the disk is pruned and made again.
+  const listed = worktreePaths().some((one) => realPath(one) === realPath(path));
+  if (!listed || !existsSync(path)) {
+    try {
+      git(["worktree", "prune"]);
+      git(["worktree", "add", "--detach", path, `origin/${branch()}`]);
+    } catch (error) {
+      const said = String(error?.stderr || error?.message || "")
+        .split("\n")
+        .map((line) => line.replace(/^fatal:\s*/, "").trim())
+        .find(Boolean);
+      return `The worktree .claude/worktrees/executor-${n} could not be made from origin/${branch()}: ${(said || "git refused").replace(/[.\s]+$/, "")}.`;
+    }
+    treesRead = undefined;
+  }
+  mkdirSync(join(root, "plans"), { recursive: true });
+  const link = join(path, "plans");
+  let there = true;
+  try {
+    lstatSync(link);
+  } catch {
+    there = false;
+  }
+  if (!there) symlinkSync(join(root, "plans"), link);
+  else if (realPath(link) !== realPath(join(root, "plans")))
+    return `.claude/worktrees/executor-${n}/plans is a folder of its own, not the link to the checkout's plans/: move what is in it to plans/ and remove it, then start again.`;
+  if (spawnSync("git", ["check-ignore", "-q", "plans"], { cwd: path }).status !== 0) {
+    const where = spawnSync("git", ["rev-parse", "--git-path", "info/exclude"], {
+      cwd: path,
+      encoding: "utf8",
+    });
+    if (where.status === 0) {
+      const file = resolve(path, where.stdout.trim());
+      mkdirSync(dirname(file), { recursive: true });
+      const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+      writeFileSync(file, `${text}${text && !text.endsWith("\n") ? "\n" : ""}/plans\n`);
+    }
+  }
+  for (const file of carried()) {
+    const from = join(root, file);
+    const to = join(path, file);
+    try {
+      if (existsSync(to) && statSync(to).mtimeMs >= statSync(from).mtimeMs) continue;
+      mkdirSync(dirname(to), { recursive: true });
+      copyFileSync(from, to);
+    } catch {
+      // A file that cannot be copied is the build's to miss, not the start's.
+    }
+  }
+  // Merged into what is there, written whole by a rename; a file that is
+  // there and no JSON object is left as it is, never overwritten.
+  const settings = join(path, ".claude", "settings.local.json");
+  const local = existsSync(settings) ? readJson(settings) : {};
+  if (local && typeof local === "object" && !Array.isArray(local)) {
+    mkdirSync(dirname(settings), { recursive: true });
+    const temp = `${settings}.${process.pid}.tmp`;
+    writeFileSync(
+      temp,
+      `${JSON.stringify({ ...local, env: { ...(local.env || {}), WORKFLOW_EXECUTOR: String(n) } }, null, 2)}\n`,
+    );
+    renameSync(temp, settings);
+  }
+  return path;
+}
+
+/**
+ * The checkout's git-ignored files a worktree is given: those
+ * `.worktreeinclude` lists (gitignore syntax) that git ignores, Claude
+ * Code's own rule; with no such file, each ignored `.env` or `.env.<x>`
+ * whose folder is not itself ignored.
+ */
+function carried() {
+  const list = (args) => {
+    try {
+      return git(["ls-files", "-z", ...args], { timeout: 10_000 })
+        .split("\0")
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+  const include = join(root, ".worktreeinclude");
+  if (!existsSync(include))
+    return list(["--others", "--ignored", "--exclude-standard", "--directory"]).filter(
+      (file) => !file.endsWith("/") && /^\.env(\..+)?$/.test(basename(file)),
+    );
+  const named = list(["--others", "--ignored", `--exclude-from=${include}`]);
+  if (!named.length) return [];
+  const ignored = spawnSync("git", ["check-ignore", "-z", "--stdin"], {
+    cwd: root,
+    input: named.join("\0"),
+    encoding: "utf8",
+  });
+  return (ignored.stdout || "").split("\0").filter(Boolean);
+}
+
 /** The primary checkout, the one the hooks run from, even from inside a worktree; else the root. */
 function primaryCheckout() {
   try {
@@ -4205,9 +4413,11 @@ function primaryCheckout() {
 }
 
 /**
- * **`plans sync`**: moves a detached checkout whose tracked files are
- * unchanged, and not ahead of the project's branch, to `origin/<branch>`,
- * or says why not. One line either way.
+ * **`plans sync`**: moves the checkout, detached or on a branch, whose
+ * tracked files are unchanged and which holds no commit the project's branch
+ * lacks, to `origin/<branch>`, detached, or says why not. One line either
+ * way. Nobody builds in the checkout (plans/executors-build-in-
+ * worktrees.md, part 5), so a branch left checked out there is moved too.
  *
  * Always the primary checkout, the one the hooks run from, even when run
  * from inside a worktree. `fetch: false` inside a hook, which the plugin's
@@ -4242,8 +4452,6 @@ export function sync({ fetch = true } = {}) {
     } catch {
       // Detached.
     }
-    if (onBranch)
-      return `${note}Not moved: the checkout is on branch ${onBranch}; it moves only when detached.`;
     // **An untracked file never holds the checkout**
     // (plans/executor-over-ceiling-hands-on.md, part 3, widened by
     // plans/owners-untracked-files-left-alone.md): git carries an untracked
@@ -4258,16 +4466,28 @@ export function sync({ fetch = true } = {}) {
     const head = run(["rev-parse", "HEAD"]);
     const target = `origin/${branch()}`;
     const tip = run(["rev-parse", target]);
-    if (head === tip) return `${note}Already at ${branch()}, ${tip.slice(0, 8)}.`;
+    if (head === tip && !onBranch) return `${note}Already at ${branch()}, ${tip.slice(0, 8)}.`;
     try {
       run(["merge-base", "--is-ancestor", "HEAD", target]);
     } catch {
       return `${note}Not moved: the checkout is ahead of ${branch()}; push or drop its commits first.`;
     }
     try {
-      run(["-c", "core.quotePath=false", "checkout", "-q", "--detach", target], {
-        env: { ...process.env, LC_ALL: "C" },
-      });
+      // An ignored file where the branch now tracks one (a `.env`) is named, never overwritten.
+      run(
+        [
+          "-c",
+          "core.quotePath=false",
+          "checkout",
+          "-q",
+          "--no-overwrite-ignore",
+          "--detach",
+          target,
+        ],
+        {
+          env: { ...process.env, LC_ALL: "C" },
+        },
+      );
     } catch (error) {
       // An untracked file where the target tracks one, or an untracked
       // directory's files where it tracks a file: git refuses and names each
@@ -4658,11 +4878,11 @@ export function list({ all = false, live, related = true, readers = null } = {})
  * (their Built lines' shas, seven or eight hex digits): null unless HEAD is one of them, so
  * the pull request mode never answers for a run another person's merge set off.
  */
-function imageRun({ only = null } = {}) {
+function imageRun({ only = null, tree = root } = {}) {
   const workflow = proj().run;
   if (!workflow) return null;
   try {
-    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: tree, encoding: "utf8" }).trim();
     if (only && !only.some((sha) => head.startsWith(sha))) return null;
     const out = execFileSync(
       "gh",
@@ -5855,11 +6075,70 @@ function plannerHook(mode, input, sessionId, statePath) {
   }
 }
 
-/** A path under the root as `plans/<x>.md`, or "" for any other file. */
+/**
+ * A path under the root as `plans/<x>.md`, or "" for any other file. Its
+ * folder is read by its real path, so a plan written through a worktree's
+ * `plans` link (`<tree>/plans/x.md`) is the checkout's `plans/x.md`.
+ */
 function planPath(file) {
   if (!file) return "";
-  const path = relative(root, resolve(root, file));
+  const path = relative(realPath(root), realFile(resolve(root, file)));
   return /^plans\/[^/]+\.md$/.test(path) ? path : "";
+}
+
+/** A folder's real path, links resolved; the path as given when it cannot be read. */
+function realPath(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** A file's path with its folder's links resolved, for a file not written yet too. */
+function realFile(full) {
+  return join(realPath(dirname(full)), basename(full));
+}
+
+/** Whether a path is a folder or inside it. */
+function within(path, folder) {
+  const rel = relative(folder, path);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * **An executor edits only its own worktree and plans/** (plans/executors-
+ * build-in-worktrees.md, part 4): an editing tool's file, by its real path,
+ * outside both is refused with the words; "" for any other call.
+ */
+function outsideTree(input) {
+  if (!["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(input.tool_name)) return "";
+  const file = input.tool_input?.file_path || input.tool_input?.notebook_path;
+  if (!file) return "";
+  const n = executorNumber(input);
+  const given = resolve(input.cwd || root, file);
+  // A link at the file itself is followed too.
+  const full = existsSync(given) ? realPath(given) : realFile(given);
+  if (within(full, realPath(join(root, "plans")))) return "";
+  // A brief for the project a plan came from (its `For` section) goes into
+  // that checkout's plans/, a folder beside its project file.
+  const folder = dirname(full);
+  if (basename(folder) === "plans" && existsSync(join(dirname(folder), PROJECT_FILE))) return "";
+  // The memory notes, which Claude Code keeps under ~/.claude/projects.
+  if (within(full, realPath(join(homedir(), ".claude", "projects")))) return "";
+  // A chat in no executor's worktree has no worktree to edit: the prompt hook's words.
+  if (!n) return IN_CHECKOUT;
+  const tree = executorTree(n);
+  if (within(full, realPath(tree))) return "";
+  return `An executor edits only its own worktree, ${relative(root, tree)}, and plans/: ${file} is outside both.`;
+}
+
+const IN_CHECKOUT =
+  "Executors build in the worktrees the queue makes (.claude/worktrees/executor-<n>), and this chat is in the checkout: plans start starts one. Do not build here; say so, and stop.";
+
+/** The worktree a hook's session works in, from its `cwd`; the root when it is none. */
+function sessionTree(input) {
+  return treeOf(input?.cwd, worktrees())?.path || root;
 }
 
 /**
@@ -6243,7 +6522,7 @@ function hook(mode, input) {
     else if (state.retired)
       reason =
         "This session is retired: a fresh executor took the queue. Do not build; say so, and stop.";
-    else reason = buildingRefusal(input, statePath);
+    else reason = outsideTree(input) || buildingRefusal(input, statePath);
     // A writing command may write a Building line: the plans' times before it,
     // for the wrote hook's judgement.
     if (!reason && command !== null) writeJson(statePath, { ...state, plansAt: planTimes() });
@@ -6262,6 +6541,12 @@ function hook(mode, input) {
   }
   const live = liveSessions();
   if (mode === "prompt") {
+    // **The checkout is for reading** (plans/executors-build-in-worktrees.md,
+    // part 4): an executor's chat opened anywhere but its worktree builds nothing.
+    if (!executorNumber(input)) {
+      process.stdout.write(JSON.stringify({ decision: "block", reason: IN_CHECKOUT }));
+      return;
+    }
     const lock = readJson(files.lock());
     if (lockHeldByOther(lock, sessionId, () => holderAlive(lock, live))) {
       process.stdout.write(JSON.stringify({ decision: "block", reason: blockReason(lock) }));
@@ -6359,9 +6644,10 @@ function hook(mode, input) {
               }),
               imageRun({
                 only: plans.filter((p) => p.state === "built" && p.fix && p.sha).map((p) => p.sha),
+                tree: sessionTree(input),
               }),
             )
-          : imageRun(),
+          : imageRun({ tree: sessionTree(input) }),
       told: state.told,
       paused: Boolean(pausedSince()),
       retired: state.retired,
@@ -7838,7 +8124,7 @@ plans start --owner-said "<words>" [path...]  start one more past a refusal that
 plans first <path> [--undo]  put a waiting plan or brief first, on the owner's word, or take that back
 plans pause | resume  stop and restart starting sessions
 plans end [id...] [--now]  end this queue's finished chats, or these; --now ends a named one whatever it is doing
-plans sync            move a clean, detached checkout to the branch
+plans sync            move a clean checkout with no commit of its own to the branch, detached
 plans init            write .claude/workflow.md for this project
 plans check           lint the catalogues and the deny key the project file names
 plans cost [--since yyyy-mm-dd] [<folder>]  what this queue's sessions cost, by agent, from their transcripts

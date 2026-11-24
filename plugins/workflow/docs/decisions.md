@@ -67,6 +67,8 @@ on the machine that planned them.
   build, from the project's branch when the tree is dirty.** (Javi, 27
   October) One checkout serves every agent, so a plan written while an
   executor is mid-change must not rest on its half-built files.
+  24 November: nobody builds in the checkout; the rule covers a tree
+  someone left dirty. plans/executors-build-in-worktrees.md.
 - `bounded-sweeps` **The planner and the assistant read the specifics
   themselves and hand out only bounded, read-only sweeps.** (Javi, 27
   October) A subagent's summary drops the detail a plan names, and a
@@ -597,17 +599,24 @@ on the machine that planned them.
   clear" by its agent view page, here a refused GitHub token. The
   process's own `status: waiting` is the prompt on screen. Retakes part
   4 of plans/idle-chats-end.md. plans/waiting-means-a-question.md.
-- `background-in-checkout` **A background session works in the
-  checkout, one executor holding the lock.** (Javi, 27 October) A
-  worktree per session made the queue lose track of what was built
-  where. plans/worktrees-ignored.md.
-  5 November: an untracked file under `plans/` is the queue's and never
-  holds the checkout, tracked plans or not.
-  plans/executor-over-ceiling-hands-on.md.
-  14 November: no untracked file holds it, the owner's `.env` as much
-  as the queue's plans, since git carries one across a detach; one the
-  branch would overwrite is named and the checkout stays.
-  plans/owners-untracked-files-left-alone.md.
+- `executors-in-worktrees` **An executor builds in its own worktree,
+  made, named and kept by the queue, and the queue's files stay in the
+  checkout.** (Javi, 24 November) One checkout held one build, so
+  every ready plan waited behind the one in hand. Claude Code's own
+  worktree per background session was the 27 October trouble: a new
+  one each session, from the default branch, with a fresh install,
+  left behind. So the queue makes one per executor number with plain
+  git and starts the chat inside it, where Claude Code makes none; as
+  Jenkins keeps a workspace per executor and exports
+  `EXECUTOR_NUMBER`, and as Claude Code's `.worktreeinclude` and
+  linked directories carry what a fresh checkout lacks. The number
+  goes in the worktree's settings `env`, since `claude --bg` hands the
+  chat to a process started before the launch, with the daemon's
+  environment (the plan's trial, 24 November).
+  plans/executors-build-in-worktrees.md.
+  - ~~A background session works in the checkout, one executor
+    holding the lock.~~ (Javi, 27 October; a worktree per session
+    made the queue lose track of what was built where)
 - `queues-in-parallel` **Each project's queue runs apart from every
   other, in parallel.** (Javi, 27 October) A change to the workflow is
   never held by the project it was noticed in.
@@ -684,6 +693,9 @@ on the machine that planned them.
   answer, which only grounds a choice among the plan's own options. The
   tool is taken away in the agent file, since an instruction is
   advisory. plans/executor-never-waits.md.
+  24 November: in its own worktree nothing is the owner's, so what an
+  executor that is gone left there is stashed whole and said in Built,
+  with no item. plans/executors-build-in-worktrees.md.
 - `group-message` **A change to another person's part is built as any
   plan, marked `Touches <name>'s part`; no agent drafts a message for
   another person unless the owner asks for one.** (Javi, 2 November) He

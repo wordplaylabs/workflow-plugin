@@ -1185,9 +1185,9 @@ describe("the handbook holds every rule the plugin cites", () => {
     "Before the push",
     "Briefs are queued like plans",
     "Handed to the assistant",
-    "Reading beside a build",
     "The audit's checks",
     "The catalogue is the record",
+    "The checkout is for reading",
     "The chat he said it in writes it",
     "The group's message",
     "The plans account for the queue's commits",
@@ -2218,7 +2218,7 @@ describe("the setup interview", () => {
       },
     );
     expect(out).toContain(
-      `Would run: claude "--mcp-config" "${join(root, ".mcp", "server.json")}" "--bg"`,
+      `Would run: claude "--mcp-config" "${join(root, ".mcp", "server.json")}" "--add-dir" "${join(root, "plans")}" "--bg"`,
     );
   });
 });
@@ -3277,35 +3277,29 @@ describe("an executor never waits on the owner", () => {
     expect(rule).toContain(clause);
   });
 
-  // plans/executor-stash-only-what-blocks.md: the first stash takes tracked
-  // changes; an untracked file is stashed only when it blocks the switch.
+  // plans/executors-build-in-worktrees.md, part 6: nothing in an
+  // executor's worktree is the owner's, so its clean start stashes it whole.
   const startClean = () => {
     const clean = /4\. Start clean:.*? 5\. /.exec(flat(read("agents/executor.md")))![0];
-    const first = /`(git stash push -m [^`]*)`/.exec(clean)![1];
-    const clash = /`(GIT_LITERAL_PATHSPECS=1 git stash push --include-untracked -m [^`]*)`/.exec(
-      clean,
-    )![1];
-    return { clean, first, clash };
+    const stash = /`(git stash push --include-untracked -m [^`]*)`/.exec(clean)![1];
+    return { clean, stash };
   };
 
-  it("an executor's clean start stashes tracked changes, and an untracked file only when it blocks the switch", () => {
-    const { clean, first, clash } = startClean();
-    expect(first).not.toContain("--include-untracked");
-    expect(first).toContain("':(exclude)plans'");
-    expect(clean).toContain("leaving untracked files where they are");
-    expect(clean.match(/--include-untracked/g)).toHaveLength(1);
-    expect(clean).toContain("When the switch fails because untracked files would be overwritten");
-    expect(clash).toContain("untracked that blocked the switch");
-    expect(clash).toContain("-- <the paths git names, each quoted>");
-    expect(clean).toContain("nothing else leaves the disk");
-    expect(clean).toContain("A stash is made with the identity you commit with");
-    expect(clean).toContain("changes to tracked files outside `plans/`");
+  it("an executor's clean start stashes its worktree whole, named in Built, discarding nothing", () => {
+    const { clean, stash } = startClean();
+    expect(clean).toContain("nothing in this worktree is ${user_config.owner}'s");
+    expect(clean).toContain("you are not resuming the plan it belongs to");
+    expect(clean).toContain('name the stash in "Built"; discard nothing');
     expect(clean).toContain("`GIT_AUTHOR_*` and `GIT_COMMITTER_*`");
+    expect(clean).toContain("`.claude/worktrees/executor-<n>`, kept for the next one");
+    expect(clean).toContain("`$WORKFLOW_EXECUTOR`");
+    expect(clean).not.toContain("GIT_LITERAL_PATHSPECS");
+    expect(clean).not.toContain("Make no worktree");
+    expect(stash).not.toContain(" -- ");
   });
 
-  it("when an executor starts with an untracked .env the branch does not track, the .env is still on disk after the switch", () => {
-    const { first, clash } = startClean();
-    const origin = dir("stash-origin-");
+  it("when an executor's worktree holds a change and an untracked file, the stash takes both and the switch follows, the ignored .env staying", () => {
+    const { stash } = startClean();
     const root = dir("stash-");
     const env = {
       ...process.env,
@@ -3318,50 +3312,29 @@ describe("an executor never waits on the owner", () => {
     const run = (cmd: string) => spawnSync("sh", ["-c", cmd], { cwd: root, env, encoding: "utf8" });
     const git = (...args: string[]) =>
       execFileSync("git", args, { cwd: root, env, encoding: "utf8" }).trim();
-    execFileSync("git", ["init", "-q", "--bare", "-b", "test"], { cwd: origin });
     git("init", "-q", "-b", "test");
-    git("remote", "add", "origin", origin);
+    writeFileSync(join(root, ".gitignore"), ".env\n");
     writeFileSync(join(root, "app.txt"), "one\n");
-    git("add", "app.txt");
+    git("add", ".gitignore", "app.txt");
     git("commit", "-q", "-m", "one");
-    git("push", "-q", "origin", "test");
-    // origin/test gains notes.md and [s].md, which the checkout has
-    // untracked; s.md, which [s].md would match as a pattern, is the owner's.
+    // origin/test gains notes.md, which the worktree has untracked.
     writeFileSync(join(root, "notes.md"), "the branch's\n");
-    writeFileSync(join(root, "[s].md"), "the branch's\n");
-    git("add", "notes.md", "[s].md");
+    git("add", "notes.md");
     git("commit", "-q", "-m", "two");
-    git("push", "-q", "origin", "test");
-    git("reset", "-q", "--hard", "HEAD~1");
-    git("fetch", "-q", "origin");
+    git("update-ref", "refs/remotes/origin/test", "HEAD");
+    git("checkout", "-q", "--detach", "HEAD~1");
     writeFileSync(join(root, "app.txt"), "edited\n");
+    writeFileSync(join(root, "notes.md"), "a gone executor's\n");
     writeFileSync(join(root, ".env"), "SECRET=1\n");
-    writeFileSync(join(root, "notes.md"), "the owner's\n");
-    writeFileSync(join(root, "[s].md"), "the owner's\n");
-    writeFileSync(join(root, "s.md"), "the owner's\n");
-    const name = (cmd: string) =>
-      cmd.replace("<this session's name>", "Executor 1").replace("<topic>", "x");
-    expect(run(name(first)).status).toBe(0);
-    expect(readFileSync(join(root, "app.txt"), "utf8")).toBe("one\n");
-    expect(existsSync(join(root, ".env"))).toBe(true);
-    const blocked = run("git switch -c batch origin/test");
-    expect(blocked.status).not.toBe(0);
-    expect(blocked.stderr).toContain("untracked working tree files would be overwritten");
-    const paths = [...blocked.stderr.matchAll(/^\t(.+)$/gm)].map((m) => m[1]);
-    expect(paths.sort()).toEqual(["[s].md", "notes.md"]);
-    const quoted = paths.map((path) => `'${path}'`).join(" ");
-    expect(run(name(clash).replace("<the paths git names, each quoted>", quoted)).status).toBe(0);
-    expect(run("git switch -c batch origin/test").status).toBe(0);
-    expect(readFileSync(join(root, ".env"), "utf8")).toBe("SECRET=1\n");
-    expect(readFileSync(join(root, "s.md"), "utf8")).toBe("the owner's\n");
+    const named = stash.replace("<this session's name>", "Executor 1").replace("<topic>", "x");
+    expect(run(named).status).toBe(0);
+    expect(git("status", "--porcelain")).toBe("");
+    expect(run("git switch -c x origin/test").status).toBe(0);
     expect(readFileSync(join(root, "notes.md"), "utf8")).toBe("the branch's\n");
-    const stashes = git("stash", "list");
-    expect(stashes).toContain("Executor 1, before plans/x.md, untracked that blocked the switch");
-    expect(git("show", "--name-only", "--format=", "stash@{0}^3").split("\n").sort()).toEqual([
-      "[s].md",
-      "notes.md",
-    ]);
-    expect(git("show", "stash@{1}:app.txt")).toBe("edited");
+    expect(readFileSync(join(root, ".env"), "utf8")).toBe("SECRET=1\n");
+    expect(git("stash", "list")).toContain("Executor 1, before plans/x.md");
+    expect(git("show", "stash@{0}:app.txt")).toBe("edited");
+    expect(git("show", "stash@{0}^3:notes.md")).toBe("a gone executor's");
   });
 });
 

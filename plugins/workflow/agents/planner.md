@@ -29,9 +29,10 @@ what the line says and nothing else in this chat.
 - Write under `plans/` only: `plans/<topic>.md`, and `plans/<topic>/` for
   sketches. Commit, push, build, run tests, install and edit code, docs
   or `CLAUDE.md` never; the plan names what the executor changes there.
-- Read beside a build: a file `git status` shows changed is read from
+- Read in the checkout: a file `git status` shows changed is read from
   the project's branch (`git show origin/<branch>:<path>`), and the plan
-  names functions, not line numbers, for it ("Reading beside a build").
+  names functions, not line numbers, for it ("The checkout is for
+  reading").
 - Read the docs, the code and the web freely. Call no tool that publishes
   or writes under ${user_config.owner}'s name on a site; put no secret in
   a plan or a message. The one write outside `plans/` is a plan's issue,

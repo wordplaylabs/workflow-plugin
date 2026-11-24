@@ -116,11 +116,10 @@ which the reviewer reads; the executor writes one test per scenario where a test
 check by command (a test, a lint, a grep) stays a command.
 (decisions.md#behavior-as-scenario)
 
-**Reading beside a build**: the planner and the assistant stay in the
-checkout while the executor builds there; one that finds the tree dirty
-(`git status`), or is told a file changed, reads it from the branch (`git
-show origin/<branch>:<path>`), names functions rather than lines for it,
-and says so in the plan. (decisions.md#reading-beside-a-build)
+**The checkout is for reading**: the planner and the assistant read the
+project there, at the branch as of the last start; one that finds the
+tree dirty (`git status`) reads the file from the branch (`git show
+origin/<branch>:<path>`) and says so. (decisions.md#reading-beside-a-build)
 
 **The planner and the assistant read the specifics themselves and hand out
 only bounded, read-only sweeps**: one answer shape, a turn limit, nothing
@@ -506,7 +505,7 @@ while its file waits; `plans first --undo <path>` takes it out.
 (decisions.md#plan-put-first)
 
 **One checkout has one executor**, which holds `.claude/executor.lock`;
-another's edits are refused. Its Stop hook holds the stop on a red or
+it edits only its own worktree and `plans/`. Its Stop hook holds the stop on a red or
 unfinished `run` of its push, or a pull request of the checkout with a
 failed check no webhook brings to the assistant, whose fix is pushed
 where the red one was, before anything else, then names
@@ -605,15 +604,20 @@ owner's word. (decisions.md#end-now)
 **Archiving a chat in the Claude app does not stop it**; `claude stop` or
 `plans end` does. (decisions.md#archiving)
 
-**A background session works in the checkout** (`worktree.bgIsolation:
-"none"`): no executor makes a worktree, and `plans` lists any under
-`.claude/worktrees/`; `plans start` refuses while an unretired executor
-lives; an executor detaches the checkout at `origin/<branch>` after its
-batch, and `plans sync` moves a detached one whose tracked files are
-unchanged to the branch, untracked files staying where they are, and
-names any the move would overwrite. The queue's files in `.claude/` and
-`.claude/worktrees/` are git-ignored.
-(decisions.md#background-in-checkout)
+**An executor builds in its own worktree**,
+`.claude/worktrees/executor-<n>`, which the queue makes with git,
+starts the executor's chat in and keeps between plans; `plans/` in it
+is a link to the checkout's, a project that tracks `plans/` in git is
+refused, and the git-ignored files it needs come by
+`.worktreeinclude`, the `.env` files with none. The queue's files stay
+in the checkout, which nobody builds in: `plans start` moves it to
+`origin/<branch>` when its tracked files are unchanged and it holds
+no commit of its own, and names any untracked file the move would
+overwrite. The executor's number is `WORKFLOW_EXECUTOR` in its chat,
+set in the worktree's `.claude/settings.local.json`, for the project's
+ports and databases; it edits only its worktree and `plans/`, a brief
+for another project's `plans/` and its memory notes aside.
+(decisions.md#executors-in-worktrees)
 
 **Each project's queue runs apart from every other, in parallel**: a
 change to the workflow goes through the plugin's own queue; a queue's

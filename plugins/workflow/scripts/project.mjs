@@ -345,6 +345,26 @@ export function defaultBranch(root, { checkedOut = false } = {}) {
 }
 
 /**
+ * **The checkout a folder belongs to** (plans/executors-build-in-worktrees.md,
+ * part 1): for a linked worktree, whose `.git` is a file whose `gitdir:` line
+ * ends `/.git/worktrees/<name>`, the folder before that `/.git/`; else the
+ * folder itself, a checkout, a submodule (whose `gitdir:` is under
+ * `.git/modules/`) or no repository alike. One small file read, no process.
+ */
+export function checkoutOf(dir) {
+  let text = "";
+  try {
+    text = readFileSync(join(dir, ".git"), "utf8");
+  } catch {
+    // A folder `.git`, or none: the folder is its own.
+    return dir;
+  }
+  const gitdir = /^gitdir:\s*(.+?)\s*$/m.exec(text)?.[1];
+  const match = gitdir && /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.exec(resolve(dir, gitdir));
+  return match ? match[1] : dir;
+}
+
+/**
  * `{ name, branch, run, land, ui, catalogue, inherits, tools, mcp, deny,
  * written, form, reuse, reviews, body, pullRequests, found }` for the project
  * at `root`: the name defaults to the directory's, the branch to the
@@ -357,13 +377,17 @@ export function defaultBranch(root, { checkedOut = false } = {}) {
  * the project's plans group into pull requests).
  */
 export function project(root) {
-  const file = join(root, PROJECT_FILE);
   let text = "";
-  try {
-    text = readFileSync(file, "utf8");
-  } catch {
-    // No project file: the defaults.
-  }
+  // A linked worktree without its own project file reads the checkout's
+  // (plans/executors-build-in-worktrees.md, part 1): an executor's tree is
+  // the project's, at another commit.
+  for (const dir of new Set([root, checkoutOf(root)]))
+    try {
+      text = readFileSync(join(dir, PROJECT_FILE), "utf8");
+      break;
+    } catch {
+      // No project file here: the next, then the defaults.
+    }
   const { values: front, unread } = readFrontmatter(text);
   // A map where a list belongs is no list.
   const list = (value) =>

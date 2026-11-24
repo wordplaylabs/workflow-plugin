@@ -14,9 +14,11 @@
 import { appendFileSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { kindOf } from "./project.mjs";
+import { checkoutOf, kindOf } from "./project.mjs";
 
-const here = () => process.env.CLAUDE_PROJECT_DIR || process.cwd();
+// The checkout, from an executor's worktree too (plans/executors-build-in-worktrees.md):
+// a file there and one under the checkout's plans/ are both counted.
+const here = () => checkoutOf(process.env.CLAUDE_PROJECT_DIR || process.cwd());
 
 /**
  * The paths a brief or a planner's plan names: any path of two or more

@@ -2463,6 +2463,7 @@ export function canStart({
   open = [],
   said = "",
   elsewhere = [],
+  unread = false,
 }) {
   // **Session names carry the project and the machine** (`Docs Executor 2
   // (lab)`), and the count is per project and per machine (the log is this
@@ -2600,7 +2601,7 @@ export function canStart({
     // running, so the id an agent ends it by stays.
     return {
       refuse: true,
-      why: `An executor is alive: ${alive}. Have the assistant message it or end it (plans end ${String(first.sessionId).slice(0, 8)}), then start again.`,
+      why: `An executor is alive: ${alive}. Have the assistant message it, or end it with plans end ${String(first.sessionId).slice(0, 8)} --now if it is stuck, then start again.`,
     };
   }
   const replacing = new Set(replace.map((one) => one.sessionId));
@@ -2611,9 +2612,15 @@ export function canStart({
     !replacing.has(lock.sessionId) &&
     alive(lock.pid)
   ) {
+    // The chats could not be read only when `claude agents` did not answer;
+    // a holder read but filtered out (retired, another number's worktree)
+    // is ended as the refusal above says.
+    const who = `${lock.name || "an executor"} [${String(lock.sessionId).slice(0, 8)}]`;
     return {
       refuse: true,
-      why: `An executor is alive: ${lock.name || "an executor"} [${String(lock.sessionId).slice(0, 8)}]. Have the assistant message it or end it (plans end ${String(lock.sessionId).slice(0, 8)}), then start again.`,
+      why: unread
+        ? `An executor is alive: ${who}, and the chats could not be read: start again once plans lists them.`
+        : `An executor is alive: ${who}. Have the assistant message it, or end it with plans end ${String(lock.sessionId).slice(0, 8)} --now if it is stuck, then start again.`,
     };
   }
   let note = "";
@@ -3924,6 +3931,7 @@ function noneAliveWords(plans, live, { many = false } = {}) {
     paused: pausedSince(),
     usage: readJson(files.usage()),
     sessions: [],
+    unread: !live,
     name: proj().name,
     fallback: proj().reuse.executor,
     // Only the verdict is said, so the name it would take needs no sessions read.
@@ -4470,6 +4478,7 @@ function startHere(
     // This checkout's chats only: one in another checkout reads another queue.
     // The chat a hand-over replaces is stopped already.
     open: kind === "assistant" ? openAssistants(live, replace) : [],
+    unread: !live,
     name: proj().name,
     fallback,
     inputs,

@@ -1644,10 +1644,18 @@ describe("plan-queue", () => {
         });
         const lock = { sessionId: "abc", pid: 1, name: "Executor 5" };
         expect(
-          canStart({ now, log: five, said, lock, alive: () => true, usage: usage(10) }),
+          canStart({
+            now,
+            log: five,
+            said,
+            lock,
+            alive: () => true,
+            usage: usage(10),
+            unread: true,
+          }),
         ).toMatchObject({
           refuse: true,
-          why: "An executor is alive: Executor 5 [abc]. Have the assistant message it or end it (plans end abc), then start again.",
+          why: "An executor is alive: Executor 5 [abc], and the chats could not be read: start again once plans lists them.",
         });
       });
 
@@ -2237,7 +2245,7 @@ describe("plan-queue", () => {
       const decision = canStart({ sessions: [one], lock: null });
       expect(decision).toMatchObject({ refuse: true });
       expect("why" in decision && decision.why).toBe(
-        "An executor is alive: Executor 2 [aacbea39], busy, in public-sources-edits on codex-answers. Have the assistant message it or end it (plans end aacbea39), then start again.",
+        "An executor is alive: Executor 2 [aacbea39], busy, in public-sources-edits on codex-answers. Have the assistant message it, or end it with plans end aacbea39 --now if it is stuck, then start again.",
       );
     });
     it("starts with none alive and a released lock", () => {
@@ -2246,6 +2254,17 @@ describe("plan-queue", () => {
         lock: { sessionId: one.sessionId, released: 1 } as never,
       });
       expect(decision).toMatchObject({ start: true });
+    });
+    it("names plans end --now for a lock holder the chats were read without", () => {
+      const lock = { sessionId: one.sessionId, pid: 1, name: "Executor 2" };
+      const decision = canStart({ sessions: [], lock, alive: () => true });
+      expect("why" in decision && decision.why).toBe(
+        "An executor is alive: Executor 2 [aacbea39]. Have the assistant message it, or end it with plans end aacbea39 --now if it is stuck, then start again.",
+      );
+      expect(canStart({ sessions: [], lock, alive: () => true, unread: true })).toMatchObject({
+        refuse: true,
+        why: "An executor is alive: Executor 2 [aacbea39], and the chats could not be read: start again once plans lists them.",
+      });
     });
   });
 

@@ -51,7 +51,7 @@ import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { catalogueFiles, globToRegExp, paragraphs, tierOf } from "./turn-audit.mjs";
 import { data } from "./plan-queue.mjs";
-import { kindOf, matches, owner, project } from "./project.mjs";
+import { checkoutOf, kindOf, matches, owner, project } from "./project.mjs";
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const MAX_RULES = 8; // rules listed in full
@@ -570,7 +570,7 @@ function main() {
   }
   let files;
   try {
-    files = readCatalogue(locations(proj));
+    files = readCatalogue(locations(proj, root, checkoutOf(root)));
   } catch {
     return;
   }

@@ -415,6 +415,38 @@ tools:
     // plans/catalogue-hook-and-audit.md: one file with no paths governs every ui path.
     expect(ctx).toContain("_talk/decisions.md (1 rules; it governs this file)");
   });
+
+  it("names an inherited entry for an edit in an executor's worktree, as in the checkout", () => {
+    // `locations()`, as `plans check` reads it: from an executor's worktree, a
+    // path that leaves the project is read in the checkout.
+    const proj = join(ws, "proj");
+    mkdirSync(join(ws, "shared"), { recursive: true });
+    writeFileSync(
+      join(ws, "shared", "decisions.md"),
+      '---\npaths:\n  - "src/Card.tsx"\n---\n\n# Cards\n\n- `card-title` **A card\'s title is one line.** (Javi, 2026-11-24)\n',
+    );
+    mkdirSync(join(proj, ".claude"), { recursive: true });
+    writeFileSync(
+      join(proj, ".claude", "workflow.md"),
+      '---\nname: Cards\ninherits:\n  - ../shared/decisions.md\nui:\n  - "src/**"\n---\n',
+    );
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: proj });
+    git("init", "-q");
+    git("add", ".claude/workflow.md");
+    git("commit", "-q", "-m", "base");
+    const tree = join(proj, ".claude", "worktrees", "executor-1");
+    git("worktree", "add", "-q", "--detach", tree, "HEAD");
+    const edit = (dir: string) =>
+      run(
+        context,
+        [],
+        { tool_input: { file_path: join(dir, "src", "Card.tsx"), content: "<h2>{title}</h2>" } },
+        { CLAUDE_PROJECT_DIR: dir },
+      );
+    expect(edit(proj)).toContain("A card's title is one line.");
+    expect(edit(tree)).toContain("A card's title is one line.");
+  });
 });
 
 /**

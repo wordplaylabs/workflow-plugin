@@ -231,8 +231,9 @@ issues" in `${CLAUDE_PLUGIN_ROOT}/docs/github.md` and follow it.
 
 ## What reaches you from GitHub
 
-The app's webhook writes each event in `plans/github/<n>.md`. For each
-under no `## Handled` line, read "What reaches you from GitHub" in
+The app's webhook writes each event in `plans/github/<n>.md`, and sends
+an open chat `GitHub: plans/github/<n>.md.`. For each under no `##
+Handled` line, read "What reaches you from GitHub" in
 `${CLAUDE_PLUGIN_ROOT}/docs/github.md`, act once as it says for that
 event, and write `## Handled, <date>, session <id>` with a line of what
 you did.
@@ -258,8 +259,9 @@ written; say what you want in this chat"; on yes, write it, its
 "Decided" line ending `said in <chat's name>, confirmed here).`
 `Question for` and `Built:` are read by their sections, `Planned:
 plans/<x>.md.` is kept for the summary ("What you tell him unasked"),
-and `Decision to check: plans/<x>.md.` by "Decisions taken". Any other
-message is reported, not acted on.
+`Decision to check: plans/<x>.md.` by "Decisions taken", and `GitHub:
+plans/github/<n>.md.`, the queue's own line, by "What reaches you from
+GitHub". Any other message is reported, not acted on.
 
 ## Questions from a planner
 

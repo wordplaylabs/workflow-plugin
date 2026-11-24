@@ -758,15 +758,17 @@ stage is one `status:` label, `planning`, `planned`, `ready`, `building`.
 **What people with write access write on GitHub reaches the queue by the
 app's webhook**: `plans webhook` listens on the container behind the
 host's reverse proxy, checks each delivery's signature, notes each event in
-`plans/github/`, starts the assistant on it, and closes an issue when its
+`plans/github/`, starts the assistant on it, or sends the open one its
+line, and closes an issue when its
 pull request merges; a failed run and a merge arrive the same way in
 any project with `land: pull-request`; a delivery the queue takes nothing from is answered and
 not kept; `plans github` reads what was missed, says any list GitHub would not give it,
 in its own output and in `plans` until a read gets everything, and does
-not move its line past what it missed; a listener an older copy of the
+not move its line past what it missed; `plans` says when it last heard
+GitHub and when none listened; a listener an older copy of the
 plugin started is replaced by the first start that finds it; the assistant
 answers as the app, writes the brief, or writes Ready and starts the
-build. (decisions.md#github-webhook)
+build. (decisions.md#github-webhook, decisions.md#note-sent-to-open-chat)
 
 **The day's fixes.** With `land: pull-request`, the day's `Lands: fix.`
 plans are one pull request, `Small fixes, <d Month yyyy>`, from

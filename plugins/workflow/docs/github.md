@@ -58,7 +58,8 @@ say what it says.
 
 The app's webhook writes each event in `plans/github/<n>.md` ("What
 people with write access write on GitHub reaches the queue by the app's
-webhook"); an open chat reads `plans/github/` at its next turn. For each
+webhook"); an open assistant chat is sent `GitHub: plans/github/<n>.md.`
+within a minute. For each
 event under no `## Handled` line, read the issue and its plan, then act
 once:
 

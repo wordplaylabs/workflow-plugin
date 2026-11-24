@@ -4395,7 +4395,7 @@ describe("the queue's faults, closed", () => {
   // plans/one-assistant-chat.md, part 2: when the assistant's prompt is
   // Heartbeat., then the prompt hook adds one line and not the queue's listing.
   it("answers the assistant's heartbeat with one line of the work under way, and the ceiling's", () => {
-    const dir = fixture("Heartbeat");
+    const dir = fixture("Heartbeat", "land: pull-request\n");
     const transcript = join(dir, "transcript.jsonl");
     const context = (tokens: number) =>
       writeFileSync(
@@ -4442,6 +4442,32 @@ describe("the queue's faults, closed", () => {
     );
     // His own message gets the ceiling's line alone.
     expect(said("What is building?")).toBe("This chat is over its ceiling (160k of 150k).");
+    // plans/open-assistant-reads-github-notes.md, part 3: when the heartbeat comes while a note
+    // waits unhandled, then its line ends naming it, with or without plans under way.
+    context(40_000);
+    mkdirSync(join(dir, "plans", "github"));
+    const note = join(dir, "plans", "github", "7.md");
+    writeFileSync(
+      note,
+      "# GitHub #7: T\n\nfailed, 24 November 2026 15:00, Checks run 1 on 4f1c2b9a: https://github.com/o/r/actions/runs/1\n\n",
+    );
+    const old = (Date.now() - 11 * 60_000) / 1000;
+    utimesSync(note, old, old);
+    expect(said()).toBe(
+      "Work under way: 1 building, 1 waiting, 0 asking; plans/building.md's executor is not running; plans/github/7.md from GitHub is not handled.",
+    );
+    rmSync(join(dir, "plans", "ready.md"));
+    rmSync(join(dir, "plans", "building.md"));
+    expect(said()).toBe(
+      "Work under way: 0 building, 0 waiting, 0 asking; plans/github/7.md from GitHub is not handled.",
+    );
+    // A note under ten minutes old keeps the heartbeat, unnamed (Codex C7).
+    utimesSync(note, new Date(), new Date());
+    expect(said()).toBe("Work under way: 0 building, 0 waiting, 0 asking.");
+    // The chat runs the assistant's agent: its state says so (part 1).
+    const state = stateFile(`heartbeat-${process.pid}`);
+    expect(JSON.parse(readFileSync(state, "utf8")).agent).toBe("assistant");
+    rmSync(state, { force: true });
   });
 
   it("reads the run a fix pushed straight sets off after the pull requests' checks, in the pull request mode", () => {
@@ -10268,6 +10294,256 @@ else if (args[0] === "pr" && args[1] === "list") {
         },
       );
     });
+
+    // plans/open-assistant-reads-github-notes.md, part 1: a note reaches an open assistant chat by
+    // a one-shot run of Claude with the message tool alone, addressed by the chat's socket.
+    describe("an open assistant chat", () => {
+      const stub = mkdtempSync(join(tmpdir(), "told-claude-"));
+      const socks = join(stub, "socks");
+      const plansPath = (dir: string, ...args: string[]) =>
+        spawnSync("node", [join(here, "plan-queue.mjs"), ...args], {
+          encoding: "utf8",
+          env: {
+            PATH: process.env.PATH || "",
+            TMPDIR: tmpdir(),
+            WORKFLOW_ROOT: dir,
+            CLAUDE_PROJECT_DIR: dir,
+            WORKFLOW_GH: "/bin/false",
+            WORKFLOW_CLAUDE: join(stub, "claude"),
+            WORKFLOW_SOCKS: socks,
+            STUB_ROWS: join(dir, "rows.json"),
+            STUB_SENT: join(dir, "sent.log"),
+            STUB_FAIL: existsSync(join(dir, "fail")) ? "1" : "",
+            WORKFLOW_STARTS_LOG: join(dir, "starts.log"),
+            WORKFLOW_USAGE_FILE: join(dir, "usage.json"),
+            WORKFLOW_WEBHOOK_SECRET: "",
+            WORKFLOW_SECRETS_FILE: "",
+            WORKFLOW_APP_ID: "",
+            WORKFLOW_APP_KEY: "",
+            CLAUDE_PLUGIN_OPTION_OWNER: "Javi",
+            CLAUDE_PLUGIN_OPTION_MACHINE: "lab",
+          },
+        }).stdout;
+      // A chat named Runs Assistant, listed with a process.
+      const chat = (dir: string, pid: number) => ({
+        sessionId: `told-${process.pid}-${pid}`,
+        name: "Runs Assistant",
+        kind: "background",
+        status: "idle",
+        pid,
+        startedAt: pid,
+        cwd: dir,
+      });
+      const project = (rows: object[]) => {
+        const dir = mkdtempSync(join(tmpdir(), "told-"));
+        execFileSync("git", ["init", "-q"], { cwd: dir });
+        mkdirSync(join(dir, ".claude", "github-inbox"), { recursive: true });
+        mkdirSync(join(dir, "plans"));
+        writeFileSync(
+          join(dir, ".claude", "workflow.md"),
+          "---\nname: Runs\nbranch: test\nland: pull-request\n---\n\n# Runs\n",
+        );
+        writeFileSync(
+          join(dir, "plans", "series-order.md"),
+          "# Series\n\nPlan only, 14 November 2026, for Javi.\n\n## Built, 14 November 2026\n\nPull request #40 (https://github.com/o/r/pull/40) to test from branch series-order, commit 4f1c2b9a; draft.\n",
+        );
+        writeFileSync(join(dir, "rows.json"), JSON.stringify(rows));
+        writeFileSync(
+          join(dir, ".claude", "github-inbox", "w1.json"),
+          JSON.stringify({ id: "w1", event: "workflow_run", body: JSON.stringify(recorded) }),
+        );
+        return dir;
+      };
+      // Each one-shot run: its arguments and where it ran.
+      const sent = (dir: string): { args: string[]; cwd: string }[] =>
+        existsSync(join(dir, "sent.log"))
+          ? readFileSync(join(dir, "sent.log"), "utf8")
+              .trim()
+              .split("\n")
+              .map((line) => JSON.parse(line))
+          : [];
+      const textOf = (one: { args: string[] }) => one.args.at(-1) || "";
+      beforeAll(() => {
+        mkdirSync(socks);
+        for (const pid of [111, 222]) writeFileSync(join(socks, `${pid}.sock`), "");
+        // Records each -p run and prints a stream-json tool result, sent or refused.
+        writeFileSync(
+          join(stub, "claude"),
+          `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "agents") process.stdout.write(fs.readFileSync(process.env.STUB_ROWS, "utf8"));
+else if (args[0] === "-p") {
+  fs.appendFileSync(process.env.STUB_SENT, JSON.stringify({ args, cwd: process.cwd() }) + "\\n");
+  const content = process.env.STUB_FAIL
+    ? "No agent named 'Runs' is reachable"
+    : [{ type: "text", text: '{"success":true,"message":"Message sent"}' }];
+  console.log(JSON.stringify({ type: "system", subtype: "init" }));
+  console.log(JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content }] } }));
+}
+`,
+        );
+        chmodSync(join(stub, "claude"), 0o755);
+      });
+      afterAll(() => rmSync(stub, { recursive: true, force: true }));
+
+      it("an open assistant chat is sent the note", { timeout: 30_000 }, () => {
+        const dir = project([chat("", 111)]);
+        writeFileSync(join(dir, "rows.json"), JSON.stringify([chat(dir, 111)]));
+        try {
+          const said = plansPath(dir, "github", "--inbox");
+          expect(said).toContain("GitHub: #40 Checks run failed, noted.\n");
+          expect(said).toContain("GitHub: Runs Assistant was sent plans/github/40.md.\n");
+          const runs = sent(dir);
+          expect(runs).toHaveLength(1);
+          const [one] = runs;
+          expect(one.args[0]).toBe("-p");
+          expect(one.args.join(" ")).toContain("--tools SendMessage --allowedTools SendMessage");
+          expect(realpathSync(one.cwd)).toBe(realpathSync(tmpdir()));
+          expect(textOf(one).split("\n").slice(0, 3)).toEqual([
+            `Recipient: uds:${join(socks, "111.sock")}`,
+            "Text:",
+            "GitHub: plans/github/40.md.",
+          ]);
+          // Sent to a chat the queue has not seen run the assistant's agent: the line for it.
+          expect(textOf(one)).toContain(
+            "this chat has the assistant's name and not its instructions: tell Javi",
+          );
+          expect(plansPath(dir, "list")).toMatch(
+            /\nFrom GitHub, not handled\n {2}plans\/github\/40\.md, sent to Runs Assistant at \d\d:\d\d\n/,
+          );
+          // Sent and still waiting: not sent again.
+          expect(plansPath(dir, "github", "--inbox").trim()).toBe("GitHub: nothing new.");
+          expect(sent(dir)).toHaveLength(1);
+          // Handled, then a new event: sent again.
+          const note = join(dir, "plans", "github", "40.md");
+          appendFileSync(note, "## Handled, 14 November 2026, session s1\n\nRerun.\n\n");
+          expect(plansPath(dir, "github", "--inbox").trim()).toBe("GitHub: nothing new.");
+          appendFileSync(
+            note,
+            "failed, 14 November 2026 21:30, Checks run 19283746502 on 4f1c2b9a: https://github.com/o/r/actions/runs/19283746502\n\n",
+          );
+          expect(plansPath(dir, "github", "--inbox").trim()).toBe(
+            "GitHub: Runs Assistant was sent plans/github/40.md.",
+          );
+          expect(sent(dir)).toHaveLength(2);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
+
+      it(
+        "picks the chat that ran the assistant's agent, else the one started last",
+        { timeout: 30_000 },
+        () => {
+          const dir = project([]);
+          const rows = [chat(dir, 111), chat(dir, 222)];
+          writeFileSync(join(dir, "rows.json"), JSON.stringify(rows));
+          const state = stateFile(rows[0].sessionId);
+          try {
+            writeFileSync(state, JSON.stringify({ agent: "assistant" }));
+            plansPath(dir, "github", "--inbox");
+            const [first] = sent(dir);
+            expect(textOf(first)).toContain(`Recipient: uds:${join(socks, "111.sock")}\n`);
+            expect(textOf(first)).not.toContain("has the assistant's name");
+            // Neither ran it: the one started last, with the line.
+            rmSync(state);
+            rmSync(join(dir, ".claude", "github-told.json"));
+            plansPath(dir, "github", "--inbox");
+            const second = sent(dir)[1];
+            expect(textOf(second)).toContain(`Recipient: uds:${join(socks, "222.sock")}\n`);
+            expect(textOf(second)).toContain("has the assistant's name and not its instructions");
+          } finally {
+            rmSync(state, { force: true });
+            rmSync(dir, { recursive: true, force: true });
+          }
+        },
+      );
+
+      // Codex C10: the listener's own minute sends again, with no read or delivery asked.
+      it("the listener's minute tries a note again by itself", { timeout: 60_000 }, async () => {
+        const dir = project([]);
+        const rows = [chat(dir, 111)];
+        writeFileSync(join(dir, "rows.json"), JSON.stringify(rows));
+        writeFileSync(join(dir, "fail"), "");
+        const saved = { ...process.env };
+        const set = {
+          WORKFLOW_ROOT: dir,
+          WORKFLOW_LIVE: JSON.stringify(rows),
+          WORKFLOW_CLAUDE: join(stub, "claude"),
+          WORKFLOW_SOCKS: socks,
+        };
+        Object.assign(process.env, set);
+        vi.resetModules();
+        const queue = await import("../plugins/workflow/scripts/plan-queue.mjs");
+        const port = await freePort();
+        const env = {
+          PATH: process.env.PATH || "",
+          TMPDIR: tmpdir(),
+          ...set,
+          CLAUDE_PROJECT_DIR: dir,
+          WORKFLOW_GH: "/bin/false",
+          STUB_ROWS: join(dir, "rows.json"),
+          STUB_SENT: join(dir, "sent.log"),
+          STUB_FAIL: "1",
+          WORKFLOW_STARTS_LOG: join(dir, "starts.log"),
+          WORKFLOW_USAGE_FILE: join(dir, "usage.json"),
+          WORKFLOW_WEBHOOK_SECRET: "s3cret",
+          WORKFLOW_WEBHOOK_PORT: String(port),
+          WORKFLOW_SECRETS_FILE: "",
+          WORKFLOW_APP_ID: "",
+          WORKFLOW_APP_KEY: "",
+          CLAUDE_PLUGIN_OPTION_OWNER: "Javi",
+          CLAUDE_PLUGIN_OPTION_MACHINE: "lab",
+        };
+        const { server } = await queue.webhookCommand(["--serve"], env, { tell: 200 });
+        try {
+          // The start's read sends once; the minute alone sends the rest, five in all.
+          const end = Date.now() + 45_000;
+          while (sent(dir).length < 5 && Date.now() < end)
+            await new Promise((done) => setTimeout(done, 100));
+          expect(sent(dir)).toHaveLength(5);
+          await new Promise((done) => setTimeout(done, 1500));
+          expect(sent(dir)).toHaveLength(5);
+        } finally {
+          await new Promise((done) => server.close(done));
+          for (const key of Object.keys(set))
+            if (saved[key] === undefined) delete process.env[key];
+            else process.env[key] = saved[key];
+          vi.resetModules();
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
+
+      it(
+        "tries a note it could not send again, five times, and plans says so",
+        { timeout: 60_000 },
+        () => {
+          const dir = project([]);
+          writeFileSync(join(dir, "rows.json"), JSON.stringify([chat(dir, 111)]));
+          writeFileSync(join(dir, "fail"), "");
+          try {
+            const could =
+              "GitHub: Runs Assistant could not be sent plans/github/40.md: No agent named 'Runs' is reachable";
+            expect(plansPath(dir, "github", "--inbox")).toContain(
+              `${could}; tried again in a minute.\n`,
+            );
+            for (let i = 2; i <= 4; i++)
+              expect(plansPath(dir, "github", "--inbox").trim()).toBe(
+                `${could}; tried again in a minute.`,
+              );
+            expect(plansPath(dir, "github", "--inbox").trim()).toBe(`${could}; plans lists it.`);
+            expect(plansPath(dir, "github", "--inbox").trim()).toBe("GitHub: nothing new.");
+            expect(sent(dir)).toHaveLength(5);
+            expect(plansPath(dir, "list")).toContain(
+              "\n  plans/github/40.md, not sent: No agent named 'Runs' is reachable\n",
+            );
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        },
+      );
+    });
   });
 
   // plans/related-plans-share-a-pull-request-follow-up-5.md: issues need pull requests.
@@ -10497,6 +10773,47 @@ else if (args[0] === "pr" && args[1] === "list") {
       } finally {
         await new Promise((done) => taken.close(done));
       }
+    });
+
+    // plans/open-assistant-reads-github-notes.md, part 4: when a listener starts after another
+    // that last heard GitHub at a known time and stopped ten minutes before, then plans says that
+    // last delivery and when none listened; with none alive, since when.
+    it("keeps the last delivery and says when none listened", () => {
+      const months =
+        "January February March April May June July August September October November December".split(
+          " ",
+        );
+      const at = (ms: number) => {
+        const day = new Date(ms);
+        const time = day.toTimeString().slice(0, 5);
+        return day.toDateString() === new Date().toDateString()
+          ? time
+          : `${day.getDate()} ${months[day.getMonth()]} ${time}`;
+      };
+      const t0 = Date.now() - 15 * 60_000;
+      const t1 = Date.now() - 10 * 60_000;
+      writeFileSync(
+        join(dir, ".claude", "webhook.last.json"),
+        JSON.stringify({ lastAt: t0, aliveAt: t1 }),
+      );
+      expect(plans("list").stdout).toContain(
+        `\nThe webhook: none since ${at(t1)}, last delivery ${at(t0)}; plans webhook starts it.\n`,
+      );
+      expect(plans("webhook").stdout).toMatch(
+        new RegExp(
+          `^The webhook: listening on ${port} since (\\d\\d:\\d\\d), last delivery ${at(t0)}; none listened from ${at(t1)} to \\1\\.\\n$`,
+        ),
+      );
+      expect(plans("list").stdout).toContain(
+        `, last delivery ${at(t0)}; none listened from ${at(t1)} to `,
+      );
+      expect(plans("webhook", "--stop").stdout.trim()).toBe("The webhook: stopped.");
+      // Stopped, the history keeps the delivery and when it was last alive.
+      expect(plans("list").stdout).toMatch(
+        new RegExp(
+          `\\nThe webhook: none since \\d\\d:\\d\\d, last delivery ${at(t0)}; plans webhook starts it\\.\\n`,
+        ),
+      );
     });
   });
 });

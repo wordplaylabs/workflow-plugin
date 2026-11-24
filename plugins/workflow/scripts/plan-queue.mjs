@@ -44,7 +44,7 @@
 // the lock, the pause and the deferral in the project's `.claude/` (ignored
 // by git); the usage numbers and the starts' log in the plugin's data
 // directory.
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   closeSync,
   copyFileSync,
@@ -196,6 +196,11 @@ const files = {
   githubSeen: () => join(root, ".claude", "github-seen.json"),
   githubInbox: () => join(root, ".claude", "github-inbox"),
   webhook: () => join(root, ".claude", "webhook.json"),
+  // When the listener last heard GitHub and was last alive, which no start
+  // removes, so a restart keeps them.
+  webhookLast: () => join(root, ".claude", "webhook.last.json"),
+  // The notes an open assistant chat was sent (decisions.md#note-sent-to-open-chat).
+  githubTold: () => join(root, ".claude", "github-told.json"),
   // What the owner was told of an app that sends no failed run.
   webhookTold: () => join(root, ".claude", "webhook.told.json"),
   // The refresh plans the owner's own assistant chat was told of
@@ -901,6 +906,40 @@ function liveNames() {
   return (liveAll || []).map((row) => row.name || "");
 }
 
+/** `liveSessions`'s own rows of `rows`, every row kept in `liveAll`. */
+function keepRows(rows) {
+  liveAll = rows;
+  liveRead =
+    rows &&
+    ownRows(rows, {
+      paths: worktreePaths(),
+      lockIds: readLocks().map((lock) => lock.sessionId),
+      named: namedSessions(),
+    });
+  return liveRead;
+}
+
+/** `liveSessions`, read fresh without blocking: the listener's minute reads it while its server answers. */
+function liveSessionsLater(timeout = 8000) {
+  if (process.env.WORKFLOW_LIVE) return Promise.resolve(liveSessions({ fresh: true }));
+  return new Promise((done) =>
+    execFile(
+      claudeBin(),
+      ["agents", "--json"],
+      { cwd: root, encoding: "utf8", timeout },
+      (error, out) => {
+        let rows = null;
+        try {
+          rows = error ? null : JSON.parse(out);
+        } catch {
+          // Unread, as a failed call.
+        }
+        done(keepRows(rows));
+      },
+    ),
+  );
+}
+
 function liveSessions({ fresh = false, timeout = 8000 } = {}) {
   if (!fresh && liveRead !== undefined) return liveRead;
   let rows = null;
@@ -920,15 +959,7 @@ function liveSessions({ fresh = false, timeout = 8000 } = {}) {
       rows = null;
     }
   }
-  liveAll = rows;
-  liveRead =
-    rows &&
-    ownRows(rows, {
-      paths: worktreePaths(),
-      lockIds: readLocks().map((lock) => lock.sessionId),
-      named: namedSessions(),
-    });
-  return liveRead;
+  return keepRows(rows);
 }
 
 /**
@@ -2474,9 +2505,9 @@ export function canStart({
   // (decisions.md#waiting-is-an-open-prompt), and one mid-brief over its
   // ceiling for this brief would be retired at its next stop, so each gets a
   // fresh planner beside it. **A start nobody is watching** (`unwatched`, a
-  // timer's) replaces an idle session whatever its warmth: no command can
-  // message a session, so the work it is started for would otherwise wait on a
-  // chat nobody prompts. **An executor with no process is not alive**
+  // timer's) replaces an idle session whatever its warmth: the queue sends a
+  // message to the assistant chat alone (`tellAssistant`), so the work it is
+  // started for would otherwise wait on a chat nobody prompts. **An executor with no process is not alive**
   // (decisions.md#plan-put-first): it takes nothing, so it is replaced, its
   // plan handed over by `startHere`; a planner so is started beside.
   const idle = (one) => /^idle\b/.test(one.status || "");
@@ -5325,8 +5356,21 @@ export function list({ all = false, live, related = true, readers = null } = {})
   // project with pull requests (decisions.md#merge-refreshes-the-rest).
   if (proj().found && proj().land === "pull-request") {
     const waiting = notesWaiting();
+    // Each with whether the open assistant chat was sent it
+    // (decisions.md#note-sent-to-open-chat).
+    const told = readTold();
+    const words = (entry) =>
+      !entry
+        ? ""
+        : entry.ok
+          ? `, sent to ${entry.to} at ${hhmm(entry.at)}`
+          : `, not sent: ${entry.why}`;
     if (waiting.length)
-      out.push("", "From GitHub, not handled", ...waiting.map((path) => `  ${path}`));
+      out.push(
+        "",
+        "From GitHub, not handled",
+        ...waiting.map((path) => `  ${path}${words(toldOf(path, told))}`),
+      );
   }
   // **Where each lands**, in the pull request mode, before the build, and
   // what its author marked it related to.
@@ -6938,7 +6982,8 @@ const HEARTBEAT = "Heartbeat.";
  * **The heartbeat's line** (decisions.md#one-chat): the plans building,
  * waiting (ready or handed for an executor, a brief waiting for or with a
  * planner) and asking, with a fault the assistant tells the owner (a
- * building plan whose executor is not running, a start deferred); or
+ * building plan whose executor is not running, a start deferred, a note
+ * from GitHub waiting unhandled over ten minutes); or
  * `Nothing is under way.`, on which the assistant deletes its job.
  */
 function workLine({ plans = null, live = liveSessions(), deferred = null } = {}) {
@@ -6948,7 +6993,14 @@ function workLine({ plans = null, live = liveSessions(), deferred = null } = {})
   const waiting = read.filter(
     (p) => !p.askingIn && ["ready", "handed", "brief", "planning"].includes(p.state),
   );
-  if (!building.length && !asking.length && !waiting.length) return "Nothing is under way.";
+  // **A note nobody handled is a fault he is told**
+  // (decisions.md#note-sent-to-open-chat): one waiting more than ten minutes
+  // is named, and any note waiting keeps the heartbeat, with nothing else
+  // under way too, so it is still there at ten minutes. Only with pull
+  // requests, where `plans` lists them.
+  const notes = proj().land === "pull-request" ? notesWaitingNow() : [];
+  if (!building.length && !asking.length && !waiting.length && !notes.length)
+    return "Nothing is under way.";
   // A Building line whose session is listed with no process, or is gone
   // from the list (read as waiting, `stale`).
   const faults = live
@@ -6963,8 +7015,16 @@ function workLine({ plans = null, live = liveSessions(), deferred = null } = {})
   const later = deferred === null ? readJson(files.deferred("executor")) : deferred;
   if (later?.until > Date.now())
     faults.push(`a start waits until ${hhmm(later.until)}: ${later.why || "deferred"}`);
+  faults.push(
+    ...notes
+      .filter((one) => Date.now() - one.mtime > NOTE_UNHANDLED)
+      .map((one) => `${one.path} from GitHub is not handled`),
+  );
   return `Work under way: ${building.length} building, ${waiting.length} waiting, ${asking.length} asking${faults.length ? `; ${faults.join("; ")}` : ""}.`;
 }
+
+/** How long a note waits unhandled before the heartbeat names it. */
+const NOTE_UNHANDLED = 10 * MINUTE;
 
 /** The file an assistant chat past its ceiling writes for the fresh one (decisions.md#one-chat). */
 const ASSISTANT_HANDOVER = "plans/assistant-handover.md";
@@ -7050,6 +7110,13 @@ function hook(mode, input) {
   // Only an executor's Building line takes a plan, and only a planner's
   // "Decided" or a planner's or the assistant's `## Dropped` lets one go; any
   // other session's edit returns at once.
+  // **A chat that runs the assistant's agent says so in its state**, so a note
+  // goes to it first, without the line for a chat with the name alone
+  // (decisions.md#note-sent-to-open-chat).
+  if (kindOf(input) === "assistant" && ["wrote", "prompt", "stop"].includes(mode)) {
+    const state = readState(sessionId);
+    if (state.agent !== "assistant") writeJson(statePath, { ...state, agent: "assistant" });
+  }
   if (mode === "wrote" && kindOf(input) === "assistant") {
     leaveAsking(input);
     return;
@@ -7811,10 +7878,35 @@ function ourListener(pid) {
   return line.includes("plan-queue.mjs") && line.includes("webhook");
 }
 
-/** The webhook's line in `plans` and `plans webhook`: listening or none. */
-export function webhookLine(record = webhookAlive()) {
-  if (!record) return "The webhook: none; plans webhook starts it.";
-  const last = record.lastAt ? `, last delivery ${hhmm(record.lastAt)}` : "";
+/** A time as the listener's history says it: "15:40" today, "23 November 15:40" before. */
+function whenWords(at, now = Date.now()) {
+  const day = new Date(at);
+  return day.toDateString() === new Date(now).toDateString()
+    ? hhmm(at)
+    : `${day.getDate()} ${MONTHS[day.getMonth()]} ${hhmm(at)}`;
+}
+
+/** A gap between two listeners longer than this, in ms, is said as one none listened in. */
+const LISTENER_GAP = 2 * MINUTE;
+
+/**
+ * The webhook's line in `plans` and `plans webhook`: listening, with when
+ * none listened before it in the last day; or none, since when, from the
+ * listener's history (`last`).
+ */
+export function webhookLine(record = webhookAlive(), last = readJson(files.webhookLast())) {
+  const now = Date.now();
+  if (!record) {
+    const since = last?.aliveAt || last?.lastAt;
+    if (!since) return "The webhook: none; plans webhook starts it.";
+    const delivered = last.lastAt ? `, last delivery ${whenWords(last.lastAt, now)}` : "";
+    return `The webhook: none since ${whenWords(since, now)}${delivered}; plans webhook starts it.`;
+  }
+  const down =
+    record.down && now - record.down.to < DAY_MS
+      ? `; none listened from ${whenWords(record.down.from, now)} to ${whenWords(record.down.to, now)}`
+      : "";
+  const delivered = record.lastAt ? `, last delivery ${whenWords(record.lastAt, now)}` : "";
   // **An app that cannot send a failed run is said while it holds**.
   const lacks = record.lacks;
   const why = !lacks?.what?.length
@@ -7825,7 +7917,7 @@ export function webhookLine(record = webhookAlive()) {
   const reads = why
     ? `; the app sends no failed run (${why}), so they are read every five minutes`
     : "";
-  return `The webhook: listening on ${record.port} since ${hhmm(record.at)}${last}${reads}.`;
+  return `The webhook: listening on ${record.port} since ${hhmm(record.at)}${delivered}${down}${reads}.`;
 }
 
 /**
@@ -8037,19 +8129,33 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
         : `GitHub: #${event.number} ${event.kind} by ${event.by}, noted.`,
     );
   }
+  let started = "";
+  let refused = "";
   if (noted.length) {
     // The oldest note with an event not handled; one chat at a time.
     const path = notesWaiting()[0] || noted[0].path;
     const out = dry ? "" : start([path], { agent: "assistant" });
     const ours = noted.find((one) => one.path === path) || noted[0];
-    // **An open chat reads the notes itself** at its next turn: no message to send.
-    const open = /^(.+?) is open: send it the message\./.exec(out);
-    if (/ was started on: /.test(out))
+    if (/ was started on: /.test(out)) {
       said[ours.line] = `${said[ours.line].replace(/\.$/, "; assistant started.")} ${out}`;
-    else if (open)
-      said.push(`GitHub: ${open[1]} is open and reads plans/github/ at its next turn.`);
-    else if (out) said.push(out);
+      started = out;
+    } else if (out) refused = out;
   }
+  // **An open chat is sent the note** (decisions.md#note-sent-to-open-chat),
+  // whether this run noted it or not. A chat started on it reads every note
+  // waiting, so none is sent it again, unless its start is not confirmed
+  // (`claude agents` unread), which the minute's send covers. A told file
+  // that cannot be written throws nothing, so the seen file is still written
+  // and no delivery is noted twice.
+  let sent = "";
+  try {
+    if (!started) sent = tellAssistant({ dry });
+    else if (!/ is not confirmed\./.test(started))
+      markTold(sessionName("assistant", 0, { project: proj().name }));
+  } catch {
+    // Told nothing: the listener's minute tries again.
+  }
+  said.push(sent || refused);
   return { said: said.filter(Boolean), seen: { ...seen, fresh, ...(login ? { login } : {}) } };
 }
 
@@ -8164,6 +8270,215 @@ function readNotes(dir) {
       return [];
     }
   });
+}
+
+/** How many times a note is sent to an open assistant chat before `plans` alone lists it. */
+const TELL_TRIES = 5;
+/** How long the one-shot run that sends it has. */
+const TELL_TIMEOUT = 60_000;
+
+/** The one-shot run's system prompt: the relay words of the trial (plans/open-assistant-reads-github-notes.md). */
+const RELAY_PROMPT =
+  "You relay one message to another Claude session on this machine. Call SendMessage exactly once. Its 'to' argument is the whole Recipient line after 'Recipient: ', every character. Its 'message' argument is the Text, changing no character. Then answer with the tool's result and nothing else.";
+
+/** The told file: `{ [path]: { mtime, at, to, ok, tries } }`, a note's last send. */
+function readTold() {
+  const told = readJson(files.githubTold());
+  return told && typeof told === "object" ? told : {};
+}
+
+/**
+ * Whether `note` waits to be sent to the chat `session`: never sent, sent
+ * before its last change (a new event), or failed under `TELL_TRIES` times
+ * on that chat, so a chat that replaces one never reached is tried afresh.
+ */
+function untold(note, told, session) {
+  const entry = told[note.path];
+  return (
+    !entry ||
+    entry.mtime !== note.mtime ||
+    (!entry.ok && (entry.session !== session || (entry.tries || 0) < TELL_TRIES))
+  );
+}
+
+/** The notes waiting, oldest first. */
+function notesWaitingNow() {
+  return readNotes(join(root, "plans", "github"))
+    .filter((one) => one.state === "waiting")
+    .sort((a, b) => a.mtime - b.mtime);
+}
+
+/** The notes waiting and not yet sent to the chat `session`, oldest first. */
+export function notesUntold(session, told = readTold()) {
+  return notesWaitingNow().filter((one) => untold(one, told, session));
+}
+
+/** The told entry of a note as it is now, or null: one written before its last change says nothing. */
+function toldOf(path, told = readTold(), dir = join(root, "plans", "github")) {
+  const entry = told[path];
+  if (!entry) return null;
+  const note = readNotes(dir).find((one) => one.path === path);
+  return note && note.mtime === entry.mtime ? entry : null;
+}
+
+/**
+ * Writes the notes `notes` told to `to`, each at the change it had when
+ * read, so an event noted meanwhile is still sent.
+ */
+function markTold(to, at = Date.now(), notes = notesWaitingNow()) {
+  const told = readTold();
+  for (const note of notes) told[note.path] = { mtime: note.mtime, at, to, ok: true, tries: 0 };
+  writeJson(files.githubTold(), told);
+}
+
+/**
+ * **The open assistant chat a note is sent to**
+ * (decisions.md#note-sent-to-open-chat): of the live rows with the
+ * assistant's name and a process, the one whose state says it ran the
+ * assistant's agent, else the one started last. `{ row, address, agent }`,
+ * the address its process's socket, or the name when no socket is found and
+ * one chat alone has it, else "". Null with none.
+ */
+export function assistantChat(
+  live,
+  {
+    stateOf = readState,
+    socks = process.env.WORKFLOW_SOCKS || "/tmp/cc-socks",
+    // Every chat on the machine: a name another checkout's chat shares is no address.
+    all = liveAll || live,
+  } = {},
+) {
+  const rows = (live || []).filter((row) => row.pid && isSession("assistant", row));
+  if (!rows.length) return null;
+  const ran = rows.find((one) => stateOf(one.sessionId)?.agent === "assistant");
+  const row = ran || [...rows].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+  const sock = join(socks, `${row.pid}.sock`);
+  const alone = (all || []).filter((one) => one.name === row.name).length === 1;
+  const address = existsSync(sock) ? `uds:${sock}` : alone ? row.name : "";
+  return { row, address, agent: !!ran };
+}
+
+/**
+ * The message an open assistant chat is sent for `path`: the start prompt's
+ * line, what to read and do, and, to a chat the queue has not seen run the
+ * assistant's agent, the line asking it to tell the owner.
+ */
+export function noteMessage(path, { agent = true, pluginRoot = join(here, "..") } = {}) {
+  return [
+    githubPrompt(path),
+    `From this project's webhook, not a person: an event in that file, and maybe in others of plans/github/, is under no "## Handled" line. Read "What reaches you from GitHub" in ${join(pluginRoot, "docs", "github.md")}, act once as it says for each, and write the Handled line.`,
+    ...(agent
+      ? []
+      : [
+          `If your instructions hold no heading "What reaches you from GitHub", this chat has the assistant's name and not its instructions: tell ${owner()} in a line that it was opened before this project's chats opened as the assistant, and that a new chat opened here has them.`,
+        ]),
+  ].join("\n");
+}
+
+/**
+ * Whether the one-shot run's stream-json output holds a tool result that
+ * sent: `{ ok: true }`, else `{ ok: false, why }`, the why the tool
+ * result's own words cut at 120 characters, or "".
+ */
+export function relayResult(out) {
+  let words = "";
+  for (const line of String(out || "").split("\n")) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const content = event?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (part?.type !== "tool_result") continue;
+      const text =
+        typeof part.content === "string"
+          ? part.content
+          : Array.isArray(part.content)
+            ? part.content.map((one) => one?.text || "").join("")
+            : "";
+      if (/"success"\s*:\s*true/.test(text)) return { ok: true };
+      words ||= text.replace(/\s+/g, " ").trim();
+    }
+  }
+  return { ok: false, why: words.slice(0, 120) };
+}
+
+/**
+ * **A note reaches an open assistant chat by a message the queue sends
+ * itself** (decisions.md#note-sent-to-open-chat): when a note waits untold,
+ * one one-shot run of Claude, from the temp folder with the message tool
+ * alone, sends the chat `noteMessage` for the oldest. Sent, every waiting
+ * note is told, since the message covers them all; not, the oldest's tries
+ * grow, and the listener's minute tries again. The line `plans github`
+ * prints, or "" with nothing to send or no chat to send it to.
+ */
+export function tellAssistant({ dry = false, live, now = Date.now() } = {}) {
+  // The compact form has no queue, and a note is read only with pull requests.
+  if (proj().form === "compact" || proj().land !== "pull-request") return "";
+  const versions = notesWaitingNow();
+  if (!versions.length || dry) return "";
+  const chat = assistantChat(live ?? liveSessions());
+  if (!chat) return "";
+  const session = chat.row.sessionId;
+  const waiting = notesUntold(session);
+  if (!waiting.length) return "";
+  const { path, mtime } = waiting[0];
+  const name = chat.row.name;
+  let why = "";
+  if (!chat.address) why = `no address for ${name}`;
+  else {
+    const { WORKFLOW_ROOT: _root, CLAUDE_PROJECT_DIR: _dir, ...env } = process.env;
+    const ran = spawnSync(
+      claudeBin(),
+      [
+        "-p",
+        "--model",
+        "haiku",
+        "--tools",
+        "SendMessage",
+        "--allowedTools",
+        "SendMessage",
+        "--no-session-persistence",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--system-prompt",
+        RELAY_PROMPT,
+        `Recipient: ${chat.address}\nText:\n${noteMessage(path, { agent: chat.agent })}`,
+      ],
+      {
+        // No project's hooks or `agent` setting apply in the temp folder.
+        cwd: tmpdir(),
+        env,
+        encoding: "utf8",
+        timeout: TELL_TIMEOUT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const result = relayResult(ran.stdout);
+    if (result.ok) {
+      markTold(name, now, versions);
+      return `GitHub: ${name} was sent ${path}.`;
+    }
+    why =
+      ran.error?.code === "ETIMEDOUT"
+        ? `no answer in ${TELL_TIMEOUT / 1000} seconds`
+        : ran.error
+          ? ran.error.message
+          : result.why || "no tool result";
+  }
+  const told = readTold();
+  const before = told[path];
+  const again = before && before.mtime === mtime && !before.ok && before.session === session;
+  const tries = (again ? before.tries || 0 : 0) + 1;
+  told[path] = { mtime, at: now, to: name, session, ok: false, tries, why };
+  writeJson(files.githubTold(), told);
+  return `GitHub: ${name} could not be sent ${path}: ${why}; ${tries < TELL_TRIES ? "tried again in a minute" : "plans lists it"}.`;
 }
 
 /** The seen file, with its defaults. */
@@ -8646,7 +8961,7 @@ function labeller(number, label, deadline) {
 export async function webhookCommand(
   args = [],
   env = process.env,
-  { fetch = globalThis.fetch, every = APP_RECHECK } = {},
+  { fetch = globalThis.fetch, every = APP_RECHECK, tell = MINUTE } = {},
 ) {
   if (args.includes("--stop")) {
     // A record whose port answers nothing is stale, its pid perhaps another
@@ -8676,6 +8991,14 @@ export async function webhookCommand(
   }
   mkdirSync(files.githubInbox(), { recursive: true });
   const record = { pid: process.pid, port, at: Date.now(), lastAt: 0, code: codeStamp() };
+  // **The listener's history outlives its record**: the last delivery's time,
+  // and when none listened, from the last listener's last sign of life to now.
+  const last = readJson(files.webhookLast()) || {};
+  record.lastAt = last.lastAt || 0;
+  const since = last.aliveAt || last.lastAt || 0;
+  if (since && record.at - since > LISTENER_GAP) record.down = { from: since, to: record.at };
+  const markAlive = () =>
+    writeJson(files.webhookLast(), { lastAt: record.lastAt, aliveAt: Date.now() });
   // **The handling runs in a child**, one at a time, so a start's wait never
   // keeps the server from answering GitHub within its ten seconds.
   let child = null;
@@ -8711,6 +9034,7 @@ export async function webhookCommand(
     heard: () => {
       record.lastAt = Date.now();
       writeJson(files.webhook(), record);
+      markAlive();
     },
     keep: (id, event, body) => {
       writeFileSync(join(files.githubInbox(), `${id}.json`), JSON.stringify({ id, event, body }));
@@ -8746,6 +9070,27 @@ export async function webhookCommand(
   };
   server.on("listening", async () => {
     writeJson(files.webhook(), record);
+    markAlive();
+    // **Each minute**: the history's sign of life, and a note no open
+    // assistant chat was sent yet sent again (decisions.md#note-sent-to-open-chat).
+    // The sessions are read only while a note waits, and without blocking the
+    // server; a child runs only when there is a chat to send it to.
+    let reading = false;
+    const minute = setInterval(async () => {
+      try {
+        markAlive();
+      } catch {
+        // A folder that cannot be written loses this minute's mark.
+      }
+      if (reading || child || !notesWaitingNow().length) return;
+      const now = project(root);
+      if (now.land !== "pull-request" || now.form === "compact") return;
+      reading = true;
+      const chat = assistantChat(await liveSessionsLater());
+      reading = false;
+      if (chat && notesUntold(chat.row.sessionId).length) run(["--inbox"]);
+    }, tell);
+    server.on("close", () => clearInterval(minute));
     // What a container that was down missed, once, as `plans github` reads it.
     run([]);
     const first = await check();

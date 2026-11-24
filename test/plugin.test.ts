@@ -3250,6 +3250,8 @@ describe("an executor never waits on the owner", () => {
       ["Planned: plans/<x>.md.", ["planner"], ["assistant"]],
       ["Built: plans/<x>.md.", ["executor"], ["assistant"]],
       ["From ${user_config.owner}: said in <", ["planner", "executor"], ["assistant"]],
+      // The queue's own, sent by tellAssistant (plans/open-assistant-reads-github-notes.md).
+      ["GitHub: plans/github/<n>.md.", [], ["assistant"]],
     ];
     for (const [line, senders, readers] of lines)
       for (const agent of [...senders, ...readers]) expect(body(agent), agent).toContain(line);

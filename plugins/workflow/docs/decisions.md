@@ -768,7 +768,21 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/executor-never-watches-ci.md,
   plans/failed-runs-the-webhook-misses.md,
   plans/app-old-registration-said.md, plans/checks-read-with-the-app.md,
-  plans/merged-pr-refreshes-the-rest.md.
+  plans/merged-pr-refreshes-the-rest.md,
+  plans/open-assistant-reads-github-notes.md.
+- `note-sent-to-open-chat` **A note from GitHub reaches an open
+  assistant chat by a message the queue sends itself, within a
+  minute.** (Javi, 24 November) A failed run sat forty minutes in a
+  project whose assistant chat was open: the queue left the notes for
+  the chat to find, and nothing in the chat said to look. The route is
+  the one every worker uses (`handed-to-the-assistant`), sent by a
+  one-shot run of Claude with the message tool alone, from the temp
+  folder, addressed by the chat's process: observed on Claude Code
+  2.1.331, 15 seconds and under a cent a message. Not a hook in the
+  chat, since a running chat keeps the hooks it started with. The
+  message says what to read and do, so a chat with the name and not the
+  instructions acts too, and is asked to tell the owner.
+  plans/open-assistant-reads-github-notes.md.
 - `days-fixes` **The day's fixes are one pull request, `Small fixes, <d
   Month yyyy>`, never two in a day.** (Javi, 30 October) A daily pull
   request for the small fixes rather than a message for the group, which

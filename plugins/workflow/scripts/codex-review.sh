@@ -30,7 +30,11 @@ codex login status 2>&1 | grep -q "Logged in" \
   || say "not run: codex is not signed in; run codex login"
 
 case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
-mkdir -p "$(dirname "$out")"
+# The real folder, with no link in it: an executor's worktree reaches plans/ through a link,
+# and Codex fails to open its last-message file on the linked path ("Not a directory").
+folder=$(mkdir -p "$(dirname "$out")" && cd "$(dirname "$out")" && pwd -P) \
+  || say "not run: could not open the review folder"
+out="$folder/$(basename "$out")"
 repo=$(git rev-parse --show-toplevel)
 tree=$(mktemp -d "${TMPDIR:-/tmp}/codex-review-XXXXXX")
 rmdir "$tree"

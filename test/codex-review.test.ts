@@ -1,7 +1,16 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 /**
@@ -13,6 +22,7 @@ const script = join(__dirname, "..", "plugins", "workflow", "scripts", "codex-re
 let repo: string;
 let bin: string;
 let home: string;
+let elsewhere: string;
 
 const STUB = `#!/usr/bin/env bash
 if [ "$1" = "login" ]; then
@@ -43,6 +53,9 @@ beforeAll(() => {
   repo = mkdtempSync(join(tmpdir(), "codex-review-repo-"));
   bin = mkdtempSync(join(tmpdir(), "codex-review-bin-"));
   home = mkdtempSync(join(tmpdir(), "codex-review-home-"));
+  // An executor's worktree reaches plans/ through a link to the checkout's folder.
+  elsewhere = mkdtempSync(join(tmpdir(), "codex-review-plans-"));
+  symlinkSync(elsewhere, join(repo, "linked"));
   const git = (...args: string[]) =>
     execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: repo });
   git("init", "-q", "-b", "base");
@@ -59,11 +72,14 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  for (const dir of [repo, bin, home]) rmSync(dir, { recursive: true, force: true });
+  for (const dir of [repo, bin, home, elsewhere]) rmSync(dir, { recursive: true, force: true });
 });
 
-function review(mode: string | null, extra: Record<string, string> = {}) {
-  const out = join(repo, "plans", "x", "codex-review.md");
+function review(
+  mode: string | null,
+  extra: Record<string, string> = {},
+  given = join(repo, "plans", "x", "codex-review.md"),
+) {
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     HOME: home,
@@ -77,11 +93,15 @@ function review(mode: string | null, extra: Record<string, string> = {}) {
     env.PATH = `${bin}:${process.env.PATH}`;
     env.CODEX_STUB_MODE = mode;
   }
-  const said = execFileSync("bash", [script, "base", out, "A title"], {
+  const said = execFileSync("bash", [script, "base", given, "A title"], {
     cwd: repo,
     env,
     encoding: "utf8",
   }).trim();
+  // The script names the real folder, with no link in it (on macOS, tmpdir() is under one).
+  const out = existsSync(dirname(given))
+    ? join(realpathSync(dirname(given)), basename(given))
+    : given;
   return { said, out };
 }
 
@@ -127,6 +147,24 @@ describe("codex-review.sh", () => {
       .trim()
       .split("\n");
     expect(log.at(-1)).toMatch(/^\S+Z base 0 \d+$/);
+  });
+
+  it("gives Codex the real path of a plans folder reached through a link", () => {
+    const { said, out } = review("ok", {}, join(repo, "linked", "topic", "codex-review.md"));
+    const real = join(realpathSync(elsewhere), "topic", "codex-review.md");
+    expect(out).toBe(real);
+    const args = readFileSync(join(home, "args"), "utf8").split("\n");
+    expect(args[args.indexOf("-o") + 1]).toBe(real);
+    expect(said).toBe(`codex review: written to ${real}`);
+    expect(readFileSync(real, "utf8")).toContain("**C1. A claim** (High, Confirmed)");
+    expect(worktrees()).toBe(1);
+  });
+
+  it("says a review folder it cannot open, and writes nothing elsewhere", () => {
+    writeFileSync(join(elsewhere, "file"), "");
+    const { said } = review("ok", {}, join(repo, "linked", "file", "codex-review.md"));
+    expect(said).toBe("codex review: not run: could not open the review folder");
+    expect(worktrees()).toBe(1);
   });
 
   it("says when it is over the usage limit, and keeps the log", () => {

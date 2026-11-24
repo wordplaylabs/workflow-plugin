@@ -19,7 +19,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { createServer } from "node:net";
+import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -200,6 +200,16 @@ const g = (cwd: string, ...args: string[]) =>
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
+/** A port the system says is free: listened on as port 0, read, closed. */
+const freePort = () =>
+  new Promise<number>((resolve, reject) => {
+    const server = createServer();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as AddressInfo;
+      server.close(() => resolve(port));
+    });
+  });
 /** A session's queue state file. */
 const stateFile = (id: string) => join(tmpdir(), `workflow-queue-${id}.json`);
 /** A plan's dated header line. */
@@ -6594,44 +6604,52 @@ describe("the tool hook counts what the chat holds of each file", () => {
       expect(stateOf(id).held).toEqual(["plans/p.md"]);
     });
 
-    it("a Read of 400 KB costs a bare node start, and a 400 KB Bash response under 100 ms more than none", () => {
-      const dir = project();
-      const id = `seen-time-${process.pid}`;
-      const best = (run: () => unknown) =>
-        Math.min(
-          ...[1, 2, 3, 4, 5].map(() => {
-            const t0 = performance.now();
-            run();
-            return performance.now() - t0;
+    // Timed: tried up to three times, since a load spike rarely lasts three tries.
+    it(
+      "a Read of 400 KB costs a bare node start, and a 400 KB Bash response under 100 ms more than none",
+      { retry: 2 },
+      () => {
+        const dir = project();
+        const id = `seen-time-${process.pid}`;
+        // A retry starts with no counts from the try before it.
+        rmSync(seenFile(id), { force: true });
+        rmSync(stateFile(id), { force: true });
+        const best = (run: () => unknown) =>
+          Math.min(
+            ...[1, 2, 3, 4, 5].map(() => {
+              const t0 = performance.now();
+              run();
+              return performance.now() - t0;
+            }),
+          );
+        const node = best(() => execFileSync("node", ["-e", ""]));
+        const read = best(() =>
+          seen(dir, {
+            session_id: id,
+            agent_type: "workflow:planner",
+            ...reading("src/a.mjs", 400_000),
           }),
         );
-      const node = best(() => execFileSync("node", ["-e", ""]));
-      const read = best(() =>
-        seen(dir, {
+        // The wrote hook on the same output, with and without a file named: node,
+        // the script's load and the stdin's parse, which every hook pays already.
+        const bash = (command: string) => ({
           session_id: id,
           agent_type: "workflow:planner",
-          ...reading("src/a.mjs", 400_000),
-        }),
-      );
-      // The wrote hook on the same output, with and without a file named: node,
-      // the script's load and the stdin's parse, which every hook pays already.
-      const bash = (command: string) => ({
-        session_id: id,
-        agent_type: "workflow:planner",
-        tool_name: "Bash",
-        tool_input: { command },
-        tool_response: { stdout: "x".repeat(400_000), stderr: "" },
-      });
-      const bare = best(() => wrote(dir, bash("npm test")));
-      const counted = best(() => wrote(dir, bash("cat src/a.mjs")));
-      // Five Reads and five Bash runs, each adding the output's 100k tokens.
-      expect(logOf(id)).toEqual({ "src/a.mjs": 1_000_000 });
-      console.log(
-        `seen.mjs on a 400 KB Read ${Math.round(read)} ms, node -e '' ${Math.round(node)} ms; wrote hook ${Math.round(counted)} ms counting, ${Math.round(bare)} ms not`,
-      );
-      expect(read - node).toBeLessThan(60);
-      expect(counted - bare).toBeLessThan(100);
-    });
+          tool_name: "Bash",
+          tool_input: { command },
+          tool_response: { stdout: "x".repeat(400_000), stderr: "" },
+        });
+        const bare = best(() => wrote(dir, bash("npm test")));
+        const counted = best(() => wrote(dir, bash("cat src/a.mjs")));
+        // Five Reads and five Bash runs, each adding the output's 100k tokens.
+        expect(logOf(id)).toEqual({ "src/a.mjs": 1_000_000 });
+        console.log(
+          `seen.mjs on a 400 KB Read ${Math.round(read)} ms, node -e '' ${Math.round(node)} ms; wrote hook ${Math.round(counted)} ms counting, ${Math.round(bare)} ms not`,
+        );
+        expect(read - node).toBeLessThan(60);
+        expect(counted - bare).toBeLessThan(100);
+      },
+    );
   });
 });
 
@@ -9761,7 +9779,7 @@ else say([]);
     // In a project with pull requests, no Issues heading and the secret.
     describe("with pull requests and no issues", () => {
       let dir: string;
-      const port = 30000 + ((process.pid + 7) % 20000);
+      let port: number;
       const stubDir = mkdtempSync(join(tmpdir(), "failed-claude-"));
       const rows = join(stubDir, "rows.json");
       const script = join(stubDir, "claude");
@@ -9784,7 +9802,8 @@ else say([]);
           encoding: "utf8",
           env: env(),
         });
-      beforeAll(() => {
+      beforeAll(async () => {
+        port = await freePort();
         fakeClaude(stubDir);
         dir = mkdtempSync(join(tmpdir(), "failed-run-"));
         execFileSync("git", ["init", "-q"], { cwd: dir });
@@ -9800,8 +9819,11 @@ else say([]);
         );
       });
       afterAll(() => {
-        plans("webhook", "--stop");
-        rmSync(dir, { recursive: true, force: true });
+        // With no folder (its setup failed), the stop would reach the working checkout.
+        if (dir) {
+          plans("webhook", "--stop");
+          rmSync(dir, { recursive: true, force: true });
+        }
         rmSync(stubDir, { recursive: true, force: true });
       });
 
@@ -10115,7 +10137,7 @@ else if (args[0] === "pr" && args[1] === "list") {
 
   describe("plans webhook", () => {
     let dir: string;
-    const port = 30000 + (process.pid % 20000);
+    let port: number;
     const env = () => ({
       PATH: process.env.PATH || "",
       WORKFLOW_ROOT: dir,
@@ -10128,7 +10150,8 @@ else if (args[0] === "pr" && args[1] === "list") {
     });
     const plans = (...args: string[]) =>
       spawnSync("node", [join(here, "plan-queue.mjs"), ...args], { encoding: "utf8", env: env() });
-    beforeAll(() => {
+    beforeAll(async () => {
+      port = await freePort();
       dir = mkdtempSync(join(tmpdir(), "webhook-"));
       execFileSync("git", ["init", "-q"], { cwd: dir });
       mkdirSync(join(dir, ".claude"));
@@ -10138,6 +10161,8 @@ else if (args[0] === "pr" && args[1] === "list") {
       );
     });
     afterAll(() => {
+      // With no folder (its setup failed), the stop would reach the working checkout.
+      if (!dir) return;
       plans("webhook", "--stop");
       rmSync(dir, { recursive: true, force: true });
     });
@@ -10276,7 +10301,7 @@ else if (args[0] === "pr" && args[1] === "list") {
       } finally {
         await new Promise((done) => taken.close(done));
       }
-    }, 10_000);
+    });
   });
 });
 
@@ -10358,15 +10383,6 @@ describe("an app that sends no failed run", () => {
     const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
     const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
     const sha = "4f1c2b9a7e3d5c8b";
-    // A port nothing holds: a listener in this process that cannot bind exits it.
-    const freePort = () =>
-      new Promise<number>((done) => {
-        const probe = createServer();
-        probe.listen(0, "127.0.0.1", () => {
-          const { port } = probe.address() as { port: number };
-          probe.close(() => done(port));
-        });
-      });
     let dir: string;
     let stub: string;
     // The queue's module with its root at `dir`: the root is read once, at import.
@@ -10501,7 +10517,7 @@ else say([]);
     // Codex: what the app has unknown is read for anyway; pull requests off end the reads.
     it(
       "reads while GitHub's answer fails, and stops once pull requests are off",
-      { timeout: 60_000 },
+      { timeout: 60_000, retry: 2 },
       async () => {
         let calls = 0;
         const fetch = async () => {

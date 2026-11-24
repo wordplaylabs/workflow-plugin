@@ -13,10 +13,9 @@
 //
 // **A session is charged only with its own writes**:
 // the snapshot is of the tree, which every session in the checkout shares,
-// so a planner stopping beside a building executor was once asked about the
-// executor's files. The paths its editing tools wrote are judged; a shell
-// command that could write makes it answer for the whole tree, as before,
-// since only a building session does that; a session whose tools wrote
+// so the paths a session's editing tools wrote are judged, never another
+// session's; a shell command that could write makes it answer for the whole
+// tree, since only a building session does that; a session whose tools wrote
 // nothing is asked only whether a request that read like a preference
 // decided anything, and the planner and the assistant are never audited.
 //
@@ -93,14 +92,14 @@ export function catalogueFiles(path) {
 }
 
 /**
- * **A catalogue is written to when an entry is** (plans/catalogue-hook-and-audit.md):
+ * **A catalogue is written to when an entry is** (decisions.md#audit-checks):
  * the entries of every file of the project's own catalogue, as `paragraphs`
  * reads them, by the file's path from the root, `{ [path]: [item, ...] }`,
  * snapshotted at the prompt so the stop can tell an entry added, changed or
- * removed from a frontmatter, heading or prose line. Empty with no catalogue
- * or when it cannot be read.
+ * removed from a frontmatter, heading or prose line. Empty with no catalogue or
+ * when it cannot be read.
  */
-export function catalogueEntries(dir = root, proj = project(dir)) {
+function catalogueEntries(dir = root, proj = project(dir)) {
   const entries = {};
   if (!proj.catalogue) return entries;
   try {
@@ -169,7 +168,7 @@ export function treeFiles(dir = root) {
 }
 
 /** The files that differ from the snapshot: new, deleted, or changed in size or mtime. */
-export function changedSince(snapshot, now) {
+function changedSince(snapshot, now) {
   const changed = new Set();
   for (const [p, v] of Object.entries(now))
     if (!snapshot[p] || snapshot[p][0] !== v[0] || snapshot[p][1] !== v[1]) changed.add(p);
@@ -254,16 +253,14 @@ const TAG_FIRST = new RegExp(`^${TAG}`, "u");
 const TAG_LAST = new RegExp(`(${TAG})\\.?\\s*$`, "u");
 
 /**
- * **A rule's tier is read in one of two places**: the tag right after its
- * bold statement, `**Rule.** (Javi, 21 October) The body.`, or the tag that
- * ends its first paragraph, `**Rule.** The body. (Javi, 21 October)`. A
- * parenthesis inside the statement ("Per-step (per row) toggle.") or in the
- * middle of the body is never the tier; a closed one inside a source's name
- * is part of it; a struck-through predecessor kept under the rule is
- * history. Returns {id, statement, tag (without its parentheses), after
- * (the text after a tag right after the statement)}, or null for a rule
- * without its tier and date. The audit, `plans check` and the edit-time
- * hook all read the tier here.
+ * **A rule's tier is read in one of two places**: the tag right after its bold
+ * statement, `**Rule.** (Javi) The body.`, or the tag that ends its first
+ * paragraph, `**Rule.** The body. (Javi)`. A parenthesis inside the statement
+ * ("Per-step (per row) toggle.") or in the middle of the body is never the
+ * tier; a closed one inside a source's name is part of it; a struck-through
+ * predecessor kept under the rule is history. Returns {id, statement, tag
+ * (without its parentheses)}, or null for a rule without its tier and date. The
+ * audit, `plans check` and the edit-time hook all read the tier here.
  */
 export function tierOf(rule) {
   const open = OPENING.exec(rule);
@@ -277,7 +274,6 @@ export function tierOf(rule) {
     id: open[1] || "",
     statement: open[2],
     tag: tag.slice(1, -1),
-    after: first ? body.slice(tag.length) : "",
   };
 }
 
@@ -398,7 +394,7 @@ export function reasonFor(
   // A catalogue file counts as written to when an entry in it was added,
   // changed or removed since the prompt's snapshot; a file the snapshot does
   // not hold (none taken, an inherited catalogue, a new file) or that is gone
-  // counts as before.
+  // counts as written to.
   const entryChanged = (f) => {
     if (!entries || !entries[f] || !(f in texts)) return true;
     const now = rules(texts[f]);

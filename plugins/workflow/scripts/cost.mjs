@@ -1,8 +1,8 @@
 // `plans cost` measures what **A chat is kept while it is cheaper than a fresh
-// one** rests on (plans/reuse-ceiling-per-agent.md, part 6): each session's turns, context and cost by agent, from the transcripts
-// of this checkout, at the prices below with the date they were read. The
-// reuse ceilings rest on these numbers (docs/decisions.md#context-cost), so
-// they are measured again, not remembered.
+// one** rests on: each session's turns, context and cost by agent, from the
+// transcripts of this checkout, at the prices below with the date they were
+// read. The reuse ceilings rest on these numbers
+// (docs/decisions.md#context-cost), so they are measured again, not remembered.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -12,7 +12,7 @@ import { join } from "node:path";
  * day `read`; `write` is the one-hour cache write, which Claude Code uses. A
  * model is matched by its id's prefix.
  */
-export const PRICES = {
+const PRICES = {
   read: "2026-11-05",
   page: "platform.claude.com/docs/en/about-claude/pricing",
   models: {
@@ -150,11 +150,6 @@ export function priceOf(model) {
   return { price: PRICES.models[key || FALLBACK], assumed: !key };
 }
 
-/** A row's cost in dollars, by part, each turn at its own model's prices. */
-export function costOf(row) {
-  return row.cost;
-}
-
 /** The middle value; the mean of the two middle ones for an even count. */
 export function median(values) {
   if (!values.length) return 0;
@@ -179,8 +174,7 @@ const KINDS = [
   ["assistant", "Assistants"],
 ];
 
-export const kindOf = (agent) =>
-  KINDS.find(([kind]) => agent.split(":").at(-1) === kind)?.[0] || "";
+const rowKind = (agent) => KINDS.find(([kind]) => agent.split(":").at(-1) === kind)?.[0] || "";
 
 /**
  * The report's lines: the first says the machine, the span, the folder and
@@ -190,7 +184,7 @@ export const kindOf = (agent) =>
  * `turns`) and that ceiling `warm` and `cold` (`ceilingFor`'s): the line
  * gives the count of sessions that ended over the warm one, and, with
  * history (`warm.history`), a line after it says the inputs
- * (plans/adaptive-reuse.md, part 4).
+ * (decisions.md#reuse-check-cheap).
  */
 export function costWords(rows, { reuse = null, machine = "", since = "", dir = "" } = {}) {
   const first = since || (rows.length ? rows[0].start : 0);
@@ -206,7 +200,7 @@ export function costWords(rows, { reuse = null, machine = "", since = "", dir = 
   const total = (group) => {
     const parts = { write: 0, output: 0, read: 0, input: 0 };
     for (const row of group) {
-      const cost = costOf(row);
+      const cost = row.cost;
       for (const part of Object.keys(parts)) parts[part] += cost[part];
     }
     const sum = Object.values(parts).reduce((a, b) => a + b, 0);
@@ -221,7 +215,7 @@ export function costWords(rows, { reuse = null, machine = "", since = "", dir = 
       : "";
   };
   for (const [kind, heading] of KINDS) {
-    const group = rows.filter((row) => kindOf(row.agent) === kind);
+    const group = rows.filter((row) => rowKind(row.agent) === kind);
     if (!group.length) continue;
     const { parts, sum } = total(group);
     const shares = Object.entries(parts)
@@ -243,7 +237,7 @@ export function costWords(rows, { reuse = null, machine = "", since = "", dir = 
         `Reuse inputs: fresh start ${k(inputs.start)} (median first turn of ${inputs.sessions} sessions), ${inputs.turns} turns; the ceiling is ${k(inputs.warm.ceiling)} warm and ${k(inputs.cold.ceiling)} cold at ${inputs.warm.prices} prices, capped at ${k(inputs.warm.cap)}.`,
       );
   }
-  const other = rows.filter((row) => !kindOf(row.agent));
+  const other = rows.filter((row) => !rowKind(row.agent));
   if (other.length) {
     const agents = [...new Set(other.map((row) => row.agent).filter(Boolean))];
     lines.push(
@@ -261,7 +255,7 @@ export function costWords(rows, { reuse = null, machine = "", since = "", dir = 
 export function inputsOf(rows) {
   const inputs = {};
   for (const [kind] of KINDS) {
-    const group = rows.filter((row) => kindOf(row.agent) === kind);
+    const group = rows.filter((row) => rowKind(row.agent) === kind);
     if (!group.length) continue;
     const counts = new Map();
     for (const row of group) counts.set(row.model, (counts.get(row.model) || 0) + 1);

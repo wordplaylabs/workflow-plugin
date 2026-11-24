@@ -66,7 +66,7 @@ exec node "$dir/bin/plans" "$@"
 `;
 
 /** Where the command goes: `WORKFLOW_BIN` (the tests), else `~/.local/bin`. */
-export const binDir = (env = process.env) => env.WORKFLOW_BIN || join(homedir(), ".local", "bin");
+const binDir = (env = process.env) => env.WORKFLOW_BIN || join(homedir(), ".local", "bin");
 
 const defaultText = () => {
   const { record, key } = source();

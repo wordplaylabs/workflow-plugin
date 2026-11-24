@@ -93,9 +93,6 @@ export type StartDecision = {
   replace?: (Session & { why: string })[];
 };
 
-export const QUEUE_SINCE: number;
-export const FIVE_HOUR_MAX: number;
-export const SEVEN_DAY_MAX: number;
 export function parseDay(text: string): number;
 export function today(now?: number): string;
 /** A plan's text without the queue's status sections (Planning, Building, Resumed, Handing over). */
@@ -114,7 +111,6 @@ export function ownRows<R extends { sessionId?: string; cwd?: string }>(
   rows: R[],
   options?: { paths?: string[]; lockIds?: string[]; named?: string[] },
 ): R[];
-export function liveSessions(options?: { fresh?: boolean; timeout?: number }): LiveRow[] | null;
 export function data(env?: Record<string, string | undefined>, scriptDir?: string): string;
 export function owner(env?: Record<string, string | undefined>, settings?: string): string;
 export function machine(
@@ -175,9 +171,6 @@ export function sharedTokens(
   seen?: Record<string, number>,
   options?: { checkout?: string },
 ): number;
-export function withPlans<
-  S extends { agent?: string; brief?: string; planned?: boolean; plans?: string[] },
->(state: S): S & { plans?: string[] };
 export type LiveRow = {
   sessionId: string;
   id?: string;
@@ -231,7 +224,6 @@ export type Session = {
   sharedWith?: string;
 };
 export function worktrees(): Tree[];
-export const SESSION_NAME: RegExp;
 /** `<Project> <Kind> <n> (<machine>)`, the project and the machine optional. */
 export function sessionName(
   kind: string,
@@ -286,11 +278,6 @@ export function askingIn(
   live: LiveRow[] | null,
   options?: AskingOptions,
 ): { row: LiveRow; until: number } | null;
-export function withAsking<P extends { path: string; state?: string; asks?: boolean }>(
-  plans: P[],
-  live: LiveRow[] | null,
-  options?: AskingOptions,
-): (P & { askingIn: { row: LiveRow; until: number } | null })[];
 export function describeSession(one: Session): string;
 /** A brief waiting for a planner, with what it shares with the chat in tokens. */
 export type WaitingBrief = { path: string; shared?: number };
@@ -322,12 +309,10 @@ export function tiredFor(
 ): string;
 export function plannerMayEdit(facts: {
   plans?: string[];
-  brief?: string;
   toolName?: string;
   filePath?: string;
   base?: string;
 }): boolean;
-export function planEdited(facts: { plans?: string[]; filePath?: string; base?: string }): string;
 export function planTaken(text?: string): boolean;
 export function whoTook(text?: string, live?: LiveRow[] | null): string;
 export function plannerContext(
@@ -340,7 +325,6 @@ export type PlannerState = {
   agent?: string;
   retired?: boolean;
   brief?: string;
-  planned?: boolean;
   plans?: string[];
   stopAsked?: number;
 };
@@ -377,7 +361,6 @@ export function plannerPrompt(path: string): string;
 /** The first prompt of an assistant chat the queue starts on a built plan's follow-ups. */
 export function assistantPrompt(path: string): string;
 /** The executor's `Follow-ups ready` message, which a start beside an open assistant chat prints. */
-export function followUpsMessage(path: string): string;
 export function startPrompt(path: string, plans: { state: string; path: string }[]): string;
 /** A plan's wait (plans/parallel-executors.md, part 3). */
 export type WaitsOn = { path: string; why: string } | null;
@@ -385,16 +368,8 @@ export function freePlans<P extends { path: string; state: string; text?: string
   plans: P[],
   options?: { claims?: Record<string, Claim> },
 ): (P & { waitsOn: WaitsOn })[];
-export function changedFiles(text?: string): string[];
-export function waitsWords(plan: { path: string; waitsOn: NonNullable<WaitsOn> }): string;
 /** A plan named to an executor and not yet taken. */
 export type Claim = { holder: string; name?: string; at: number; until: number };
-export function readClaims(
-  plans?: { path: string; state: string }[],
-  live?: LiveRow[] | null,
-  now?: number,
-): Record<string, Claim>;
-export function claimedWords(path: string, one: Partial<Claim>): string;
 export function takerFor(
   plan: { path: string; state: string; tree?: string } | null,
   options: {
@@ -411,44 +386,16 @@ export function takerFor(
     from?: number;
   },
 ): { number: number; session: object | null } | null;
-export function numberOf(cwd?: string): number;
 export function githubPrompt(path: string): string;
 export const PLANNER_PROMPT: RegExp;
 export function fromOf(text?: string): { project: string; path: string } | null;
 export function firstOf(text?: string): First | null;
 export function firstUnread(text?: string): boolean;
-export function firstWords(plan: { first?: First | null } | null | undefined): string;
-export function firstCommand(
-  args?: string[],
-  options?: { now?: number; live?: object[] | null },
-): { said: string; status: number };
-export function firstAhead<
-  P extends {
-    path: string;
-    state: string;
-    text?: string;
-    first?: First | null;
-    mtime?: number;
-  },
->(
-  path: string,
-  plans: P[],
-  options?: { live?: object[] | null; timeOf?: (plan: P) => number; sessionId?: string },
-): P[];
-export function outOfTurnWords(path: string, ahead: { path: string; first?: First | null }): string;
 export function carriesOf(text?: string): { project: string; file: string }[];
-export function briefThere(
-  checkout: string,
-  file: string,
-  path: string,
-  read?: (at: string) => string,
-): boolean;
 export function carryOf(
   plans: { path: string; from?: PlanState["from"]; carries?: PlanState["carries"] }[],
   options?: { read?: (at: string) => string },
 ): Carry[];
-export function briefMissingWords(carry: Carry): string;
-export function fromMissingWords(carry: Carry): string;
 export function versionLine(
   live: LiveRow[] | null,
   options?: { installed?: string; versionOf?: (pid?: number) => string },
@@ -493,9 +440,6 @@ export function decideStop(facts: {
 }): StopDecision;
 /** A session's context, its last turn's time and, when the transcript says it, its model. */
 export type SessionUsage = { context: number; at: number; model?: string };
-export const REUSE_DEFAULT: Ceilings;
-export const CACHE_TTL: number;
-export const WARM: number;
 /** How long a reuse summary, and a background refresh's marker, holds. */
 export const REUSE_REFRESH: number;
 /** Starts `plans cost --summary` in the background unless a marker under an hour old stops it. */
@@ -524,18 +468,8 @@ export function decideEnd(facts: {
   now?: number;
   force?: boolean;
 }): { end: true } | { end: false; why: string };
-export function endSession(
-  sessionId: string,
-  options?: { force?: boolean; live?: LiveRow[] | null },
-): { ended: boolean; handed?: true; line: string };
-export function endCommand(ids?: string[]): string;
 /** How long a hook's `executor.starting` marker, left by a start still running or crashed, holds off another hook's. */
-export const STARTING_SPAN: number;
 /** The line of an executor started on the ready plans when none is alive, else "" (the gate, the marker, a refusal or a deferral). */
-export function startOnReady(options?: {
-  now?: number;
-  alive?: (pid?: number | null) => boolean;
-}): string;
 export function transcriptOf(row: { cwd?: string; sessionId?: string }, projects?: string): string;
 export function mayReuse(facts: {
   usage?: SessionUsage | null;

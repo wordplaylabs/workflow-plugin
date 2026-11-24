@@ -25,12 +25,11 @@
 //      destructive actions,
 //   4. and, for an edit under `ui` whose text draws a control or carries
 //      words a person could read, a small model's naming of the catalogue's
-//      files (a directory) or `## ` sections (one file) the text touches
-//      (plans/catch-inconsistent-ui-at-build.md): `claude -p --model haiku`
-//      with no tools, no MCP servers and no hooks, one call per distinct text a session,
+//      files (a directory) or `## ` sections (one file) the text touches:
+//      `claude -p --model haiku` with no tools, no MCP servers and no hooks, one call per distinct text a session,
 //      sixty a session at most, twenty seconds each, a line per attempt in
 //      `catalogue-kinds.log` in the plugin's data directory. About 1.5k
-//      tokens and seven seconds a call as measured on 2 November
+//      tokens and seven seconds a call as measured
 //      (`total_cost_usd` 0.0003, `duration_api_ms` 872, wall 7.1 s, Haiku);
 //      no `claude`, a failure or a timeout leaves the first three alone.
 //
@@ -44,8 +43,6 @@ import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { catalogueFiles, globToRegExp, paragraphs, tierOf } from "./turn-audit.mjs";
-
-export { catalogueFiles, paragraphs };
 import { data } from "./plan-queue.mjs";
 import { kindOf, matches, owner, project } from "./project.mjs";
 
@@ -84,7 +81,7 @@ export function frontmatter(text) {
  * last; a project entry whose id an inherited entry carries replaces it, and
  * says which it overrides.
  */
-export function readCatalogue(locations) {
+function readCatalogue(locations) {
   const list =
     typeof locations === "string" ? [{ path: locations, label: "", own: true }] : locations;
   const files = [];
@@ -199,13 +196,13 @@ export function reads(text) {
 }
 
 /**
- * **The kinds a small model names** (plans/catch-inconsistent-ui-at-build.md):
- * the parts of the catalogue a model may name, `{name, line, alias}`: a
- * directory catalogue's files but the README, `<label>: <title>`, labelled
- * as the hook labels them, the file's own name an alias when no other
- * file shares it (an answer may give `toasts.md` for `docs/ui/toasts.md`); a one-file
- * catalogue's `## ` sections that hold an entry, `<heading>: <its first
- * entry's statement>`. The inherited catalogues' files are among them.
+ * **The kinds a small model names**: the parts of the catalogue a model may
+ * name, `{name, line, alias}`: a directory catalogue's files but the README,
+ * `<label>: <title>`, labelled as the hook labels them, the file's own name an
+ * alias when no other file shares it (an answer may give `toasts.md` for
+ * `docs/ui/toasts.md`); a one-file catalogue's `## ` sections that hold an
+ * entry, `<heading>: <its first entry's statement>`. The inherited catalogues'
+ * files are among them.
  */
 export function menuOf(files) {
   const menu = [];
@@ -308,7 +305,7 @@ export function kindsFor(text, menu, ask = askClaude) {
   return { names: found, cost: answer.total_cost_usd ?? null };
 }
 
-// An executor never waits on the owner (plans/executor-never-waits-follow-up.md).
+// An executor never waits on the owner.
 function nothingCovers(catalogue, who, executor) {
   const newScreen = executor
     ? "for a new screen or flow, an executor does not ask: it researches how the product people know does it, follows it, and names it in Built"
@@ -320,7 +317,7 @@ function nothingCovers(catalogue, who, executor) {
 }
 
 /** Whether a tier is a person's: not a product's (`as X does`, `per <source>`, `observed in <x>`) or the agent's choice. */
-export function isPerson(tag) {
+function isPerson(tag) {
   return !/^(?:as .+ does|per .+|observed in .+|the agent's choice)\b/.test(tag);
 }
 
@@ -334,7 +331,7 @@ export function stem(signalSource) {
 }
 
 /** Every string value of a tool call's input, joined by newlines, as the matching text. */
-export function flatten(value) {
+function flatten(value) {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map(flatten).filter(Boolean).join("\n");
   if (value && typeof value === "object") return flatten(Object.values(value));
@@ -350,7 +347,7 @@ export function flatten(value) {
  * are counted instead and to which the ones printed now are added, `kinds`
  * the catalogue's files or sections a small model named for the text.
  */
-export function contextFor(
+function contextFor(
   rel,
   text,
   files,
@@ -385,11 +382,11 @@ export function contextFor(
   };
   // Files found by the text's signals or by path come first, then those
   // whose rules name the file; the project's before the inherited at the
-  // same rank; the rules listed follow the same order.
-  // **One list, in the project file** (plans/catalogue-hook-and-audit.md):
-  // the project's own catalogue, when it is one `.md` file with no `paths`,
-  // governs every `ui` path, which `rel` is already inside by here; a
-  // directory's files are found by their own `paths` as before.
+  // same rank; the rules listed follow the same order. **One list, in the
+  // project file** (decisions.md#audit-checks): the project's own
+  // catalogue, when it is one `.md` file with no `paths`, governs every
+  // `ui` path, which `rel` is already inside by here; a directory's files
+  // are found by their own `paths`.
   const governs = (f) => f.globs.some((g) => g.test(rel)) || (f.own && f.single && !f.paths.length);
   const named = new Set(kinds.map((k) => k.toLowerCase()));
   const found = files
@@ -562,13 +559,10 @@ function main() {
     return;
   }
   const statePath = shownPath(input.session_id);
-  // `{shown, calls, answers}`; an array is an older session's `shown`.
+  // `{shown, calls, answers}`.
   let state = { shown: [], calls: 0, answers: {} };
   try {
-    if (statePath) {
-      const read = JSON.parse(readFileSync(statePath, "utf8"));
-      state = Array.isArray(read) ? { ...state, shown: read } : { ...state, ...read };
-    }
+    if (statePath) state = { ...state, ...JSON.parse(readFileSync(statePath, "utf8")) };
   } catch {
     // First time this session.
   }
@@ -588,7 +582,7 @@ function main() {
   try {
     if (statePath) writeFileSync(statePath, JSON.stringify({ ...state, shown: [...shown] }));
   } catch {
-    // No state: the next call shows them again, and asks again, as before.
+    // No state: the next call shows them again, and asks again.
   }
   if (!context) return;
   process.stdout.write(

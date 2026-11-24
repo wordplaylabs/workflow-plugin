@@ -21,20 +21,14 @@ import { fileURLToPath } from "node:url";
 export const PROJECT_FILE = join(".claude", "workflow.md");
 
 /**
- * The frontmatter's keys: `key: value`; `key:` followed by `  - item` lines;
- * or `key:` followed by indented `name:` lines, each with its own `- item`
- * lines indented as deep or deeper, or with one item on its own line (`name: item`), a
- * map of lists (`deny`). A top-level key closes the map.
- */
-export function frontmatter(text) {
-  return readFrontmatter(text).values;
-}
-
-/**
- * The frontmatter as `frontmatter()` reads it (`values`), with the lines it
- * could not read (`unread`): `{ line, text, under, item }`, `line` the file's
- * line number, `under` the key the line sits under, `item` whether it is a
- * `- item` line. Comments and blank lines are not lines here.
+ * The frontmatter's keys (`values`): `key: value`; `key:` followed by
+ * `  - item` lines; or `key:` followed by indented `name:` lines, each with
+ * its own `- item` lines indented as deep or deeper, or with one item on its
+ * own line (`name: item`), a map of lists (`deny`). A top-level key closes
+ * the map. With them, the lines it could not read (`unread`): `{ line, text,
+ * under, item }`, `line` the file's line number, `under` the key the line
+ * sits under, `item` whether it is a `- item` line. Comments and blank lines
+ * are not lines here.
  */
 export function readFrontmatter(text) {
   const block = /^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? "";
@@ -53,7 +47,7 @@ export function readFrontmatter(text) {
     if (item && list) {
       // An item belongs to the agent above when indented as deep as the
       // agent's line or deeper, as YAML reads it; a shallower one would join
-      // a list it is not under (the deny key's review, 27 October; Javi).
+      // a list it is not under (Javi).
       if (sub && indent < subIndent) unread.push(at);
       else (sub ? out[list][sub] : out[list]).push(unquote(item[1].trim()));
       return;
@@ -61,7 +55,7 @@ export function readFrontmatter(text) {
     // An indented `name:` under a key with no value opens a sub-list there;
     // the key's value becomes a map the first time, with no prototype, so a
     // name is only ever a name. Under a list that has items already, the line
-    // is skipped, as before the map: no item is lost. `name: item` on one line
+    // is skipped: no item is lost. `name: item` on one line
     // is a sub-list of that one item, or the agent would be dropped unseen.
     const nested = /^\s+([\w:-]+):(?:\s+(.*))?$/.exec(line);
     if (nested && list) {
@@ -151,7 +145,7 @@ export function machine(env = process.env, settings = USER_SETTINGS) {
 }
 
 /** This plugin's name, its agents' prefix (`workflow:executor`), from its manifest beside `scripts/`. */
-export function pluginName(dir = join(dirname(fileURLToPath(import.meta.url)), "..")) {
+function pluginName(dir = join(dirname(fileURLToPath(import.meta.url)), "..")) {
   try {
     return JSON.parse(readFileSync(join(dir, ".claude-plugin", "plugin.json"), "utf8")).name;
   } catch {
@@ -166,7 +160,7 @@ const PLUGIN = pluginName();
  * The plugin's agent a hook's input is for: `workflow:executor` or a bare
  * `executor` is "executor". Another plugin's agent of the same short name
  * (`other:reviewer`) is none of this plugin's, so "", and no list here holds
- * it (the deny key's review, 27 October).
+ * it.
  */
 export function kindOf(input, plugin = PLUGIN) {
   const type = String(input?.agent_type || "");
@@ -178,8 +172,7 @@ export function kindOf(input, plugin = PLUGIN) {
 /**
  * Whether a pattern compiles alone. One that does has its parentheses
  * balanced outside escapes and classes, so wrapped in `^(?:...)$` it cannot
- * close the group early and match more than whole names (`mcp__a)|(.*`, the
- * deny key's review, 27 October).
+ * close the group early and match more than whole names (`mcp__a)|(.*`).
  */
 export function compiles(pattern) {
   try {
@@ -346,13 +339,12 @@ export function defaultBranch(root, { checkedOut = false } = {}) {
 }
 
 /**
- * **The checkout a folder belongs to** (plans/executors-build-in-worktrees.md,
- * part 1): for a linked worktree, whose `.git` is a file whose `gitdir:` line
- * ends `/.git/worktrees/<name>`, the folder before that `/.git/`; else the
- * folder itself, a checkout, a submodule (whose `gitdir:` is under
- * `.git/modules/`) or no repository alike. One small file read, no process.
- * A repository made with a separate git folder (plans/executors-build-in-
- * worktrees-follow-up.md) records nowhere where its checkout is, and `git
+ * **The checkout a folder belongs to** (decisions.md#executors-in-worktrees):
+ * for a linked worktree, whose `.git` is a file whose `gitdir:` line ends
+ * `/.git/worktrees/<name>`, the folder before that `/.git/`; else the folder
+ * itself, a checkout, a submodule (whose `gitdir:` is under `.git/modules/`)
+ * or no repository alike. One small file read, no process. A repository made
+ * with a separate git folder records nowhere where its checkout is, and `git
  * worktree list` names the git folder for it; so a `gitdir:` folder holding a
  * `commondir` file is a linked worktree's, and a worktree at
  * `<checkout>/.claude/worktrees/<name>`, where the queue makes them, belongs
@@ -399,8 +391,8 @@ export function checkoutOf(dir) {
 export function project(root) {
   let text = "";
   // A linked worktree without its own project file reads the checkout's
-  // (plans/executors-build-in-worktrees.md, part 1): an executor's tree is
-  // the project's, at another commit.
+  // (decisions.md#executors-in-worktrees): an executor's tree is the
+  // project's, at another commit.
   for (const dir of new Set([root, checkoutOf(root)]))
     try {
       text = readFileSync(join(dir, PROJECT_FILE), "utf8");
@@ -413,7 +405,7 @@ export function project(root) {
   const list = (value) =>
     Array.isArray(value) ? value : typeof value === "string" && value ? [value] : [];
   // The remote's default is asked of git only when a caller reads the branch:
-  // every hook reads `found`, in every session (/code-review, 27 October).
+  // every hook reads `found`, in every session.
   let branch = typeof front.branch === "string" && front.branch ? front.branch : null;
   const body = text.replace(/^---\n[\s\S]*?\n---\n?/, "");
   return {
@@ -444,8 +436,8 @@ export function project(root) {
     // The key as written beside the map above, and the lines the parser could
     // not read, for `plans check`: the file is parsed once.
     written: { deny: front.deny, executors: front.executors, unread },
-    // How many executors build at once, each in its own worktree
-    // (plans/parallel-executors.md, part 1): a whole number, 1 by default.
+    // How many executors build at once, each in its own worktree: a whole
+    // number, 1 by default.
     executors: executorsOf(front.executors),
     form: front.form === "compact" ? "compact" : "full",
     // The context, in tokens, above which a finished session retires, by
@@ -476,21 +468,19 @@ export function executorsOf(value) {
 }
 
 /**
- * **The ceiling while a project has no history** (plans/adaptive-reuse.md,
- * part 3): the context, in tokens, above which a finished session retires
- * rather than take the next plan or brief, used while the project has under
- * five sessions of the agent. With history the queue works the ceiling out
- * where a kept session and a fresh one cost the same over a job of T turns:
+ * **The ceiling while a project has no history**
+ * (decisions.md#reuse-check-cheap): the context, in tokens, above which a
+ * finished session retires rather than take the next plan or brief, used
+ * while the project has under five sessions of the agent. With history the
+ * queue works the ceiling out where a kept session and a fresh one cost the
+ * same over a job of T turns:
  *
  *     C = (S + R) x (1 + w / (T x r))
  *
  * S the agent's fresh start here (its median first-turn context), R the
  * tokens the waiting work shares with the chat, w the one-hour cache write
  * and r the cache read a million tokens (Fable 5.1 $20 and $0.25, Opus 5.5 $8
- * and $0.20, read 5 November 2026), never over 480k. Measured in the plugin's
- * own checkout on 6 November: an executor 49k and 79 turns on Opus, about
- * 74k; a planner 35k and 26 turns on Fable, about 144k. 200k is the owner's
- * allowance of 27 October for the batch's continuity, 160k his of 5 November.
+ * and $0.20, read), never over 480k. The defaults are the owner's.
  */
 export const REUSE_DEFAULT = Object.freeze({ executor: 200_000, planner: 160_000 });
 
@@ -499,7 +489,7 @@ export const REUSE_DEFAULT = Object.freeze({ executor: 200_000, planner: 160_000
  * sets `executor` and `planner`, each missing one the default. A value that
  * is no number above zero is the default.
  */
-export function reuseOf(value) {
+function reuseOf(value) {
   const number = (one) => {
     const n = Number(Array.isArray(one) ? one[0] : one);
     return n > 0 ? n : 0;
@@ -588,12 +578,14 @@ export const QUEUE_IGNORES = [
   // An assistant chat's start writes `assistant.started`; it has no deferral.
   ".claude/assistant.*",
   ".claude/worktrees/",
-  // The project's app's token (plans/plans-as-github-issues.md, part 1).
+  // The project's app's token.
   ".claude/app-token.*",
-  // What GitHub's webhook brought, and its listener (plans/github-watched.md).
+  // What GitHub's webhook brought, and its listener
+  // (decisions.md#github-webhook).
   ".claude/github-*",
   ".claude/webhook.*",
-  // The refresh plans the owner was told of (plans/merged-pr-refreshes-the-rest.md, part 6).
+  // The refresh plans the owner was told of
+  // (decisions.md#merge-refreshes-the-rest).
   ".claude/refreshes.*",
   // The agent a plain chat opens as (`sessionAgent`): Claude Code keeps the
   // file out of git only when it creates it itself.
@@ -663,8 +655,8 @@ export function init(root) {
   mkdirSync(join(root, ".claude"), { recursive: true });
   writeFileSync(file, starter(root));
   // The lock, the pause, the deferrals and Claude Code's worktrees stay out
-  // of git, or a clean start finds them (the Claude review, 27 October);
-  // a line the project ignores another way is not written twice.
+  // of git, or a clean start finds them; a line the project ignores another
+  // way is not written twice.
   const ignore = join(root, ".gitignore");
   let text = "";
   try {
@@ -684,7 +676,7 @@ export function init(root) {
 }
 
 /** The project's own local settings, each person's and git-ignored, where `sessionAgent` writes. */
-export const LOCAL_SETTINGS = join(".claude", "settings.local.json");
+const LOCAL_SETTINGS = join(".claude", "settings.local.json");
 
 /**
  * **A project's chats open as its agent, from the project's own settings**
@@ -738,10 +730,11 @@ export function sessionAgent(
   const now = named(settings);
   if (now === agent) return { agent, did: "" };
   // An agent named that is neither of the plugin's two is somebody's own; a
-  // key with no name in it (`""`, `null`) names none (/code-review 5).
+  // key with no name in it (`""`, `null`) names none.
   if (now && !ours.includes(now)) return { agent, did: "" };
   // The shared file outranks the user settings, as in Claude Code
-  // (plans/agent-set-by-the-project.md, decision checked by the assistant).
+  // (decisions.md#chats-open-as-the-agent, decision checked by the
+  // assistant).
   const applies =
     now ||
     named(read(join(root, ".claude", "settings.json")).value) ||
@@ -756,8 +749,8 @@ export function sessionAgent(
   ignoreQueueFiles(root);
   // A project rule that overrides the exclude line (`!.claude/**`), or an
   // exclude file that cannot be written, leaves the file unignored: no write,
-  // or it is an untracked file anyone's `git add .` takes (Codex C1). Outside
-  // a repository (128) there is no checkout to dirty.
+  // or it is an untracked file anyone's `git add .` takes. Outside a
+  // repository (128) there is no checkout to dirty.
   const ignored = spawnSync("git", ["check-ignore", "-q", "--no-index", "--", LOCAL_SETTINGS], {
     cwd: root,
     stdio: "ignore",
@@ -770,7 +763,7 @@ export function sessionAgent(
     writeFileSync(temporary, `${JSON.stringify({ ...settings, agent }, null, 2)}\n`);
     renameSync(temporary, file);
   } catch (error) {
-    // No temporary file is left in the checkout, where nothing ignores it (/code-review 2).
+    // No temporary file is left in the checkout, where nothing ignores it.
     rmSync(temporary, { force: true });
     throw error;
   }

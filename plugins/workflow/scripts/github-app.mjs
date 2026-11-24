@@ -1,11 +1,11 @@
-// **The project's Claude on GitHub** (plans/plans-as-github-issues.md, part 1):
-// the queue writes issues, comments, labels and pull requests as the
-// project's own GitHub App, never under a person's name. Its id and private
-// key reach the container as `GH_TOKEN` does, `WORKFLOW_APP_ID` and
-// `WORKFLOW_APP_KEY`, or in the file `WORKFLOW_SECRETS_FILE` names, which the
-// queue's `secret()` reads; an installation token is minted from them here, for an
-// hour, and kept in `.claude/app-token.json` until five minutes before it
-// ends. `node:` modules only; `fetch` is Node's own.
+// **The project's Claude on GitHub**: the queue writes issues, comments, labels
+// and pull requests as the project's own GitHub App, never under a person's
+// name. Its id and private key reach the container as `GH_TOKEN` does,
+// `WORKFLOW_APP_ID` and `WORKFLOW_APP_KEY`, or in the file
+// `WORKFLOW_SECRETS_FILE` names, which the queue's `secret()` reads; an
+// installation token is minted from them here, for an hour, and kept in
+// `.claude/app-token.json` until five minutes before it ends. `node:` modules
+// only; `fetch` is Node's own.
 import { createSign } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -14,7 +14,7 @@ const API = "https://api.github.com";
 /** The REST API's version every call names (GitHub's "API versions"). */
 const API_VERSION = "2022-11-28";
 /** A cached token is minted again this long before it ends. */
-export const TOKEN_MARGIN = 5 * 60_000;
+const TOKEN_MARGIN = 5 * 60_000;
 
 const base64url = (value) =>
   Buffer.from(typeof value === "string" ? value : JSON.stringify(value)).toString("base64url");
@@ -23,7 +23,7 @@ const base64url = (value) =>
  * The key as the variable holds it: a PEM's text, its line ends as written or
  * as `\n` escapes, which a one-line environment value often carries.
  */
-export function keyOf(text = "") {
+function keyOf(text = "") {
   return /\n/.test(text) ? text : text.replace(/\\n/g, "\n");
 }
 
@@ -133,11 +133,11 @@ export function repoOfRemote(url = "") {
 }
 
 /**
- * **What the app has** (plans/app-old-registration-said.md, part 1): its
- * registration, `GET /app`, and its installation on the repository, `GET
- * /repos/{owner}/{repo}/installation`, each with the permissions and events
- * GitHub gives, the installation's with its address, where its owner accepts
- * new permissions. One JWT for both; throws as either call does.
+ * **What the app has**: its registration, `GET /app`, and its installation
+ * on the repository, `GET /repos/{owner}/{repo}/installation`, each with the
+ * permissions and events GitHub gives, the installation's with its address,
+ * where its owner accepts new permissions. One JWT for both; throws as
+ * either call does.
  */
 export async function appStanding({
   owner,
@@ -166,7 +166,7 @@ export async function appStanding({
  * the Workflow run event. An app with Actions read is sent every run; only its
  * rerun is refused, which the assistant already turns into a short plan.
  */
-export function runsLack({ permissions = {}, events = [] } = {}) {
+function runsLack({ permissions = {}, events = [] } = {}) {
   const lacks = [];
   if (!["read", "write"].includes(permissions.actions)) lacks.push("Actions read and write");
   if (!events.includes("workflow_run")) lacks.push("the Workflow run event");

@@ -1,10 +1,10 @@
 // **What people write on GitHub reaches the queue on its own**
-// (plans/github-watched.md): the app's webhook posts each event to `plans
-// webhook` on the container, which checks its signature, keeps it in
-// `.claude/github-inbox/`, and turns it into the queue's events; `plans
-// github` reads what a container that was down missed, into the same
-// events. This file is the pure part and the listener; what is done with
-// an event is `plan-queue.mjs`'s. `node:` modules only.
+// (decisions.md#github-webhook): the app's webhook posts each event to
+// `plans webhook` on the container, which checks its signature, keeps it
+// in `.claude/github-inbox/`, and turns it into the queue's events;
+// `plans github` reads what a container that was down missed, into the
+// same events. This file is the pure part and the listener; what is done
+// with an event is `plan-queue.mjs`'s. `node:` modules only.
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
@@ -33,7 +33,7 @@ export const labelsOf = (thing) =>
  * `X-GitHub-Event` and `label` as the app's settings name it, in the order
  * the lines that set up the app give them: `noAppWords` and `noSecretWords`
  * build their list from this, and a test ties it to `itemsOfDelivery`'s
- * branches (plans/webhook-events-from-the-parser.md).
+ * branches.
  */
 export const WEBHOOK_EVENTS = Object.freeze([
   { event: "issues", label: "Issues" },
@@ -116,13 +116,12 @@ export function itemsOfDelivery(event, payload = {}, deliveryId = "") {
       },
     ];
   }
-  // **A failed run is an item** (plans/executor-never-watches-ci.md, part 1):
-  // `completed` comes whatever the outcome, so only the failing conclusions,
-  // on a branch of this repository, a fork's branch may share a name.
-  // Whatever set it off, a push to the branch as much as the pull request: a
-  // run is judged by its pull request, in `githubEvents`, and one on a branch
-  // with no pull request of the queue's own is no event
-  // (plans/failed-runs-the-webhook-misses.md, part 1).
+  // **A failed run is an item** (decisions.md#github-webhook): `completed`
+  // comes whatever the outcome, so only the failing conclusions, on a branch
+  // of this repository, a fork's branch may share a name. Whatever set it
+  // off, a push to the branch as much as the pull request: a run is judged by
+  // its pull request, in `githubEvents`, and one on a branch with no pull
+  // request of the queue's own is no event (decisions.md#github-webhook).
   if (event === "workflow_run" && payload.action === "completed") {
     const run = payload.workflow_run;
     if (
@@ -171,24 +170,24 @@ export function itemsOfDelivery(event, payload = {}, deliveryId = "") {
 
 /**
  * **The conclusions that make a check failed**, in the webhook and the Stop
- * hook alike (plans/failed-runs-the-webhook-misses.md, part 3): `cancelled`
- * was superseded by a later push or stopped by a person, `action_required`
- * waits on a person, on the pull request's page, and only GitHub sets
- * `stale`; none is anybody's to fix.
+ * hook alike (decisions.md#github-webhook): `cancelled` was superseded by a
+ * later push or stopped by a person, `action_required` waits on a person,
+ * on the pull request's page, and only GitHub sets `stale`; none is
+ * anybody's to fix.
  */
 export const FAILED_CONCLUSIONS = ["failure", "timed_out", "startup_failure"];
 
 /**
- * **Whether a delivery is kept** (plans/merged-pr-refreshes-the-rest.md,
- * part 3): only an event the webhook reads, whose body is JSON and makes an
- * item; an event the queue takes nothing from (Workflow job, a run not yet
+ * **Whether a delivery is kept** (decisions.md#merge-refreshes-the-rest):
+ * only an event the webhook reads, whose body is JSON and makes an item; an
+ * event the queue takes nothing from (Workflow job, a run not yet
  * completed, a pull request pushed to) is answered and not kept.
  */
 export function keeps(event, rawBody) {
   if (!WEBHOOK_EVENTS.some((one) => one.event === event)) return false;
   try {
     // A body of `null` or a shape the parser trips on is kept nothing of, and
-    // never stops the listener (/code-review).
+    // never stops the listener.
     return itemsOfDelivery(event, JSON.parse(rawBody) || {}).length > 0;
   } catch {
     return false;
@@ -196,7 +195,7 @@ export function keeps(event, rawBody) {
 }
 
 /** The issue a pull request is for, from its `For #<n>.` line; 0 with none. */
-export function forOf(text = "") {
+function forOf(text = "") {
   return Number(/^For #(\d+)\.?[ \t]*$/m.exec(text)?.[1] || 0);
 }
 
@@ -216,26 +215,24 @@ export const NOTHING_SEEN = Object.freeze({
 const DELIVERIES_KEPT = 500;
 
 /**
- * **The queue's events from GitHub's items** (plans/github-watched.md, part
- * 2), pure: `{ events, seen }`, each event `{ kind, number, by, at, text,
- * url, title, permission, pull }`, in the items' order. `context` says
- * what the checkout's plans hold: `carried` (the issues a plan or a brief
- * carries), `planned` (a planned plan's issues), `own` (the queue's own
- * pull requests), `slug` (the app's) and `issuesOff` (every delivery is
- * marked seen, and only failed runs and merges are events). Kinds: `issue` (an issue opened,
+ * **The queue's events from GitHub's items** (decisions.md#github-webhook),
+ * pure: `{ events, seen }`, each event `{ kind, number, by, at, text, url,
+ * title, permission, pull }`, in the items' order. `context` says what the
+ * checkout's plans hold: `carried` (the issues a plan or a brief carries),
+ * `planned` (a planned plan's issues), `own` (the queue's own pull requests),
+ * `slug` (the app's) and `issuesOff` (every delivery is marked seen, and only
+ * failed runs and merges are events). Kinds: `issue` (an issue opened,
  * unlabelled), `plan` (`status: planning` set on an issue nothing carries),
- * `mention` (`@<slug>` in a comment), `comment` (on an issue a plan
- * carries), `review` (a review, a review comment or a comment on the
- * queue's own pull request), `ready` (`status: ready` on a planned plan's
- * issue), `merged` (a pull request merged, told once by its number, `issue`
- * its `For #<n>` line's or 0 with issues off, with `base` and `head`; nobody
- * is gated, since only a person with write access merges), `failed` (a run that
- * failed on the queue's own pull request, `by` its workflow, with `run` and
- * `sha`). A reader's item, one whose author's permission is not write or
- * admin in `seen.permissions`, and the app's own are never events, but a
- * failed run is nobody's writing and is judged by its pull request alone; a
- * delivery seen is skipped, and so is an item from a read no newer than what
- * was seen of its issue.
+ * `mention` (`@<slug>` in a comment), `comment` (on an issue a plan carries),
+ * `review`, `ready` (`status: ready` on a planned plan's issue), `merged` (a
+ * pull request merged, told once by its number, `issue` its `For #<n>` line's
+ * or 0 with issues off, with `base` and `head`; nobody is gated, since only a
+ * person with write access merges), `failed` (a run that failed on the queue's
+ * own pull request, `by` its workflow, with `run` and `sha`). A reader's item,
+ * one whose author's permission is not write or admin in `seen.permissions`,
+ * and the app's own are never events, but a failed run is nobody's writing and
+ * is judged by its pull request alone; a delivery seen is skipped, and so is an
+ * item from a read no newer than what was seen of its issue.
  */
 export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
   const carried = new Set(context.carried || []);
@@ -261,15 +258,15 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
     }
     const merge = item.kind === "closed" && item.merged;
     // With issues off, a delivery is still marked seen, so turning issues on
-    // later replays none of it (/code-review); a failed run and a merge are
-    // events either way (plans/merged-pr-refreshes-the-rest.md, part 1).
+    // later replays none of it; a failed run and a merge are events either
+    // way (decisions.md#merge-refreshes-the-rest).
     if (context.issuesOff && item.kind !== "failed" && !merge) continue;
     if (item.kind === "failed") {
       // **A run is told once, by its id and attempt**, whether a delivery or
       // a read brought it, and touches no pull request's time, so no comment
-      // and no other run of the same second is hidden by it (Codex,
-      // /code-review). The app's own pull request is set off by the app: no
-      // author gate; one whose number is unknown is nobody's.
+      // and no other run of the same second is hidden by it. The app's own
+      // pull request is set off by the app: no author gate; one whose number
+      // is unknown is nobody's.
       const key = `${item.run}:${item.attempt || 1}`;
       if (next.runs.includes(key) || !item.number) continue;
       if (!own.has(item.number) && !(item.head && own.has(item.head))) continue;
@@ -290,7 +287,7 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
     if (merge) {
       // **A merge is told once, by its number**, whether a delivery or a read
       // brought it, and passes no author gate; before the read's time gate, so
-      // a comment seen after it does not hide a merge the webhook missed (Codex).
+      // a comment seen after it does not hide a merge the webhook missed.
       if (item.at && (!next.pulls[item.number] || item.at > next.pulls[item.number]))
         next.pulls[item.number] = item.at;
       if (next.merges.includes(item.number)) continue;
@@ -369,7 +366,7 @@ const MONTHS =
   );
 
 /** "3 November 2026 21:58", as the note writes a time. */
-export function noteTime(at) {
+function noteTime(at) {
   const d = new Date(at);
   if (Number.isNaN(d.getTime())) return "";
   const hh = String(d.getHours()).padStart(2, "0");
@@ -378,7 +375,7 @@ export function noteTime(at) {
 }
 
 /**
- * **An event as its note** (plans/github-watched.md, part 3): the heading
+ * **An event as its note** (decisions.md#github-webhook): the heading
  * when the note is new (`first`), then a line of the event and its text
  * as written, indented four spaces.
  */
@@ -393,7 +390,7 @@ export function noteFor(event, { first = false } = {}) {
   if (event.kind === "failed")
     return `${head}failed, ${noteTime(event.at)}, ${event.by} run ${event.run} on ${event.sha}: ${event.url}\n\n`;
   // A merge's line names the base and who merged; under it, what it left behind
-  // (plans/merged-pr-refreshes-the-rest.md, part 2).
+  // (decisions.md#merge-refreshes-the-rest).
   if (event.kind === "merged") {
     const behind = event.behind || {};
     const pulls = (list, login = false) =>
@@ -411,14 +408,14 @@ export function noteFor(event, { first = false } = {}) {
 }
 
 /**
- * **The listener** (plans/github-watched.md, part 1): every verified POST
- * is `heard()`, kept by `keep(id, event, rawBody)` when the queue takes
+ * **The listener** (decisions.md#github-webhook): every verified POST is
+ * `heard()`, kept by `keep(id, event, rawBody)` when the queue takes
  * something from it (`keeps`), and answered 202 before `after()` runs the
  * work, GitHub wanting an answer within ten seconds; one it takes nothing
  * from is answered 202 with nothing kept and no work
- * (plans/merged-pr-refreshes-the-rest.md, part 3); an unverified one is
- * answered 401 with nothing kept, anything but a POST 405. The server,
- * listening on `port`.
+ * (decisions.md#merge-refreshes-the-rest); an unverified one is answered
+ * 401 with nothing kept, anything but a POST 405. The server, listening
+ * on `port`.
  */
 export function listen({ port, secret, keep, heard = () => {}, after = () => {} }) {
   const server = createServer((request, response) => {

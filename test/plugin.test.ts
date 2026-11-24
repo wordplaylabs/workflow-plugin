@@ -34,7 +34,7 @@ import { FILES, missing, steps } from "../plugins/workflow/scripts/install-check
 import { install, onPath, source, WRAPPER } from "../plugins/workflow/scripts/plans-on-path.mjs";
 import {
   defaultBranch,
-  frontmatter,
+  readFrontmatter,
   ignoreQueueFiles,
   init,
   kindOf,
@@ -75,7 +75,7 @@ describe("the project file", () => {
       "---\nname: Paper\nnote: \\JaviAI   # the note command\nreply: \\javi\n---\n",
     );
     const text = readFileSync(join(root, ".claude", "workflow.md"), "utf8");
-    expect(frontmatter(text)).toMatchObject({ note: "\\JaviAI", reply: "\\javi" });
+    expect(readFrontmatter(text).values).toMatchObject({ note: "\\JaviAI", reply: "\\javi" });
   });
 
   it("reads name, branch, run, ui and catalogue", () => {
@@ -298,7 +298,7 @@ deny:                     # MCP tools an agent here may never call
     - mcp__research__.*
 branch: test
 `;
-    expect(frontmatter(`---\n${front}---\n`)).toMatchObject({
+    expect(readFrontmatter(`---\n${front}---\n`).values).toMatchObject({
       deny: {
         assistant: ["mcp__(claude_ai_)?lab-devops__.*", "mcp__lab__write_.*"],
         planner: ["mcp__lab-personal__.*", "mcp__research__.*"],

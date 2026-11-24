@@ -9,13 +9,13 @@ export type TurnState = {
   wrote?: string[];
   shell?: boolean;
   calls?: string[];
+  entries?: Record<string, string[]> | null;
 };
 export type ToolEvent = {
   tool_name?: string;
   tool_input?: { file_path?: string; notebook_path?: string; command?: string };
 };
 export function treeFiles(dir?: string): Files;
-export function changedSince(snapshot: Files, now: Files): string[];
 export function shellWrites(command: string): boolean;
 export function recordTool<S extends TurnState>(
   state: S,
@@ -37,7 +37,9 @@ export function reasonFor(
     inherits?: string[];
     who?: string;
     day?: string;
+    days?: string[];
     calls?: string[];
     wrote?: string[];
+    entries?: Record<string, string[]> | null;
   },
 ): string;

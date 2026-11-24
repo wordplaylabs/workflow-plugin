@@ -1,11 +1,10 @@
 // **What the chat holds of each file, counted by its tool hook**
-// (plans/shared-file-share.md, plans/shared-count-fixes.md;
-// decisions.md#shared-is-what-is-held). A Read runs this script alone, not the
-// queue: a bare node start rather than plan-queue.mjs loaded, after every Read
-// in every session of every project with the plugin
-// (decisions.md#reuse-check-cheap). The other tools' calls are counted by
-// plan-queue.mjs's `wrote` mode, already loaded for them, with the same
-// functions.
+// (decisions.md#shared-is-what-is-held).
+// A Read runs this script alone, not the queue: a bare node start rather than
+// plan-queue.mjs loaded, after every Read in every session of every project
+// with the plugin (decisions.md#reuse-check-cheap). The other tools' calls are
+// counted by plan-queue.mjs's `wrote` mode, already loaded for them, with the
+// same functions.
 //
 // The count is an append-only log, `workflow-seen-<id>.jsonl` in the temp
 // folder, one short line per file per call: nothing is read before a write,
@@ -16,17 +15,17 @@ import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { checkoutOf, kindOf } from "./project.mjs";
 
-// The checkout, from an executor's worktree too (plans/executors-build-in-worktrees.md):
-// a file there and one under the checkout's plans/ are both counted.
+// The checkout, from an executor's worktree too
+// (decisions.md#executors-in-worktrees): a file there and one under the
+// checkout's plans/ are both counted.
 const here = () => checkoutOf(process.env.CLAUDE_PROJECT_DIR || process.cwd());
 
 /**
  * The paths a brief or a planner's plan names: any path of two or more
- * segments with an extension, `plans/` and `.claude/` included
- * (plans/planner-continues.md, part 3), and a bare name whose extension
- * starts with a letter and has two characters or more, such as `CLAUDE.md`,
- * `vitest.config.ts` or `.mcp.json` (plans/shared-count-fixes.md, part 2),
- * so `5.1` and `e.g.` are not. The
+ * segments with an extension, `plans/` and `.claude/` included, and a bare
+ * name whose extension starts with a letter and has two characters or more,
+ * such as `CLAUDE.md`, `vitest.config.ts` or `.mcp.json`
+ * (decisions.md#shared-is-what-is-held), so `5.1` and `e.g.` are not. The
  * callers keep only names that are files in the checkout, so a bare
  * `decisions.md` with no root file costs a stat and counts nothing.
  */

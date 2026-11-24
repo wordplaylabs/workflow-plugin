@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-// An installed copy of the plugin can be cut off partway (2 November: three
-// directories and five scripts missing, and nothing said so), so the plugin
-// checks itself at every session's start (a SessionStart hook declared in
-// the manifest) and before `plans` imports anything. It must stand alone,
+// An installed copy of the plugin can be cut off partway, so the plugin checks
+// itself at every session's start (a SessionStart hook declared in the
+// manifest) and before `plans` imports anything. It must stand alone,
 // importing `node:` modules only, since any other file may be the missing one
 // (docs/workflow.md, "Installing"; decisions.md#install-checks-itself).
 import { execFileSync } from "node:child_process";
@@ -147,7 +146,7 @@ function installed(plugins, root) {
   }
 }
 
-/** The line said when files are missing (plans/install-fix-every-path.md, The words, row 1). */
+/** The line said when files are missing (decisions.md#install-checks-itself). */
 export function message(root, gone, how = fix(root)) {
   return (
     `The workflow plugin's installed copy is incomplete: ${gone.length} of its ${FILES.length} ` +

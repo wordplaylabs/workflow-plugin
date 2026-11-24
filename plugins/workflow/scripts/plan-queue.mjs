@@ -66,8 +66,8 @@ import { connect } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentsChoice, shellWrites, untiered } from "./turn-audit.mjs";
-import { catalogueFiles, locations, paragraphs } from "./catalogue-context.mjs";
+import { agentsChoice, catalogueFiles, paragraphs, shellWrites, untiered } from "./turn-audit.mjs";
+import { locations } from "./catalogue-context.mjs";
 import { appLacks, appSlug, appStanding, installationToken, repoOfRemote } from "./github-app.mjs";
 import {
   FAILED_CONCLUSIONS,
@@ -101,7 +101,7 @@ import {
 import { costWords, inputsOf, measure, measureFile, priceOf } from "./cost.mjs";
 import { briefPaths, noteSeen, seenIn, seenOf } from "./seen.mjs";
 
-export { machine, owner, REUSE_DEFAULT };
+export { machine, owner };
 
 /** The modes Claude Code runs as hooks, from `hooks/hooks.json`. */
 const HOOK_MODES = ["prompt", "tool", "stop", "wrote", "cutoff", "session"];
@@ -113,9 +113,9 @@ const HOOK_MODES = ["prompt", "tool", "stop", "wrote", "cutoff", "session"];
  * `CLAUDE_PROJECT_DIR`, so `cd <checkout> && plans start` acts there). The
  * processes the command spawns inherit the environment, and with it the root;
  * a hook never reads `WORKFLOW_ROOT`. **The queue never moves**
- * (plans/executors-build-in-worktrees.md, part 1): from an executor's
- * worktree it is the checkout's, so the plans, the lock, the pause and the
- * project file are in one place.
+ * (decisions.md#executors-in-worktrees): from an executor's worktree it is
+ * the checkout's, so the plans, the lock, the pause and the project file are
+ * in one place.
  */
 const root = checkoutOf(
   (hookRun() ? "" : process.env.WORKFLOW_ROOT) || process.env.CLAUDE_PROJECT_DIR || process.cwd(),
@@ -128,8 +128,7 @@ const here = dirname(fileURLToPath(import.meta.url));
  * <version>/scripts` gives `<plugins>/data/<plugin>-<marketplace>`); else the
  * default for this plugin. `WORKFLOW_DATA` for the tests. Never
  * `CLAUDE_PLUGIN_DATA`: in a Bash call, and in a session started from one, it
- * names whichever plugin exported it last, and it named the Codex plugin's
- * directory here.
+ * names whichever plugin exported it last.
  */
 export function data(env = process.env, scriptDir = here) {
   if (env.WORKFLOW_DATA) return env.WORKFLOW_DATA;
@@ -148,32 +147,33 @@ function proj() {
 }
 const branch = () => proj().branch;
 
-/** Plans dated before this are built by path only, as before the queue. */
-export const QUEUE_SINCE = Date.UTC(2026, 9, 24);
+/** Plans dated before this are built by path only. */
+const QUEUE_SINCE = Date.UTC(2026, 9, 24);
 /** No executor starts above these (percent of each window): 80 is lenient, since a plan cut off is resumed at the reset; the seven-day reset can be days away. */
-export const FIVE_HOUR_MAX = 80;
-export const SEVEN_DAY_MAX = 95;
+const FIVE_HOUR_MAX = 80;
+const SEVEN_DAY_MAX = 95;
 const MINUTE = 60_000;
 /** How often a listener whose app sends no failed run reads them itself. */
 const APP_RECHECK = 5 * MINUTE;
 const QUICK_DEATH = 10 * MINUTE;
 const USAGE_STALE = 30 * MINUTE;
 // **Five starts of a kind in a row with nothing done is a loop**
-// (plans/loop-guard-counts-failures.md, part 1): systemd's start burst, the
-// failures a circuit breaker counts before it opens.
+// (decisions.md#starts-bounded): systemd's start burst, the failures a
+// circuit breaker counts before it opens.
 const LOOP_RUN = 5;
 const MAX_HANDOVERS = 6;
 /** Seconds after a window's reset that a deferred start runs. */
 const AFTER_RESET = 120;
 
 const files = {
-  // One lock per executor number (plans/parallel-executors.md, part 1),
-  // held by the session in that number's worktree.
+  // One lock per executor number, held by the session in that number's
+  // worktree.
   lock: (n = 1) => join(root, ".claude", `executor.${n}.lock`),
-  // The plans named to an executor and not yet taken (part 4).
+  // The plans named to an executor and not yet taken.
   claims: () => join(root, ".claude", "executor.claims.json"),
   pause: () => join(root, ".claude", "executor.pause"),
-  // A hook starting an executor on ready plans (\`startOnReady\`), so two at one moment start one.
+  // A hook starting an executor on ready plans (`startOnReady`), so two at one
+  // moment start one.
   starting: () => join(root, ".claude", "executor.starting"),
   // One deferral per kind, so a planner's never drops an executor's; the
   // thirty minutes of "Asked once" have their own (`asking`), so a question
@@ -182,15 +182,17 @@ const files = {
   usage: () => process.env.WORKFLOW_USAGE_FILE || join(data(), "usage.json"),
   starts: () => process.env.WORKFLOW_STARTS_LOG || join(data(), "starts.log"),
   state: (sessionId) => join(tmpdir(), `workflow-queue-${sessionId || "unknown"}.json`),
-  // The project's app's installation token and its end (plans/plans-as-github-issues.md).
+  // The project's app's installation token and its end.
   appToken: () => join(root, ".claude", "app-token.json"),
-  // What GitHub's webhook brought, and what was made of it (plans/github-watched.md).
+  // What GitHub's webhook brought, and what was made of it
+  // (decisions.md#github-webhook).
   githubSeen: () => join(root, ".claude", "github-seen.json"),
   githubInbox: () => join(root, ".claude", "github-inbox"),
   webhook: () => join(root, ".claude", "webhook.json"),
-  // What the owner was told of an app that sends no failed run (plans/app-old-registration-said.md).
+  // What the owner was told of an app that sends no failed run.
   webhookTold: () => join(root, ".claude", "webhook.told.json"),
-  // The refresh plans the owner's own assistant chat was told of (plans/merged-pr-refreshes-the-rest.md, part 6).
+  // The refresh plans the owner's own assistant chat was told of
+  // (decisions.md#merge-refreshes-the-rest).
   refreshesTold: () => join(root, ".claude", "refreshes.told.json"),
 };
 
@@ -206,13 +208,13 @@ const MONTHS =
   );
 
 /**
- * "24 October 2026" as a UTC day, or NaN: also for a day the calendar does
- * not have, "31 February 2026", which `Date.UTC` would roll over into March
- * (plans/put-first-review-fixes.md, part 2).
+ * A plan's day as a UTC day, or NaN: also for a day the calendar does not
+ * have, the 31st of February, which `Date.UTC` would roll over into March
+ * (decisions.md#plan-put-first).
  */
 export function parseDay(text) {
   // "26 October 2026", as the plans and `today()` write it, or "2026-10-26",
-  // as an agent or a person may (plans/queue-reads-iso-dates.md).
+  // as an agent or a person may.
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text.trim());
   const m = iso ? null : /^(\d{1,2}) ([A-Z][a-z]+) (\d{4})$/.exec(text.trim());
   if (!iso && !m) return NaN;
@@ -230,7 +232,7 @@ const DAY = "\\d{1,2} [A-Z][a-z]+ \\d{4}|\\d{4}-\\d{2}-\\d{2}";
 /** A day, in milliseconds: how old a per-session temp file must be to be swept. */
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** "6 November", a day as the queue's lines say it within the year. */
+/** A day as the queue's lines say it within the year: the day and the month. */
 function dayMonth(at) {
   const d = new Date(at);
   return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
@@ -252,30 +254,30 @@ function sectionAfter(text, heading) {
 
 /**
  * The states a plan still asking its owner can be in: a planned plan
- * (plans/plans-as-github-issues.md) asks as a ready one does, and its
- * question's window is recorded the same way (/code-review).
+ * asks as a ready one does, and its question's window is recorded the
+ * same way.
  */
 const ASKS_STATES = ["ready", "planned"];
-/** The states of a file that waits, whose `First` line counts (plans/priority-queue.md, part 1). */
+/** The states of a file that waits, whose `First` line counts (decisions.md#plan-put-first). */
 const WAITING_STATES = ["brief", "planning", "ready", "planned", "handed"];
 
 /** The queue's own status lines, dated, never a plan's "## Building it" section. */
 const STATUS_HEADING = /^## (?:Planning, |Building, |Resumed, |Handing over\b)/;
+/** A plan's dated header line, as `stateOf` reads it: its kind and its day. */
+const PLAN_HEADER = new RegExp(`^(Plan only|Short plan), (${DAY})`, "m");
+/** A brief's line, and its day when it has one. */
+const BRIEF_HEADER = new RegExp(`^Brief for the planner\\b(?:, (${DAY}))?`, "m");
 /**
  * A plan's dated header line or a brief's line: where a status section above
  * it ends. Dated, so a body line that only starts with the words does not end it.
  */
-const HEADER_LINE = new RegExp(
-  `^(?:(?:Plan only|Short plan), (?:${DAY})|Brief for the planner\\b)`,
-);
-/** A plan's dated header line, as `stateOf` reads it. */
-const PLAN_HEADER = new RegExp(`^(?:Plan only|Short plan), (?:${DAY})`);
+const HEADER_LINE = new RegExp(`${PLAN_HEADER.source}|${BRIEF_HEADER.source}`);
 
 /**
  * **A plan's text without the queue's status sections**
- * (plans/handed-plan-stays-in-queue.md): each Planning, Building, Resumed or
- * Handing over line with its body, up to the next `## ` or the header line.
- * A hand-over written between the title and the header pushed the header past
+ * (decisions.md#plan-state-in-file): each Planning, Building, Resumed or
+ * Handing over line with its body, up to the next `## ` or the header line. A
+ * hand-over written between the title and the header pushed the header past
  * the lines `stateOf` reads, and the plan fell out of every list.
  */
 export function withoutStatus(text) {
@@ -293,19 +295,19 @@ export function withoutStatus(text) {
 }
 
 /**
- * **Where a plan lands**, from its `Lands` line (plans/pull-requests-by-
- * topic.md, part 1): `{ kind: "fix", now }`, `{ kind: "refresh" }` (the
- * assistant's plan after a merge, plans/merged-pr-refreshes-the-rest.md,
- * part 4) or `{ kind: "topic", name, ready }`, read from the text before the plan's first `## ` heading, past its
- * status sections; null with none, as a plan in the push mode or an older
- * plan has. A topic's line may say after its state the pull request it lands
- * in or is stacked on, `; lands in #52` or `; stacked on #52`, where agents
- * write it (plans/lands-line-suffix.md): `into` or `stackedOn`, beside the
+ * **Where a plan lands**, from its `Lands` line
+ * (decisions.md#land-by-pull-request): `{ kind: "fix", now }`, `{ kind:
+ * "refresh" }` (decisions.md#merge-refreshes-the-rest, the assistant's plan
+ * after a merge) or `{ kind: "topic", name, ready }`, read from the text before
+ * the plan's first `## ` heading, past its status sections; null with none, as
+ * a plan in the push mode or an older plan has. A topic's line may say after
+ * its state the pull request it lands in or is stacked on, `; lands in #52` or
+ * `; stacked on #52`, where agents write it: `into` or `stackedOn`, beside the
  * topic, so an agent's placement does not change where the queue thinks the
  * plan lands.
  */
 export function landsOf(text = "") {
-  // Hand-wrapped prose: the line may wrap anywhere a space is (/code-review).
+  // Hand-wrapped prose: the line may wrap anywhere a space is.
   const m =
     /^Lands:\s+(?:fix(,\s+now)?|(refresh)|topic\s+([a-z0-9]+(?:-[a-z0-9]+)*),\s+(waiting|ready)(?:;\s+(lands\s+in|stacked\s+on)\s+#(\d+))?)\.?[ \t]*$/m.exec(
       headOf(text),
@@ -322,7 +324,7 @@ export function landsOf(text = "") {
 
 /**
  * A plan's text before its first `## ` heading, past its status sections and
- * outside a fenced block, so a quoted example is not the plan's (/code-review).
+ * outside a fenced block, so a quoted example is not the plan's.
  */
 function headOf(text) {
   const lines = withoutStatus(text).split("\n");
@@ -331,18 +333,17 @@ function headOf(text) {
 }
 
 /**
- * **A Lands line the queue cannot read is said** (plans/lands-line-suffix.md):
- * a line starting `Lands:` where `landsOf` looks that `landsOf` does not read,
- * so the plan is not taken for a topic named for its file without a word.
+ * **A Lands line the queue cannot read is said**: a line starting `Lands:`
+ * where `landsOf` looks that `landsOf` does not read, so the plan is not taken
+ * for a topic named for its file without a word.
  */
 export function landsUnread(text = "") {
   return /^Lands:/m.test(headOf(text)) && !landsOf(text);
 }
 
 /**
- * **A plan or a brief the owner put first** (plans/priority-queue.md, part 1;
- * decisions.md#plan-put-first), its `First: 13 November 2026 15:42:07.` line,
- * read as `landsOf` reads `Lands`: the day in either spelling `parseDay` reads,
+ * **A plan or a brief the owner put first** (decisions.md#plan-put-first),
+ * its `First: 13 November 2026 15:42:07.` line, read as `landsOf` reads `Lands`: the day in either spelling `parseDay` reads,
  * then optionally a time, `hh:mm` or `hh:mm:ss`, a comma before it or not, the
  * full stop optional. `{ day, time, at }`, `time` as `hh:mm` or "" and `at` the
  * day and the time in milliseconds, the order two marks are put in; null with
@@ -363,12 +364,12 @@ export function firstOf(text = "") {
 }
 
 /**
- * **A row put first, in words** (plans/priority-queue.md, part 3): `first
- * since 13 November 15:42`, the day without its year, the time when the line
- * has one; "" for a plan not put first. The rows of `plans`, the Stop hook's
+ * **A row put first, in words** (decisions.md#plan-put-first): `first since
+ * <d Month> <hh:mm>`, the day without its year, the time when the line has
+ * one; "" for a plan not put first. The rows of `plans`, the Stop hook's
  * line and the tool hook's refusal say it so.
  */
-export function firstWords(plan) {
+function firstWords(plan) {
   const first = plan?.first;
   if (!first) return "";
   const at = new Date(parseDay(first.day));
@@ -385,9 +386,8 @@ export function firstUnread(text = "") {
  * Where a `First` line is read: the text before the first heading that is not
  * one of the queue's status lines, outside fences, the status sections
  * included, since a hand-over or a Planning line written under the header
- * lands above the line (/code-review). The fences go first, so a heading in
- * an example in one of those sections does not end the text (Codex C2,
- * plans/waiting-means-a-question-follow-up.md).
+ * lands above the line. The fences go first, so a heading in an example in
+ * one of those sections does not end the text.
  */
 function firstHead(text) {
   const lines = text.split("\n");
@@ -412,22 +412,19 @@ const FIRST_MARK = new RegExp(`^First:[ \\t]+(?:${DAY})`);
 /**
  * One item of a `Related` line: `#<n>`, or `branch <name>`: a topic's name, or
  * another person's branch in Git's shape (`fix/pictures`, `v1.2`), a dot only
- * inside it, so the line's full stop is not the name's (Codex, 30 October).
+ * inside it, so the line's full stop is not the name's.
  */
 const RELATED_ITEM = "(?:#\\d+|branch\\s+[\\w-]+(?:[/.][\\w-]+)*)";
 
 /**
  * **What the author marked a plan or a brief related to**, from its `Related`
- * line (plans/collaborating-when-claude-writes-the-code.md, part 3): `Related:
- * #31.`, `Related: #31 and branch outside-pictures-kept.`, read as `landsOf`
- * reads `Lands`, from the text before the first `## `, past the status
- * sections and outside a fenced block; a list of `{ kind: "pull", number }`
- * and `{ kind: "branch", name }`, or null with none.
+ * line: `Related: #31.`, `Related: #31 and branch outside-pictures-kept.`,
+ * read as `landsOf` reads `Lands`, from the text before the first `## `, past
+ * the status sections and outside a fenced block; a list of `{ kind: "pull",
+ * number }` and `{ kind: "branch", name }`, or null with none.
  */
 export function relatedOf(text = "") {
-  const lines = withoutStatus(text).split("\n");
-  const end = lines.findIndex((line) => /^## /.test(line));
-  const head = (end < 0 ? lines : lines.slice(0, end)).join("\n").replace(/^```[\s\S]*?^```/gm, "");
+  const head = headOf(text);
   const m = new RegExp(
     `^Related:[ \\t]+(${RELATED_ITEM}(?:(?:,\\s+and\\s+|,\\s+|\\s+and\\s+)${RELATED_ITEM})*)\\.?[ \\t]*$`,
     "m",
@@ -443,22 +440,19 @@ export function relatedOf(text = "") {
 /**
  * A project's name in a `From` line or a `For` heading: anything up to the
  * line's delimiter, as a project file's `name` or a directory's may be
- * (`my_docs`), never a comma, a colon or a line break (Codex and /code-review).
+ * (`my_docs`), never a comma, a colon or a line break.
  */
 const PROJECT_WORDS = "[^\\s,:][^\\n,:]*?";
 
 /**
  * **Where a brief from `/workflow:change` came from**, its `From: <Project>,
- * <path>.` line (plans/project-follow-ups-reach-the-project.md, part 4): read
- * as `landsOf` reads `Lands`, from the text before the first `## `, past the
- * status sections and outside a fenced block; the path absolute, the full
- * stop optional, the line wrapped at the comma or not. `{ project, path }`,
- * or null with none.
+ * <path>.` line (decisions.md#leave-back-as-brief): read as `landsOf` reads
+ * `Lands`, from the text before the first `## `, past the status sections and
+ * outside a fenced block; the path absolute, the full stop optional, the line
+ * wrapped at the comma or not. `{ project, path }`, or null with none.
  */
 export function fromOf(text = "") {
-  const lines = withoutStatus(text).split("\n");
-  const end = lines.findIndex((line) => /^## /.test(line));
-  const head = withoutFences((end < 0 ? lines : lines.slice(0, end)).join("\n"));
+  const head = headOf(text);
   // The path runs to the line's end, spaces and all (`/Users/j/My Projects/docs`).
   const m = new RegExp(`^From:[ \\t]+(${PROJECT_WORDS}),\\s+(\\/[^\\n]*?)\\.?[ \\t]*$`, "mu").exec(
     head,
@@ -468,23 +462,20 @@ export function fromOf(text = "") {
 
 /**
  * **The GitHub issue a brief or a plan is the plan behind**, its `Issue:
- * #<n>.` line (plans/plans-as-github-issues.md, part 3): read as `fromOf`
- * reads `From`, from the text before the first `## `, past the status
- * sections and outside a fenced block; the number, 0 with none.
+ * #<n>.` line: read as `fromOf` reads `From`, from the text before the
+ * first `## `, past the status sections and outside a fenced block; the
+ * number, 0 with none.
  */
 export function issueOf(text = "") {
-  const lines = withoutStatus(text).split("\n");
-  const end = lines.findIndex((line) => /^## /.test(line));
-  const head = withoutFences((end < 0 ? lines : lines.slice(0, end)).join("\n"));
-  return Number(/^Issue:[ \t]+#(\d+)\.?[ \t]*$/m.exec(head)?.[1] || 0);
+  return Number(/^Issue:[ \t]+#(\d+)\.?[ \t]*$/m.exec(headOf(text))?.[1] || 0);
 }
 
 /**
- * **A plan's `## Ready, <date>` section** (plans/plans-as-github-issues.md,
- * part 3), outside a fenced block: `{ readyDay, by, lines }`, `by` "github"
- * for `Ready on GitHub, <d Month>.`, "owner" for `Ready on <owner>'s word, <d
- * Month>.`, "" for another first line, and `lines` the decisions the comments
- * made, one per line; null with none.
+ * **A plan's `## Ready, <date>` section**, outside a fenced block: `{
+ * readyDay, by, lines }`, `by` "github" for `Ready on GitHub, <d Month>.`,
+ * "owner" for `Ready on <owner>'s word, <d Month>.`, "" for another first
+ * line, and `lines` the decisions the comments made, one per line; null with
+ * none.
  */
 export function readyOf(text = "") {
   if (!/^## Ready, /m.test(text)) return null;
@@ -509,8 +500,8 @@ export function readyOf(text = "") {
 /**
  * **The briefs a plan carries to the project it came from**, its `## For
  * <Project>: plans/<topic>.md` sections outside fenced blocks
- * (plans/project-follow-ups-reach-the-project.md, part 4): `[{ project, file
- * }]`, the file as written; `[]` with none.
+ * (decisions.md#leave-back-as-brief): `[{ project, file }]`, the file as
+ * written; `[]` with none.
  */
 export function carriesOf(text = "") {
   const heading = new RegExp(`^## For (${PROJECT_WORDS}): (plans\\/[^\\s/]+\\.md)[ \\t]*$`, "gmu");
@@ -521,7 +512,7 @@ export function carriesOf(text = "") {
 }
 
 /** A `Related` line's items in words, for a Ready row: "#31 and branch a-b"; "" with none. */
-export function relatedWords(related) {
+function relatedWords(related) {
   if (!related?.length) return "";
   return andList(
     related.map((one) => (one.kind === "pull" ? `#${one.number}` : `branch ${one.name}`)),
@@ -531,10 +522,9 @@ export function relatedWords(related) {
 /**
  * A text without its fenced blocks, backticks or tildes, three or more, the
  * closing fence of the same character and at least as long (CommonMark), so
- * a plan that shows a section in an example does not read as having it
- * (Codex, 30 October).
+ * a plan that shows a section in an example does not read as having it.
  */
-export function withoutFences(text = "") {
+function withoutFences(text = "") {
   const kept = [];
   let fence = null;
   for (const line of text.split("\n")) {
@@ -548,8 +538,7 @@ export function withoutFences(text = "") {
 /**
  * The fence open after `line`, `fence` the one open before it, by
  * `withoutFences`'s rules, which every reader of fences shares, so the line
- * `plans first --undo` takes out is the one `firstOf` reads (Codex,
- * plans/waiting-means-a-question-follow-up.md).
+ * `plans first --undo` takes out is the one `firstOf` reads.
  */
 function fenceAfter(fence, line) {
   const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
@@ -563,12 +552,13 @@ function fenceAfter(fence, line) {
 }
 
 /**
- * **A plan or a brief dropped on the owner's word** (plans/dropped-plan-
- * state.md): its `## Dropped, <date>` section, outside a fenced block, as
- * `{ droppedDay, why }`, the why its first paragraph with the `Dropped on
- * <owner>'s word: ` lead-in and the full stop taken off; null with none.
+ * **A plan or a brief dropped on the owner's word**
+ * (decisions.md#plan-state-in-file): its `## Dropped, <date>` section,
+ * outside a fenced block, as `{ droppedDay, why }`, the why its first
+ * paragraph with the `Dropped on <owner>'s word: ` lead-in and the full
+ * stop taken off; null with none.
  */
-export function droppedOf(text = "") {
+function droppedOf(text = "") {
   if (!/^## Dropped/m.test(text)) return null;
   const prose = withoutFences(text);
   const heading = /^## Dropped(?:, ([^\n]+?))?[ \t]*$/m.exec(prose);
@@ -583,6 +573,11 @@ export function droppedOf(text = "") {
   return { droppedDay: (heading[1] || "").trim(), why };
 }
 
+/** A plan's Built section, with what its heading says after the comma. */
+const BUILT_DAY = /^## Built(?:, ([^\n]+))?/m;
+/** Whether a plan has a Built section: its heading alone or with a date, never "## Builtin". */
+const BUILT_SECTION = /^## Built(?:,|\s*$)/m;
+
 /**
  * A plan's place in the queue, read from its text. `live` is the live
  * sessions' ids, or null when they could not be listed, which counts every
@@ -592,20 +587,17 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
   // **A plan is a plan before it is a brief**: its header is read first, and
   // the brief's line only at a line's start, so a plan whose first lines
   // mention the brief it replaced reads as the plan. Both are looked for past
-  // the queue's own status sections, wherever an agent wrote them; the
-  // status checks below read the whole text. A `First` line and its blank
-  // count for nothing, so one written above the first `## ` section, over a
-  // header under a section, does not push the header out of the twelve lines
-  // (Codex C1, plans/put-first-review-fixes-follow-up.md).
+  // the queue's own status sections, wherever an agent wrote them; the status
+  // checks below read the whole text. A `First` line and its blank count for
+  // nothing, so one written above the first `## ` section, over a header
+  // under a section, does not push the header out of the twelve lines.
   const lines = withoutStatus(withoutFirstLine(text)).split("\n");
-  const header = new RegExp(`^(Plan only|Short plan), (${DAY})`, "m").exec(
-    lines.slice(0, 12).join("\n"),
-  );
+  const header = PLAN_HEADER.exec(lines.slice(0, 12).join("\n"));
   const head = lines.slice(0, 6).join("\n");
   const dropped = droppedOf(text);
-  // **A brief is queued like a plan** (plans/planner-queue.md): one a
-  // planner is working on carries its Planning line, live while its session is.
-  const brief = header ? null : new RegExp(`^Brief for the planner(?:, (${DAY}))?`, "m").exec(head);
+  // **A brief is queued like a plan**: one a planner is working on carries its
+  // Planning line, live while its session is.
+  const brief = header ? null : BRIEF_HEADER.exec(head);
   if (brief) {
     const day = brief[1] || "";
     const base = {
@@ -617,7 +609,7 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
       issue: issueOf(text),
     };
     if (dropped) return { ...base, state: "dropped", ...dropped };
-    // **A brief put first** (plans/priority-queue.md, part 1): the mark counts
+    // **A brief put first** (decisions.md#plan-put-first): the mark counts
     // while the brief waits or is planned, and the planner carries it on.
     const first = firstOf(text);
     const planning = /^## Planning, ([^,\n]+), session ([^\s,]+)/m.exec(text);
@@ -639,16 +631,15 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
   };
   // Dropped before built: nobody writes both, and the drop is the last word.
   if (dropped) return { ...plan, state: "dropped", ...dropped };
-  const built = /^## Built(?:, ([^\n]+))?/m.exec(text);
+  const built = BUILT_DAY.exec(text);
   if (built) {
     // The commit is the hash written after "commit", in any case and at git's
     // short length of seven or more: in the section's opening paragraph,
     // where the executor says how the plan landed, else anywhere in the
-    // section; else the opening paragraph's first hash that is no session
-    // id, Actions run or issue: the word after `session` or `run`, a whole
-    // UUID, anything in brackets or a link, and a number after `#` are
-    // never a commit (plans/executor-over-ceiling-hands-on.md, part 4). Cut
-    // to eight, in git's lower case.
+    // section; else the opening paragraph's first hash that is no session id,
+    // Actions run or issue: the word after `session` or `run`, a whole UUID,
+    // anything in brackets or a link, and a number after `#` are never a
+    // commit. Cut to eight, in git's lower case.
     const section = sectionAfter(text, /^## Built/m);
     const paragraph =
       section
@@ -679,7 +670,7 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
     const fix = /^Pushed straight to /.test(opening);
     const topic = /^On topic ([^\s,]+)/.exec(opening)?.[1] || "";
     // A refresh has no commit of its own: the pull requests' are theirs
-    // (plans/merged-pr-refreshes-the-rest.md, part 4).
+    // (decisions.md#merge-refreshes-the-rest).
     const refresh = /^Refreshed\b/.test(opening);
     return {
       ...plan,
@@ -731,10 +722,10 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
   const asks =
     /^## Decisions for [^\n]*\n[\s\S]*?^\d+\./m.test(sectionAfter(text, /^## Decisions for /m)) &&
     !/^## Decided/m.test(text);
-  // **A plan with an issue waits for Ready** (plans/plans-as-github-issues.md,
-  // part 3): planned until the label or the owner's word writes the section.
-  // **A plan put first** (plans/priority-queue.md, part 1): only while it
-  // waits; a built, dropped or building plan carries no mark, with nothing to clear.
+  // **A plan with an issue waits for Ready**: planned until the label or the
+  // owner's word writes the section. **A plan put first**
+  // (decisions.md#plan-put-first): only while it waits; a built, dropped or
+  // building plan carries no mark, with nothing to clear.
   const first = firstOf(text);
   if (plan.issue && !readyOf(text)) return { ...plan, state: "planned", stale, asks, first };
   return { ...plan, state: "ready", stale, asks, first };
@@ -750,11 +741,11 @@ export function pathsIn(text) {
 
 /**
  * **What a plan or brief shares with a chat, in tokens**
- * (plans/shared-file-share.md, part 2; decisions.md#shared-is-what-is-held):
- * for each path `briefPaths` finds in `text` that the chat read or wrote
- * (`seen`, its tool hook's count) and that is a file in `checkout`, what the
- * chat holds of it, at most the file's size in bytes over four; never the
- * whole file for a few hunks of it; 0 for none.
+ * (decisions.md#shared-is-what-is-held): for each path `briefPaths` finds in
+ * `text` that the chat read or wrote (`seen`, its tool hook's count) and
+ * that is a file in `checkout`, what the chat holds of it, at most the
+ * file's size in bytes over four; never the whole file for a few hunks of
+ * it; 0 for none.
  */
 export function sharedTokens(text = "", seen = {}, { checkout = root } = {}) {
   let tokens = 0;
@@ -773,7 +764,7 @@ export function sharedTokens(text = "", seen = {}, { checkout = root } = {}) {
 /**
  * The plans under `plans/`, each with its path and state, the queue's order:
  * handed over first, then those put first, the latest put first on top
- * (plans/priority-queue.md, part 1), then oldest.
+ * (decisions.md#plan-put-first), then oldest.
  */
 export function readPlans(dir = join(root, "plans"), live = null, texts = {}) {
   let names = [];
@@ -788,7 +779,8 @@ export function readPlans(dir = join(root, "plans"), live = null, texts = {}) {
     let text;
     let mtime;
     try {
-      // A text given for the path is read in its place: a dry start's hand-over (Codex C2).
+      // A text given for the path is read in its place: a dry start's
+      // hand-over.
       text = texts[`plans/${name}`] ?? readFileSync(file, "utf8");
       mtime = statSync(file).mtimeMs;
     } catch {
@@ -809,11 +801,11 @@ export function readPlans(dir = join(root, "plans"), live = null, texts = {}) {
 
 /**
  * **A plan file the queue cannot read is listed, never dropped**
- * (plans/handed-plan-stays-in-queue.md): the `plans/*.md` with neither a
- * plan's header nor a brief's line where `stateOf` looks (`headless`), and
- * those that could not be read at all (`failed`, Codex, 28 October), by path.
- * One gone between the listing and the read is gone, not failed. The log of
- * decisions taken for the owner (`TAKEN_LOG`) is the assistant's, not a plan.
+ * (decisions.md#plan-state-in-file): the `plans/*.md` with neither a plan's
+ * header nor a brief's line where `stateOf` looks (`headless`), and those
+ * that could not be read at all (`failed`), by path. One gone between the
+ * listing and the read is gone, not failed. The log of decisions taken for
+ * the owner (`TAKEN_LOG`) is the assistant's, not a plan.
  */
 export const TAKEN_LOG = "plans/decisions-taken.md";
 
@@ -886,14 +878,14 @@ let liveAll = null;
 /**
  * The names of every live session on this machine, in any checkout: a
  * start's number counts them all, since two checkouts of one project share
- * its names (Codex, plans/session-names-across-machines.md).
+ * its names (decisions.md#session-names).
  */
 function liveNames() {
   liveSessions();
   return (liveAll || []).map((row) => row.name || "");
 }
 
-export function liveSessions({ fresh = false, timeout = 8000 } = {}) {
+function liveSessions({ fresh = false, timeout = 8000 } = {}) {
   if (!fresh && liveRead !== undefined) return liveRead;
   let rows = null;
   // The tests' sessions, so a hook run in a child process sees rows of their own.
@@ -925,9 +917,9 @@ export function liveSessions({ fresh = false, timeout = 8000 } = {}) {
 
 /**
  * The worktrees of this repository, the checkout first, from `git worktree
- * list`. **A background session lives in one** (plans/queue-sees-worktree-
- * executor.md): Claude Code moves it under `.claude/worktrees/` before its
- * first edit, so a session counted only in the checkout read as gone.
+ * list`. **A background session lives in one**: Claude Code moves it under
+ * `.claude/worktrees/` before its first edit, so a session counted only in
+ * the checkout read as gone.
  */
 export function worktrees() {
   treesRead ??= readWorktrees();
@@ -1002,19 +994,18 @@ function treeOf(cwd, trees) {
 }
 
 /**
- * **Any live executor counts** (plans/queue-counts-any-executor.md): a
- * session is an executor by its name (`Executor n`, given by `start()`), by
- * the state its prompt hook wrote (`agent: "executor"`, so one the owner started
- * by hand counts too), or by holding the lock. **A planner counts only when
- * the queue started it** (plans/planner-queue.md): a background row named
- * `Planner n`, or one whose state says `agent: "planner"`; the owner's own
- * planner chats are his, not the queue's.
+ * **Any live executor counts**: a session is an executor by its name (`Executor
+ * n`, given by `start()`), by the state its prompt hook wrote (`agent:
+ * "executor"`, so one the owner started by hand counts too), or by holding the
+ * lock. **A planner counts only when the queue started it**: a background row
+ * named `Planner n`, or one whose state says `agent: "planner"`; the owner's
+ * own planner chats are his, not the queue's.
  */
 export function isSession(kind, row, state, locks = []) {
   const named = parseName(row.name || "")?.kind === kind;
   // **An assistant chat is the queue's by its numbered name alone**
-  // (plans/project-follow-ups-reach-the-project.md, part 6): the owner's own
-  // `<Project> Assistant` is his.
+  // (decisions.md#leave-back-as-brief): the owner's own `<Project>
+  // Assistant` is his.
   if (kind === "assistant") return named;
   if (kind === "planner") return row.kind === "background" && (named || state?.agent === "planner");
   return (
@@ -1025,12 +1016,11 @@ export function isSession(kind, row, state, locks = []) {
 }
 
 /**
- * **A session's name** (plans/session-names-across-machines.md):
- * `<Project> <Kind> <n> (<machine>)`, `Workflow Executor 2 (lab)`, the
- * project and the machine optional, so a session started before the
- * machine was in the name still counts as the queue's.
+ * **A session's name**: `<Project> <Kind> <n> (<machine>)`, `Workflow
+ * Executor 2 (lab)`. The project and the machine are optional, since the
+ * start log still holds names written before the machine was in them.
  */
-export const SESSION_NAME = /^(?:(.+) )?(Executor|Planner|Assistant) (\d+)(?: \(([\w.-]+)\))?$/;
+const SESSION_NAME = /^(?:(.+) )?(Executor|Planner|Assistant) (\d+)(?: \(([\w.-]+)\))?$/;
 
 /** The name the queue gives a session it starts. */
 export function sessionName(kind, n, { project = "", machine = "" } = {}) {
@@ -1053,7 +1043,7 @@ export function parseName(name) {
  * `pid`, no `status`); else the process's own status. `state` is not read:
  * `blocked` is also Claude Code's reading of the last turn's text, an error
  * only the owner can clear as much as a question
- * (plans/waiting-means-a-question.md, retaking plans/idle-chats-end.md, part 4).
+ * (decisions.md#waiting-is-an-open-prompt).
  */
 export function statusOf(row) {
   if (row.status === "waiting" || row.waitingFor)
@@ -1100,23 +1090,25 @@ export function sessionsOf(
         status: statusOf(row),
         // Its context and the age of its last turn, from its transcript.
         usage: usageFor(row),
-        // What its ceiling is worked out from (plans/adaptive-reuse.md).
+        // What its ceiling is worked out from
+        // (decisions.md#reuse-check-cheap).
         fallback,
         inputs,
         where: !tree || tree.path === root ? "checkout" : basename(tree.path),
         branch: tree?.branch || "",
-        // Its executor number, from its worktree (plans/parallel-executors.md, part 1).
+        // Its executor number, from its worktree.
         number: kind === "executor" ? numberOf(row.cwd) : 0,
         retired: Boolean(state?.retired),
         on:
           (working &&
             plans.find((plan) => plan.state === working && plan.session === row.sessionId)?.path) ||
           "",
-        // When its end timer fires, if it is left quiet (plans/idle-chats-end.md).
+        // When its end timer fires, if it is left quiet.
         endsAt: state?.end?.at || 0,
-        // Why its Stop hook kept it for the work it took (plans/reuse-ceiling-per-agent.md).
+        // Why its Stop hook kept it for the work it took.
         kept: state?.kept || null,
-        // What it read or wrote of each file, by its tool hook (plans/shared-file-share.md).
+        // What it read or wrote of each file, by its tool hook
+        // (decisions.md#shared-is-what-is-held).
         seen: seenFor(row.sessionId),
         // A planner's plans, which its chat still talks about, where each
         // stands, and how tired it is.
@@ -1141,12 +1133,12 @@ export function sessionsOf(
 
 /**
  * **`plans` says what the next waiting work shares with each chat**
- * (plans/shared-file-share.md, part 3): an executor's row against the plan
- * the queue starts first, by `readPlans`'s order, the one `plans start`
- * judges the live executor with: the first handed-over or ready plan not
- * asking, handed first (plans/shared-count-fixes.md, part 3); a
- * planner's against the oldest brief free for it; each with `shared` and
- * `sharedWith`; a row with nothing waiting is left as it is.
+ * (decisions.md#shared-is-what-is-held): an executor's row against the
+ * plan the queue starts first, by `readPlans`'s order, the one `plans
+ * start` judges the live executor with: the first handed-over or ready
+ * plan not asking, handed first; a planner's against the oldest brief
+ * free for it; each with `shared` and `sharedWith`; a row with nothing
+ * waiting is left as it is.
  */
 export function withShare(rows, kind, plans, live, { checkout = root } = {}) {
   const first = plans.find((p) => (p.state === "handed" || p.state === "ready") && !p.askingIn);
@@ -1160,12 +1152,11 @@ export function withShare(rows, kind, plans, live, { checkout = root } = {}) {
 }
 
 /**
- * Where a planner's plan stands, as its line says it (plans/idle-chats-end.md,
- * part 5), so an idle planner's reason is read off the line. A plan the queue
- * did not read is `gone` when its file is not in the checkout, `built` when an
- * executor's line or a drop is in it all the same (/code-review), and `not read
- * by the queue` otherwise (plans/planner-holds-unread-plan.md), so the planner
- * that can fix it is kept.
+ * Where a planner's plan stands, as its line says it, so an idle planner's
+ * reason is read off the line. A plan the queue did not read is `gone` when its
+ * file is not in the checkout, `built` when an executor's line or a drop is in
+ * it all the same, and `not read by the queue` otherwise, so the planner that
+ * can fix it is kept.
  */
 function standingOf(plan, live, { self = "", path = "", checkout = root, ...options } = {}) {
   if (!plan) {
@@ -1207,7 +1198,7 @@ function heldWords(one) {
  */
 function endsWords(one, now = Date.now()) {
   return one.endsAt > now && /^idle\b/.test(one.status || "")
-    ? `ends at ${new Date(one.endsAt).toTimeString().slice(0, 5)} if left quiet`
+    ? `ends at ${hhmm(one.endsAt)} if left quiet`
     : "";
 }
 
@@ -1216,7 +1207,7 @@ function endsWords(one, now = Date.now()) {
  * its ceiling", "200k context, cold 130 min, over its ceiling", or "" with no
  * usage: over the warm ceiling `ceilingFor` works out for the row's agent with
  * what it shares (`shared`, 0 when no work is in hand), said with the work it
- * shares it with (`sharedWith`, plans/shared-file-share.md, part 3). An
+ * shares it with (decisions.md#shared-is-what-is-held, `sharedWith`). An
  * assistant has no ceiling: the queue never replaces one.
  */
 export function usageWords(one, now = Date.now()) {
@@ -1304,7 +1295,7 @@ export function describeSession(one) {
 }
 
 /**
- * **`plans` says the ceilings** (plans/adaptive-reuse.md, part 4): each
+ * **`plans` says the ceilings** (decisions.md#reuse-check-cheap): each
  * agent's worked out with nothing shared, and what it rests on; with no
  * history for either, the project's numbers and that they are today's.
  */
@@ -1330,7 +1321,7 @@ export function ceilingsLine(reuse = REUSE_DEFAULT, inputs = {}) {
 /**
  * **`plans` says why the last fresh session of each kind started**: the
  * newest line of the starts log for this project's executors and planners
- * that retired a session, "Last fresh planner: <name> at 12:40 on 5 November,
+ * that retired a session, "Last fresh planner: <name> at <hh:mm> on <d Month>,
  * on plans/x.md; <old name> [<id>] was retired: <why>". None without one.
  */
 export function lastFreshLines(log, project) {
@@ -1340,10 +1331,8 @@ export function lastFreshLines(log, project) {
       return line.why && parsed && parsed.project === project && parsed.kind === kind;
     });
     if (!last) return [];
-    const at = new Date(last.at);
-    const day = `${at.getDate()} ${MONTHS[at.getMonth()]}`;
     return [
-      `Last fresh ${kind}: ${last.name} at ${hhmm(last.at)} on ${day}, on ${andList(last.paths || [])}; ${last.why}`,
+      `Last fresh ${kind}: ${last.name} at ${hhmm(last.at)} on ${dayMonth(last.at)}, on ${andList(last.paths || [])}; ${last.why}`,
     ];
   });
 }
@@ -1355,9 +1344,8 @@ function andList(items) {
 
 /** The line for a kind: "The executor: ...", "The executors: ...", or "none alive". */
 function sessionsLine(kind, alive) {
-  const word = kind === "executor" ? "executor" : kind;
-  if (!alive.length) return `The ${word}: none alive.`;
-  return `The ${word}${alive.length === 1 ? "" : "s"}: ${alive.map(describeSession).join("; ")}.`;
+  if (!alive.length) return `The ${kind}: none alive.`;
+  return `The ${kind}${alive.length === 1 ? "" : "s"}: ${alive.map(describeSession).join("; ")}.`;
 }
 
 /** Whether a session's working directory is this checkout, one of its worktrees, or under one; no directory is no repository's. */
@@ -1387,17 +1375,17 @@ export function allowedWhileLocked(command) {
 }
 
 /**
- * **No agent marks a pull request ready for review** (plans/no-agent-marks-
- * ready.md): whether a shell command calls `gh pr ready` without `--undo`.
- * The command is split into simple commands on `&&`, `||`, `;`, `|`, `&`,
- * new lines, parentheses and backquotes outside quotes, and each one's
- * words are read with their quotes taken off, so a quoted string naming it
- * (a commit message) is no call. A comment, a heredoc's body and a
- * backslash before a new line are passed over (Codex); leading `NAME=value`
- * words, the shell's keywords (`if`, `then`, `do`, ...) and the wrappers
- * that run a command (`env`, `command`, `xargs`, ...) are skipped, and `gh`
- * is known by its file name. `gh api` with GitHub's mutation for it,
- * `markPullRequestReadyForReview`, is the same act (`/code-review`).
+ * **No agent marks a pull request ready for review**
+ * (decisions.md#draft-until-reviewed): whether a shell command calls `gh pr
+ * ready` without `--undo`. The command is split into simple commands on
+ * `&&`, `||`, `;`, `|`, `&`, new lines, parentheses and backquotes outside
+ * quotes, and each one's words are read with their quotes taken off, so a
+ * quoted string naming it (a commit message) is no call. A comment, a
+ * heredoc's body and a backslash before a new line are passed over; leading
+ * `NAME=value` words, the shell's keywords (`if`, `then`, `do`, ...) and
+ * the wrappers that run a command (`env`, `command`, `xargs`, ...) are
+ * skipped, and `gh` is known by its file name. `gh api` with GitHub's
+ * mutation for it, `markPullRequestReadyForReview`, is the same act.
  */
 export function marksReady(command) {
   const parts = [[]];
@@ -1463,7 +1451,7 @@ export function marksReady(command) {
   ]);
   return parts.some((words) => {
     let call = words.slice(words.findIndex((w) => !skipped.has(w) && !/^[A-Za-z_]\w*=/.test(w)));
-    // `plans gh` is `gh` as the project's app (plans/plans-as-github-issues.md, part 1).
+    // `plans gh` is `gh` as the project's app.
     if (call[0]?.split("/").pop() === "plans" && call[1] === "gh") call = call.slice(1);
     if (call.length < 3 || call[0].split("/").pop() !== "gh") return false;
     if (call[1] === "api") return call.some((w) => w.includes("markPullRequestReadyForReview"));
@@ -1496,24 +1484,20 @@ function readState(sessionId) {
   });
 }
 
-/**
- * **A planner's state holds every plan it wrote** (plans/planner-continues.md):
- * `plans`, in order. A state written before the list had `brief` and
- * `planned`, and is read as that one plan.
- */
-export function withPlans(state) {
+/** **A planner's state holds every plan it wrote**: `plans`, in order. */
+function withPlans(state) {
   if (state?.agent !== "planner") return state;
-  return { ...state, plans: state.plans ?? (state.planned && state.brief ? [state.brief] : []) };
+  return { ...state, plans: state.plans ?? [] };
 }
 
 function blockReason(lock) {
-  const since = lock.taken ? new Date(lock.taken).toTimeString().slice(0, 5) : "earlier";
+  const since = lock.taken ? hhmm(lock.taken) : "earlier";
   return `Another executor is building in this worktree: ${lock.name || "an executor"} [${String(lock.sessionId).slice(0, 8)}], since ${since}. Each worktree holds one executor (the plugin's docs/workflow.md, "The queue"). Do not build; say so, and stop.`;
 }
 
 function annotate(plan) {
   // A plan put first says so, with its other words in the one parenthesis
-  // (plans/priority-queue.md, part 3).
+  // (decisions.md#plan-put-first).
   const words = [
     plan.state === "handed" ? "handed over, resume" : "",
     firstWords(plan),
@@ -1527,20 +1511,20 @@ const kTokens = (n) => `${Math.round(n / 1000)}k`;
 
 /**
  * **The quality limit that stays fixed** (decisions.md#context-cost): no chat
- * is kept past it, whatever the formula gives. Today's largest number (Javi,
- * 5 November), and Chroma's context rot: models use a long context worse the
- * longer it is, a loss no price measures.
+ * is kept past it, whatever the formula gives. Today's largest number (Javi),
+ * and Chroma's context rot: models use a long context worse the longer it is,
+ * a loss no price measures.
  */
 export const REUSE_CAP = 480_000;
 /** The sessions of an agent in a project before its measured inputs are trusted. */
-export const REUSE_HISTORY = 5;
+const REUSE_HISTORY = 5;
 /** Today's cold ceiling, while an agent has no history here: a cold context over it is rewritten at a loss. */
 const COLD_DEFAULT = 60_000;
 
 /**
- * **The ceiling worked out from measured inputs** (plans/adaptive-reuse.md,
- * part 2, on decisions.md#context-cost): a kept chat and a fresh one cost the
- * same when the kept one's context is
+ * **The ceiling worked out from measured inputs**
+ * (decisions.md#reuse-check-cheap, on decisions.md#context-cost): a kept chat
+ * and a fresh one cost the same when the kept one's context is
  *
  *     (S + shared) x (1 + w / (T x r))
  *
@@ -1599,8 +1583,8 @@ export function ceilingFor({
   };
 }
 /** The prompt cache's life, and how long before its end a context counts as cold. */
-export const CACHE_TTL = 60 * MINUTE;
-export const WARM = CACHE_TTL - 5 * MINUTE;
+const CACHE_TTL = 60 * MINUTE;
+const WARM = CACHE_TTL - 5 * MINUTE;
 /** How long a planner's question holds its plan from the executor ("Asked once"). */
 export const ANSWER_WINDOW = 30 * MINUTE;
 /**
@@ -1653,12 +1637,9 @@ export function sessionUsage(transcriptPath) {
       (u.cache_creation_input_tokens || 0);
     if (!total) continue;
     return {
-      context:
-        (u.input_tokens || 0) +
-        (u.cache_read_input_tokens || 0) +
-        (u.cache_creation_input_tokens || 0),
+      context: total,
       at: Date.parse(entry.timestamp) || 0,
-      // Its prices, for the ceiling (plans/adaptive-reuse.md).
+      // Its prices, for the ceiling (decisions.md#reuse-check-cheap).
       ...(entry.message?.model ? { model: entry.message.model } : {}),
     };
   }
@@ -1676,7 +1657,7 @@ export function transcriptOf(
   projects = process.env.WORKFLOW_PROJECTS || join(homedir(), ".claude", "projects"),
 ) {
   if (!row?.cwd || !row.sessionId) return "";
-  const own = join(projects, row.cwd.replace(/[^a-zA-Z0-9]/g, "-"), `${row.sessionId}.jsonl`);
+  const own = join(transcriptsDir(row.cwd, projects), `${row.sessionId}.jsonl`);
   const checkout = join(transcriptsDir(root, projects), `${row.sessionId}.jsonl`);
   return existsSync(own) || !existsSync(checkout) ? own : checkout;
 }
@@ -1692,10 +1673,10 @@ export function transcriptsDir(
 /**
  * A checkout's transcript folder and those of its executors' worktrees
  * (`<folder>--claude-worktrees-executor-<n>`), the checkout's first: the
- * sessions the ceilings are measured from (plans/executors-build-in-
- * worktrees.md, part 3).
+ * sessions the ceilings are measured from
+ * (decisions.md#executors-in-worktrees).
  */
-export function transcriptFolders(folder) {
+function transcriptFolders(folder) {
   const prefix = `${basename(folder)}--claude-worktrees-executor-`;
   let trees = [];
   try {
@@ -1714,24 +1695,21 @@ export const REUSE_REFRESH = 60 * MINUTE;
 
 /**
  * **The reuse ceiling's inputs, measured and cached**
- * (decisions.md#reuse-check-cheap): the summary at
- * `<data()>/reuse/<the transcript folder's name>.json`, `{ measuredAt, rows: {
- * <id>: row }, inputs }`, this machine's and never the checkout's. A
- * transcript whose `mtime` or `size` differs from its row, or has none, is
- * measured alone (`read`), keeping its row when that read fails; the rows of
- * files gone are dropped; the file is written atomically. From a command
- * (`refresh` false) a summary measured under `REUSE_REFRESH` ago is taken as
- * it is, nothing listed; `plans cost` passes `refresh`. A hook passes
- * `cachedOnly` (`hookRun`) and takes the summary as it is, whatever its age,
- * listing and reading nothing: a hook never measures; when the summary is
- * missing or `REUSE_REFRESH` old it calls `stale` (`refreshLater`, which
- * starts `plans cost --summary` in the background, this measuring alone and
- * no report, and does not wait, at most once an hour;
- * plans/background-refresh-measures-only.md),
- * and with no summary the ceilings are the defaults, said as such; `plans`,
- * `plans start` and `plans cost` keep the summary fresh
- * (plans/reuse-measured-outside-hooks.md). No folder, or a read that fails:
- * what the cache holds, or none.
+ * (decisions.md#reuse-check-cheap): the summary at `<data()>/reuse/<the
+ * transcript folder's name>.json`, `{ measuredAt, rows: { <id>: row }, inputs
+ * }`, this machine's and never the checkout's. A transcript whose `mtime` or
+ * `size` differs from its row, or has none, is measured alone (`read`),
+ * keeping its row when that read fails; the rows of files gone are dropped;
+ * the file is written atomically. From a command (`refresh` false) a summary
+ * measured under `REUSE_REFRESH` ago is taken as it is, nothing listed; `plans
+ * cost` passes `refresh`. A hook passes `cachedOnly` (`hookRun`) and takes the
+ * summary as it is, whatever its age, listing and reading nothing: a hook
+ * never measures; when the summary is missing or `REUSE_REFRESH` old it calls
+ * `stale` (`refreshLater`, which starts `plans cost --summary` in the
+ * background, this measuring alone and no report, and does not wait, at most
+ * once an hour), and with no summary the ceilings are the defaults, said as
+ * such; `plans`, `plans start` and `plans cost` keep the summary fresh. No
+ * folder, or a read that fails: what the cache holds, or none.
  */
 export function reuseInputs({
   refresh = false,
@@ -1778,7 +1756,7 @@ export function reuseInputs({
       continue;
     }
     // A transcript that cannot be read now keeps the row it had, with its old
-    // stat, so the next refresh reads it again (Codex, 6 November).
+    // stat, so the next refresh reads it again.
     const row = read(path) || (old?.agent ? old : null);
     if (row) next[id] = row;
   }
@@ -1803,16 +1781,14 @@ export function hookRun(argv = process.argv) {
 
 /**
  * **A hook refreshes the summary in the background**
- * (plans/hooks-refresh-reuse-in-background.md,
- * plans/background-refresh-measures-only.md): starts `plans cost --summary`,
- * this script measuring the reuse inputs alone with its output discarded,
- * detached, once it has created the marker `<summary>.refreshing` beside
- * `file`, with the time, atomically (`wx`): a marker that exists is another
- * hook's refresh, and while it is under `REUSE_REFRESH` old nothing starts, so
- * a refresh that cannot write the summary is tried at most hourly. An older
- * marker is removed and created again; two hooks replacing it at one moment
- * may both start a refresh, which is harmless: each writes the same summary
- * atomically. The
+ * (decisions.md#reuse-check-cheap): starts `plans cost --summary`, this script
+ * measuring the reuse inputs alone with its output discarded, detached, once
+ * it has created the marker `<summary>.refreshing` beside `file`, with the
+ * time, atomically (`wx`): a marker that exists is another hook's refresh, and
+ * while it is under `REUSE_REFRESH` old nothing starts, so a refresh that
+ * cannot write the summary is tried at most hourly. An older marker is removed
+ * and created again; two hooks replacing it at one moment may both start a
+ * refresh, which is harmless: each writes the same summary atomically. The
  * refresh leaves the marker: its new `measuredAt` makes the next hook start
  * nothing. True when started.
  */
@@ -1873,12 +1849,11 @@ function reuseNow() {
 }
 
 /**
- * **`plans cost`** (plans/reuse-ceiling-per-agent.md, part 6): this
- * checkout's transcripts, or a folder's, since a day when given, then the
- * reuse inputs refreshed and the report. With `--summary`, the queue's own
- * argument to itself (`refreshLater`), it refreshes the reuse inputs alone and
- * prints nothing: no transcript is priced for a report nobody sees
- * (plans/background-refresh-measures-only.md).
+ * **`plans cost`**: this checkout's transcripts, or a folder's, since a day
+ * when given, then the reuse inputs refreshed and the report. With
+ * `--summary`, the queue's own argument to itself (`refreshLater`), it
+ * refreshes the reuse inputs alone and prints nothing: no transcript is priced
+ * for a report nobody sees (decisions.md#reuse-check-cheap).
  */
 export function costCommand(
   rest = [],
@@ -1907,7 +1882,7 @@ export function costCommand(
   const rows = transcriptFolders(folder).flatMap((one) => measureAll(one, { since }));
   const home = homedir();
   const shown = folder.startsWith(`${home}/`) ? `~${folder.slice(home.length)}` : folder;
-  // **The reuse inputs, refreshed** (plans/adaptive-reuse.md, part 1), and
+  // **The reuse inputs, refreshed** (decisions.md#reuse-check-cheap), and
   // each agent's ceiling from them, which the report says after its line.
   const inputs = refreshInputs({ refresh: true, dir: folder });
   const reuse = Object.fromEntries(
@@ -1963,7 +1938,7 @@ function mtimeOf(path) {
 }
 
 /** The plans with `askingIn` set on each, for the callers that have the live rows in hand. */
-export function withAsking(plans, live, options = {}) {
+function withAsking(plans, live, options = {}) {
   return plans.map((plan) => ({ ...plan, askingIn: askingIn(plan, live, options) }));
 }
 
@@ -1995,6 +1970,9 @@ export function editedText(toolName, toolInput = {}, before = "") {
 const BUILDING_LINE = /^## Building, [^\n]*/gm;
 /** A Building line with its line end, to take it out. */
 const BUILDING_WHOLE = /^## Building, [^\n]*\n?/gm;
+/** The Building line `sessionId` wrote. */
+const buildingBy = (sessionId) =>
+  new RegExp(`^## Building, [^,\\n]+, session ${sessionId}\\b`, "m");
 
 /** The Building lines `after` has that `before` has not. */
 export function buildingAdded(before = "", after = "") {
@@ -2004,52 +1982,52 @@ export function buildingAdded(before = "", after = "") {
 
 /**
  * **A plan still asking is not taken, even by mistake**
- * (plans/asking-plan-guarded.md): `askingIn` on the plan as it would stand
+ * (decisions.md#asked-once): `askingIn` on the plan as it would stand
  * without its Building lines, so the line under judgement does not make it
  * "building" and let itself through. A "Decided" section lets it go, as it
  * does every other hold. `{ row, until }` or null.
  */
-export function heldFromBuilding(path, text, live, { mtime = 0, ...options } = {}) {
+function heldFromBuilding(path, text, live, { mtime = 0, ...options } = {}) {
   const state = stateOf(text.replace(BUILDING_WHOLE, ""), { mtime });
-  // **A planned plan waits for Ready** (plans/plans-as-github-issues.md, part 3).
+  // **A planned plan waits for Ready**.
   if (state?.state === "planned") return { planned: true, issue: state.issue };
   return state ? askingIn({ path, ...state }, live, options) : null;
 }
 
 /** The refusal of a Building line on a plan `heldFromBuilding` holds, in the start's words. */
-export function holdWords(path, held) {
+function holdWords(path, held) {
   return held.planned ? plannedWords({ path, issue: held.issue }) : stillAskingWords(path, held);
 }
 
 /** The refusal of a Building line on a plan still asking, its time the one `plans` prints. */
-export function stillAskingWords(path, { until }) {
+function stillAskingWords(path, { until }) {
   const at = hhmm(until);
   return `${path} is still asking ${owner()} (its planner's until ${at}): build the other plans first, and come back to it after ${at}, or when ${owner()} says in this chat to build it now. Once he has, write his word in its "Decided" section first: that lets the plan go.`;
 }
 
 /**
- * **A plan put first is built next** (plans/priority-queue.md, part 4): the
- * ready plans, not asking, put first, other than `path`, that the queue puts
- * before it: every one when `path` is not put first, else those put first
- * later. `plans` is `readPlans(...)`; `path`'s own mark is read from its
- * text, so a plan whose Building line is written already is judged by it.
- * **Asking is the hook's own reading** (plans/put-first-review-fixes-follow-up.md):
- * a plan put first counts only when `heldFromBuilding` does not hold it with
- * `live` at `timeOf(plan)`, the time the calling hook judges that plan's own
- * Building line by, so a plan refused as still asking never holds the rest.
+ * **A plan put first is built next** (decisions.md#plan-put-first): the ready
+ * plans, not asking, put first, other than `path`, that the queue puts before
+ * it: every one when `path` is not put first, else those put first later.
+ * `plans` is `readPlans(...)`; `path`'s own mark is read from its text, so a
+ * plan whose Building line is written already is judged by it. **Asking is the
+ * hook's own reading**: a plan put first counts only when `heldFromBuilding`
+ * does not hold it with `live` at `timeOf(plan)`, the time the calling hook
+ * judges that plan's own Building line by, so a plan refused as still asking
+ * never holds the rest.
  */
-export function firstAhead(
+function firstAhead(
   path,
   plans,
   { live = null, timeOf = (plan) => plan.mtime, sessionId = "" } = {},
 ) {
   const own = plans.find((p) => p.path === path);
-  // **A handed-over plan is finished first** (Codex C1): resumed, it is the
-  // build in the middle, never out of turn.
+  // **A handed-over plan is finished first**: resumed, it is the build in
+  // the middle, never out of turn.
   if (own && /^## (?:Handing over\b|Resumed, )/m.test(withoutFences(own.text || ""))) return [];
   const mine = own ? firstOf(own.text || "") : null;
   // A plan put first that waits on another, or that another executor has
-  // claimed, is no plan this one is out of turn against (Codex C4).
+  // claimed, is no plan this one is out of turn against.
   const claims = readClaims(plans, live);
   const waiting = new Set(
     freePlans(plans, { claims })
@@ -2069,7 +2047,7 @@ export function firstAhead(
 }
 
 /** The refusal of a Building line on `path` while `ahead`, a plan put first, waits. */
-export function outOfTurnWords(path, ahead) {
+function outOfTurnWords(path, ahead) {
   return `${ahead.path} is first (${firstWords(ahead).replace(/^first /, "")}): build it before ${path}. Only ${owner()}'s word in this chat changes the order: plans first ${path}.`;
 }
 
@@ -2081,7 +2059,7 @@ function askingWords(plan) {
 
 /**
  * **One reuse rule, each agent held to the ceiling worked out for it**
- * (plans/adaptive-reuse.md, part 2): a finished session takes the next plan
+ * (decisions.md#reuse-check-cheap): a finished session takes the next plan
  * or brief when its context is under `ceilingFor`'s ceiling for that work
  * (`shared`, the tokens the work shares with it), and, its cache cold, under
  * the cold ceiling too: every turn re-reads the whole context at the
@@ -2089,7 +2067,7 @@ function askingWords(plan) {
  * shares at the write price. `kind` the agent, `inputs` what `reuseInputs`
  * measured, `fallback` the project file's number for it, `model` the
  * session's (its usage's, else the agent's commonest here). With no usage
- * known, it is kept (plans/simpler-agents.md). `{ reuse, why }` either way.
+ * known, it is kept. `{ reuse, why }` either way.
  */
 export function mayReuse({
   usage = null,
@@ -2119,27 +2097,29 @@ export function mayReuse({
 /**
  * A row whose turn is over with no prompt open: `state` done, or `state`
  * blocked while `statusOf` reads it `idle`, Claude Code's reading of the last
- * turn's text and not a prompt on screen (plans/waiting-means-a-question.md).
+ * turn's text and not a prompt on screen
+ * (decisions.md#waiting-is-an-open-prompt).
  */
 function finished(row) {
   // A question or a prompt standing is never finished, whatever `state` says
-  // ("A finished chat ends an hour after it goes quiet"; plans/put-first-review-fixes.md, part 5).
+  // (decisions.md#plan-put-first, "A finished chat ends an hour after it goes
+  // quiet").
   if (statusOf(row).startsWith("waiting for input")) return false;
   return row.state === "done" || (row.state === "blocked" && statusOf(row) === "idle");
 }
 
 /**
- * **A finished chat ends when its cache has gone cold**
- * (plans/idle-chats-end.md): a background session the queue counts as its
- * own, whose turn is over with no prompt open (`finished`: a question or a
- * prompt standing keeps it, `working` is a turn), whose last turn is older
- * than the cache's warm span, with no plan or brief under way (`on`). A planner's
- * plans still in the queue keep nothing: each stands alone in its file.
- * `force` (`plans end`) ends a warm one too. **`immediate` (`plans end <id>
- * --now`) ends any background session of the queue, whatever its state**
- * (plans/end-a-stuck-chat.md): a chat stuck in a turn could never be ended
- * otherwise; the plan or brief it has under way comes back as `on`, for the
- * caller to hand over. `{ end: true, on? }` or `{ end: false, why }`.
+ * **A finished chat ends when its cache has gone cold**: a background session
+ * the queue counts as its own, whose turn is over with no prompt open
+ * (`finished`: a question or a prompt standing keeps it, `working` is a turn),
+ * whose last turn is older than the cache's warm span, with no plan or brief
+ * under way (`on`). A planner's plans still in the queue keep nothing: each
+ * stands alone in its file. `force` (`plans end`) ends a warm one too.
+ * **`immediate` (`plans end <id> --now`) ends any background session of the
+ * queue, whatever its state** (decisions.md#end-now): a chat stuck in a turn
+ * could never be ended otherwise; the plan or brief it has under way comes back
+ * as `on`, for the caller to hand over. `{ end: true, on? }` or `{ end: false,
+ * why }`.
  */
 export function decideEnd({
   row,
@@ -2210,8 +2190,7 @@ export function decideStop({
     // **A pull request's failed checks, in the pull request mode** (`land:
     // pull-request`) that no webhook brings to the assistant: every one with
     // no webhook, another service's (`other`) with one; running ones are
-    // never waited on (plans/executor-never-watches-ci.md, part 4,
-    // plans/failed-runs-the-webhook-misses.md, part 4).
+    // never waited on (decisions.md#push-not-waited-on).
     if (run.pull) {
       const n = run.pull.number;
       const also = run.pull.also || [];
@@ -2231,8 +2210,8 @@ export function decideStop({
     };
   }
   // **A brief for the project a plan came from is written before the stop**
-  // (plans/project-follow-ups-reach-the-project.md, part 4), refused once
-  // per section, as "The audit's checks" are.
+  // (decisions.md#leave-back-as-brief), refused once per section, as "The
+  // audit's checks" are.
   const owed = carry.find((one) => one.missing && !told.includes(`for:${one.path}:${one.file}`));
   if (owed)
     return {
@@ -2257,14 +2236,14 @@ export function decideStop({
     };
   }
   // **The ceiling is judged at every stop while plans wait**
-  // (plans/executor-over-ceiling-hands-on.md): the plans the session was
-  // already named included, so a session named plans under the ceiling and
-  // over it at a later stop is retired on all of them; only the untold ones
-  // are named when it may go on. Each plan is judged with what it shares
-  // with the batch (`shared`, plans/adaptive-reuse.md, part 2), over the
-  // plans not yet named when there are any, else over all: a session that
-  // declined a plan it had room for is not kept for it while one it has no
-  // room for waits (Javi, 5 November).
+  // (decisions.md#executor-pool): the plans the session was already named
+  // included, so a session named plans under the ceiling and over it at a
+  // later stop is retired on all of them; only the untold ones are named
+  // when it may go on. Each plan is judged with what it shares with the
+  // batch (decisions.md#reuse-check-cheap, `shared`), over the plans not
+  // yet named when there are any, else over all: a session that declined a
+  // plan it had room for is not kept for it while one it has no room for
+  // waits (Javi).
   if (!waiting.length) return null;
   const fresh = waiting.filter((plan) => !told.includes(plan.path));
   const judge = (plan) =>
@@ -2273,10 +2252,10 @@ export function decideStop({
   if (!pool.some(({ verdict }) => verdict.reuse))
     return { retire: true, paths: waiting.map((plan) => plan.path), why: pool[0].verdict.why };
   // **A plan named and not taken goes to a fresh executor**
-  // (plans/executor-takes-next-ready-plan.md, part 1), as a brief goes to a
-  // fresh planner: this live executor refuses every start, so a plan it was
-  // named and stopped without taking would otherwise wait for good. Whatever
-  // its context, the session is retired on every waiting plan, the ones that
+  // (decisions.md#plans-reach-an-executor), as a brief goes to a fresh
+  // planner: this live executor refuses every start, so a plan it was named
+  // and stopped without taking would otherwise wait for good. Whatever its
+  // context, the session is retired on every waiting plan, the ones that
   // arrived since included.
   const declined = waiting.filter((plan) => told.includes(plan.path));
   if (declined.length)
@@ -2303,23 +2282,23 @@ export function decideStop({
 }
 
 /** The Stop hook's words when a plan's brief for its project is not in that project's `plans/`. */
-export function briefMissingWords({ path, project, file, checkout }) {
+function briefMissingWords({ path, project, file, checkout }) {
   const there = checkout.replace(/\/+$/, "");
   return `${path} leaves work for ${project} (its section "For ${project}: ${file}") and ${there}/${file} is not written. Write the brief there from the section, by your agent file, and start that queue: cd ${there} && plans start --agent planner ${file}, or what its line says to do; then say so in "Built". A change the plugin leaves for the project it came from goes back as a brief.`;
 }
 
 /** The Stop hook's words when a plan's `For` section has no `From` line naming its project. */
-export function fromMissingWords({ path, project, file }) {
+function fromMissingWords({ path, project, file }) {
   return `${path} leaves work for ${project} (its section "For ${project}: ${file}") but names no checkout for it: no From line, or one for another project. Add "From: ${project}, <path>." under the plan's header paragraph when the brief says where it came from, else hand the section to the assistant as a "Needs a decision" item sized assistant, and say so in "Built".`;
 }
 
 /**
  * Whether a brief naming `path` is in `checkout`: at `file`, or, when that
  * name is another's, at the first `<topic>-<n>.md` the executor wrote
- * instead. A file of the name that does not name the plan is no brief of
- * its (Codex and /code-review); nothing else is read from the other checkout.
+ * instead. A file of the name that does not name the plan is no brief of its;
+ * nothing else is read from the other checkout.
  */
-export function briefThere(checkout, file, path, read = (at) => readFileSync(at, "utf8")) {
+function briefThere(checkout, file, path, read = (at) => readFileSync(at, "utf8")) {
   const stem = file.replace(/\.md$/, "");
   for (let n = 1; n <= 20; n++) {
     let text;
@@ -2335,9 +2314,9 @@ export function briefThere(checkout, file, path, read = (at) => readFileSync(at,
 
 /**
  * **The briefs this session's built plans owe their projects**
- * (plans/project-follow-ups-reach-the-project.md, part 4): one entry per
- * `For` section, `missing` "from" with no `From` line for its project, "file"
- * while no brief naming the plan is in that checkout's `plans/`, else "".
+ * (decisions.md#leave-back-as-brief): one entry per `For` section, `missing`
+ * "from" with no `From` line for its project, "file" while no brief naming
+ * the plan is in that checkout's `plans/`, else "".
  */
 export function carryOf(plans, { read } = {}) {
   return plans.flatMap((plan) =>
@@ -2395,7 +2374,7 @@ export function canStart({
   // **Session names carry the project and the machine** (`Docs Executor 2
   // (lab)`), and the count is per project and per machine (the log is this
   // machine's), so two projects' executors number apart and two machines'
-  // sessions never share a name (plans/session-names-across-machines.md).
+  // sessions never share a name (decisions.md#session-names).
   const ours = (one) => {
     const parsed = parseName(one || "");
     return parsed && parsed.project === name && parsed.kind === kind ? parsed : null;
@@ -2407,40 +2386,37 @@ export function canStart({
       why: `The queue is paused since ${paused} ("resume the queue" in any session lifts it).`,
     };
   // **An assistant chat is started only when none is open**
-  // (plans/project-follow-ups-reach-the-project.md, part 6): this project's,
-  // the owner's or the queue's, idle or busy, is sent the message instead,
-  // and an assistant is never replaced.
+  // (decisions.md#leave-back-as-brief): this project's, the owner's or the
+  // queue's, idle or busy, is sent the message instead, and an assistant is
+  // never replaced.
   if (kind === "assistant") {
     if (open.length)
       return {
         refuse: true,
-        why: `${open[0]} is open: send it the message instead. ${followUpsMessage(brief)}`,
+        why: `${open[0]} is open: send it the message instead. ${assistantPrompt(brief)}`,
       };
     sessions = [];
   }
-  // **Any live, unretired session of the kind refuses a start, lock or not**
-  // (plans/queue-counts-any-executor.md, plans/planner-queue.md). The lock
-  // below is an executor's only evidence when the sessions cannot be read.
-  // **A stale session does not block its successor** (cache-aware queue):
+  // **Any live, unretired session of the kind refuses a start, lock or not**.
+  // The lock below is an executor's only evidence when the sessions cannot be
+  // read. **A stale session does not block its successor** (cache-aware queue):
   // one whose context is over its reuse ceiling, or cold, is replaced when
   // idle; a busy planner so is left to finish, and a fresh one starts beside
-  // it. A busy executor, or any session still worth reusing, refuses as before.
-  // A session is judged with what the work shares with it (`shared`, set by
-  // `startHere`; plans/adaptive-reuse.md, part 2).
-  // An executor with a plan under way (its Building line) is never stale:
-  // replacing it would orphan that work.
-  // **A planner is judged by what it can do now** (plans/briefs-reach-a-
-  // free-planner.md, part 1): one with a question or a prompt open takes
+  // it. A busy executor, or any session still worth reusing, refuses.
+  // A session is judged with what the work shares with it
+  // (decisions.md#reuse-check-cheap, `shared`, set by `startHere`). An executor
+  // with a plan under way (its Building line) is never stale: replacing it
+  // would orphan that work. **A planner is judged by what it can do now**
+  // (decisions.md#brief-leased): one with a question or a prompt open takes
   // nothing until he answers, one with no process takes nothing at all
-  // (plans/waiting-means-a-question.md, part 2), and one mid-brief over its
+  // (decisions.md#waiting-is-an-open-prompt), and one mid-brief over its
   // ceiling for this brief would be retired at its next stop, so each gets a
-  // fresh planner beside it.
-  // **A start nobody is watching** (`unwatched`, a timer's) replaces an idle
-  // session whatever its warmth: no command can message a session, so the
-  // work it is started for would otherwise wait on a chat nobody prompts.
-  // **An executor with no process is not alive** (plans/put-first-review-
-  // fixes.md, part 6): it takes nothing, so it is replaced, its plan handed
-  // over by `startHere`; a planner so is started beside, as before.
+  // fresh planner beside it. **A start nobody is watching** (`unwatched`, a
+  // timer's) replaces an idle session whatever its warmth: no command can
+  // message a session, so the work it is started for would otherwise wait on a
+  // chat nobody prompts. **An executor with no process is not alive**
+  // (decisions.md#plan-put-first): it takes nothing, so it is replaced, its
+  // plan handed over by `startHere`; a planner so is started beside.
   const idle = (one) => /^idle\b/.test(one.status || "");
   const work = kind === "planner" ? "brief" : "plan";
   const stale = (one) => {
@@ -2461,17 +2437,15 @@ export function canStart({
   let replace = [];
   let beside = [];
   if (sessions.length && sessions.every((one) => !stale(one).reuse)) {
-    // An idle planner with a brief under way is started beside, not
-    // replaced: retiring it would orphan that brief. So is one that holds a
-    // plan no Building line has taken yet, at the timer too: "A chat holds
-    // every plan it wrote until a Building line takes it" (docs/workflow.md,
-    // "A planner with room left takes the next brief"; plans/briefs-reach-a-
-    // free-planner-follow-up.md).
-    // A plan whose standing is not known is not counted: every path a
-    // planner holds has one where the queue reads its sessions. An old plan
-    // no Building line will take either (/code-review). A plan whose file the
-    // queue cannot read (`not read by the queue`) is held, by the same rule:
-    // no Building line has taken it (plans/planner-holds-unread-plan.md).
+    // An idle planner with a brief under way is started beside, not replaced:
+    // retiring it would orphan that brief. So is one that holds a plan no
+    // Building line has taken yet, at the timer too: "A chat holds every plan
+    // it wrote until a Building line takes it" (docs/workflow.md, "A planner
+    // with room left takes the next brief"). A plan whose standing is not
+    // known is not counted: every path a planner holds has one where the
+    // queue reads its sessions. An old plan no Building line will take
+    // either. A plan whose file the queue cannot read (`not read by the
+    // queue`) is held, by the same rule: no Building line has taken it.
     const untaken = (state) =>
       Boolean(state) &&
       !["built", "dropped", "gone", "old"].includes(state) &&
@@ -2494,12 +2468,12 @@ export function canStart({
   if (sessions.length) {
     const first = sessions[0];
     const alive = sessions.map(describeSession).join("; ");
-    // **A brief left with a live planner is leased to it** (plans/briefs-
-    // reach-a-free-planner.md, parts 1 and 2): an idle one with room is sent
-    // the brief by message, which starts its turn and its prompt hook; a busy
-    // one is sent nothing, since a message reaches a busy chat between its
-    // tool calls, where no hook judges it, and its Stop hook names the next
-    // brief. Either way it has thirty minutes to take it.
+    // **A brief left with a live planner is leased to it**
+    // (decisions.md#brief-leased): an idle one with room is sent the brief by
+    // message, which starts its turn and its prompt hook; a busy one is sent
+    // nothing, since a message reaches a busy chat between its tool calls,
+    // where no hook judges it, and its Stop hook names the next brief. Either
+    // way it has thirty minutes to take it.
     if (kind === "planner") {
       const room = sessions.filter((one) => stale(one).reuse);
       const taker = room.find(idle) || room[0];
@@ -2507,8 +2481,8 @@ export function canStart({
       const who = `${taker.name} [${String(taker.sessionId).slice(0, 8)}]`;
       const until = ` It has until ${hhmm(now + ANSWER_WINDOW)} to take it; then a fresh planner is started on it.`;
       const planning = taker.on ? `, planning ${taker.on}` : "";
-      // **Each brief its own lease** (plans/brief-lease-per-brief.md, part
-      // 1): its holder, whether it was sent by message, and the time printed.
+      // **Each brief its own lease** (decisions.md#brief-leased): its holder,
+      // whether it was sent by message, and the time printed.
       const leased = { holder: taker.sessionId, until: now + ANSWER_WINDOW };
       return idle(taker)
         ? {
@@ -2550,7 +2524,7 @@ export function canStart({
   const fresh = usage && usage.at && now - usage.at * 1000 <= USAGE_STALE;
   if (!fresh) {
     note = usage?.at
-      ? `Usage unknown: the status line has not written since ${new Date(usage.at * 1000).toTimeString().slice(0, 5)}.`
+      ? `Usage unknown: the status line has not written since ${hhmm(usage.at * 1000)}.`
       : "Usage unknown: the status line has not written the usage file.";
   } else {
     const over = windowOver(usage, now);
@@ -2563,23 +2537,21 @@ export function canStart({
       };
     }
   }
-  // **The two refusals the owner decides** (plans/loop-guard-counts-
-  // failures.md, parts 1 and 2): a quick death, and the last five starts of
-  // the kind in a day all made since the newest progress, a circuit
-  // breaker's failures in a row. A busy day of sessions that each did
-  // something is never a loop; among the five, a start whose session is
-  // still at work (one this start goes beside) has not ended. The quick
-  // death's condition is as it was. With his word (`said`) neither
-  // refuses: the decision carries `past`, the finding of the first that
-  // would have, and every check above has answered as before.
+  // **The two refusals the owner decides** (decisions.md#starts-bounded): a
+  // quick death, and the last five starts of the kind in a day all made
+  // since the newest progress, a circuit breaker's failures in a row. A
+  // busy day of sessions that each did something is never a loop; among the
+  // five, a start whose session is still at work (one this start goes
+  // beside) has not ended. With his word (`said`) neither refuses: the
+  // decision carries `past`, the finding of the first that would have.
   const done = { planner: "planned", assistant: "written" }[kind] || "built";
   // A planner's or an assistant's start names its agent, as `plans start
   // --agent planner <brief>` does, so the command it gives starts the same
-  // kind (/code-review).
+  // kind.
   const agentFlag = kind === "executor" ? "" : `--agent ${kind} `;
   const decides = `${owner()} decides: a yes starts one more, by plans start ${agentFlag}--owner-said "<the words>".`;
   const findings = [];
-  // Nor an executor at work in another number (plans/parallel-executors.md, part 5).
+  // Nor an executor at work in another number.
   const going = new Set([...beside.map((one) => one.name), ...elsewhere]);
   const last = log.filter((line) => !going.has(line.name)).at(-1);
   if (last && now - last.at < QUICK_DEATH && progressAt <= last.at)
@@ -2592,9 +2564,9 @@ export function canStart({
   if (since.length >= LOOP_RUN)
     findings.push(`The last five ${kind}s ended with nothing ${done}; something is looping.`);
   if (findings.length && !said) return { refuse: true, why: `${findings[0]} ${decides}` };
-  // From 1 in a project with none started yet (/code-review, 27 October).
-  // The live list counts too: the log can be reset (a marketplace move) while
-  // a session it named is still alive.
+  // From 1 in a project with none started yet. The live list counts too: the
+  // log can be reset (a marketplace move) while a session it named is still
+  // alive.
   const n =
     Math.max(0, ...[...log.map((line) => line.name), ...taken].map((one) => ours(one)?.n || 0)) + 1;
   const besideNote = beside
@@ -2613,10 +2585,8 @@ export function canStart({
 }
 
 /**
- * The hook's Handing over section for a session the usage limit cut off, the
- * plan's Building line taken out. **It goes after the header paragraph**, as
- * the executor's does (plans/handed-plan-stays-in-queue.md), wherever the
- * Building line was; with no header found, in the Building line's place.
+ * The hook's Handing over section for a session the usage limit cut off, put
+ * in place of its Building line by `handOverEdit`.
  */
 export function cutoffEdit(text, { sessionId, branch, tree = "", day = today() }) {
   return handOverEdit(
@@ -2627,11 +2597,11 @@ export function cutoffEdit(text, { sessionId, branch, tree = "", day = today() }
 
 /**
  * What `plans end <id> --now` writes into the plan or brief the ended session
- * had under way (plans/end-a-stuck-chat.md), so the queue resumes it: a plan
- * gets a Handing over section in place of its Building line and reads
- * `handed`; a brief only loses its Planning line and is a brief again, since
- * a Handing over line would read as an executor's taking (`planTaken`).
- * Text with no such line of the session's is returned as it is.
+ * had under way (decisions.md#end-now), so the queue resumes it: a plan gets
+ * a Handing over section in place of its Building line and reads `handed`; a
+ * brief only loses its Planning line and is a brief again, since a Handing
+ * over line would read as an executor's taking (`planTaken`). Text with no
+ * such line of the session's is returned as it is.
  */
 export function endedEdit(text, { sessionId, by, branch = "", tree = "", day = today() }) {
   const planning = new RegExp(
@@ -2649,9 +2619,8 @@ export function endedEdit(text, { sessionId, by, branch = "", tree = "", day = t
 
 /**
  * What a start writes into the plan of an executor it finds with no process
- * (plans/put-first-review-fixes.md, part 6), so the fresh executor resumes it:
- * a Handing over section in place of the Building line, as `plans end --now`
- * writes one.
+ * (decisions.md#plan-put-first), so the fresh executor resumes it: a Handing
+ * over section in place of the Building line, as `plans end --now` writes one.
  */
 export function goneEdit(text, { sessionId, branch = "", tree = "", day = today() }) {
   const where = branch ? `, on branch \`${branch}\`${treeWords(tree)}` : "";
@@ -2661,7 +2630,7 @@ export function goneEdit(text, { sessionId, branch = "", tree = "", day = today(
   );
 }
 
-/** **A hand-over names its worktree** (plans/parallel-executors.md, part 7), after the branch. */
+/** **A hand-over names its worktree**, after the branch. */
 function treeWords(tree) {
   return tree ? ` in worktree \`${tree}\`` : "";
 }
@@ -2669,8 +2638,8 @@ function treeWords(tree) {
 /**
  * A hand-over `section` in place of the Building line. **It goes after the
  * header paragraph**, as the executor's does
- * (plans/handed-plan-stays-in-queue.md), wherever the Building line was; with
- * no header found, in its place.
+ * (decisions.md#plan-state-in-file), wherever the Building line was; with no
+ * header found, in its place.
  */
 function handOverEdit(text, section) {
   const building = /^## Building, [^\n]*(?:\n[ \t]*(?=\n))?\n?/m;
@@ -2687,11 +2656,11 @@ function handOverEdit(text, section) {
 }
 
 /**
- * **Where a header paragraph ends** (plans/put-first-review-fixes.md, part
- * 1): `[header, end]`, the index of the first line matching `pattern` and
- * the index of the blank line, or the heading written straight under it,
- * that ends its paragraph; -1 for either with none. A hand-over and a First
- * line both go there.
+ * **Where a header paragraph ends** (decisions.md#plan-put-first):
+ * `[header, end]`, the index of the first line matching `pattern` and the
+ * index of the blank line, or the heading written straight under it, that
+ * ends its paragraph; -1 for either with none. A hand-over and a First line
+ * both go there.
  */
 function headerEnd(lines, pattern) {
   const header = lines.findIndex((line) => pattern.test(line));
@@ -2700,6 +2669,17 @@ function headerEnd(lines, pattern) {
     header,
     lines.findIndex((line, i) => i > header && (line.trim() === "" || /^## /.test(line))),
   ];
+}
+
+/** When a session cut off at a usage limit is started again: just past its window's reset, in milliseconds. */
+function startAfterReset(transcriptPath) {
+  let transcript = "";
+  try {
+    transcript = readFileSync(transcriptPath, "utf8").slice(-200_000);
+  } catch {
+    // No transcript: the usage file alone says when.
+  }
+  return (resetTime(readJson(files.usage()), transcript) + AFTER_RESET) * 1000;
 }
 
 /** When a cut-off session's window resets: the usage file's window over its threshold, else the transcript's last `resetsAt`. */
@@ -2745,24 +2725,16 @@ function plannedAt(plans) {
 
 /**
  * What a planner the queue starts is told: the brief's path and what it is;
- * the agent file says the rest (plans/simpler-agents.md, part 3).
+ * the agent file says the rest.
  */
 export function plannerPrompt(path) {
   return `Plan ${path}: it is a brief.`;
 }
 
 /**
- * The executor's message to an assistant chat on a built plan's follow-ups
- * (`executor.md`, "After"), which a start beside an open chat prints.
- */
-export function followUpsMessage(path) {
-  return assistantPrompt(path);
-}
-
-/**
  * What an assistant chat the queue starts is told
- * (plans/project-follow-ups-reach-the-project.md, part 6): the plan whose
- * "Built" holds the items; the agent file says the way through them.
+ * (decisions.md#leave-back-as-brief): the plan whose "Built" holds the
+ * items; the agent file says the way through them.
  */
 export function assistantPrompt(path) {
   return `Follow-ups ready: ${path}.`;
@@ -2772,10 +2744,10 @@ export function assistantPrompt(path) {
  * The newest brief or waiting plan, or the log of decisions taken: what an
  * assistant writes, its progress for the quick-death rule. A built plan is
  * not one: the executor writes its "Built" just before it starts an
- * assistant (/code-review). An assistant handed only a decision to log
- * writes the log alone (plans/executor-never-waits.md, /code-review). **A
- * note from GitHub it handled counts** (plans/loop-guard-counts-failures.md,
- * part 5): answering a comment or rerunning a job writes no plan.
+ * assistant. An assistant handed only a decision to log writes the log alone
+ * (decisions.md#executor-never-waits). **A note from GitHub it handled
+ * counts** (decisions.md#starts-bounded): answering a comment or rerunning a
+ * job writes no plan.
  */
 export function writtenAt(
   plans,
@@ -2818,7 +2790,7 @@ function openAssistants(rows, project) {
 
 /** "plans/a.md, plans/b.md (until 14:02)", a deferral as the pause and the resume say it. */
 function deferredWords(deferred) {
-  return `${(deferred.paths || []).join(", ")} (until ${new Date(deferred.until).toTimeString().slice(0, 5)})`;
+  return `${(deferred.paths || []).join(", ")} (until ${hhmm(deferred.until)})`;
 }
 
 function pausedSince() {
@@ -2842,14 +2814,13 @@ const TEMP_FILE =
 
 /**
  * **`plans` sweeps the plugin's per-session temp files**
- * (plans/shared-count-fixes.md, part 4; decisions.md#reuse-check-cheap):
- * every file in `dir` named `workflow-<kind>-<id>.<ext>` of the plugin's own
- * kinds (the queue's state, the seen log, the turn audit's, the plain-words
- * count, the catalogue's, the tool denials', the test runs' stop logs) older
- * than `age` whose id is no live session's, of any project, is removed, since nothing else removes one: 8,611 of them in
- * /tmp on 6 November, 5,221 older than two days. A folder is never removed,
- * an error passes that file over. A command's work, never a hook's. Returns
- * how many were removed.
+ * (decisions.md#shared-is-what-is-held, decisions.md#reuse-check-cheap): every
+ * file in `dir` named `workflow-<kind>-<id>.<ext>` of the plugin's own kinds
+ * (the queue's state, the seen log, the turn audit's, the plain-words count,
+ * the catalogue's, the tool denials', the test runs' stop logs) older than
+ * `age` whose id is no live session's, of any project, is removed, since
+ * nothing else removes one. A folder is never removed, an error passes that file over. A
+ * command's work, never a hook's. Returns how many were removed.
  */
 export function sweepTemp({ dir = tmpdir(), live = [], now = Date.now(), age = DAY_MS } = {}) {
   const keep = new Set(live);
@@ -2876,7 +2847,7 @@ export function sweepTemp({ dir = tmpdir(), live = [], now = Date.now(), age = D
   return removed;
 }
 
-/** An executor's first prompt: the plans, or the handed plan to resume (plans/simpler-agents.md, part 3). */
+/** An executor's first prompt: the plans, or the handed plan to resume. */
 export function startPrompt(path, plans) {
   const handed = plans.find((plan) => plan.state === "handed" && plan.path === path);
   if (handed) return `Resume ${handed.path} from its "Handing over" section.`;
@@ -2884,23 +2855,20 @@ export function startPrompt(path, plans) {
 }
 
 /** The words for a plan another executor has claimed. */
-export function claimedWords(path, one) {
+function claimedWords(path, one) {
   return `${path} is ${one.name || "an executor"}'s [${String(one.holder).slice(0, 8)}], taken at ${hhmm(one.at)}: leave it.`;
 }
 
 /**
- * A started chat's environment: this one without five variables. A node
- * child of the command inherits them all, a chat none: `WORKFLOW_ROOT` is the
+ * A started chat's environment: this one without five variables. A node child
+ * of the command inherits them all, a chat none: `WORKFLOW_ROOT` is the
  * command's; `CLAUDE_PROJECT_DIR`, `CLAUDE_PLUGIN_ROOT` and
  * `CLAUDE_PLUGIN_DATA` are what a hook is exported, and a carried one reaches
- * the new chat's Bash tool naming another project or plugin (the plugin data
- * named the Codex plugin's directory, and the starts log went there); and
+ * the new chat's Bash tool naming another project or plugin; and
  * `CLAUDE_SESSION_ID`, which `plans pause` records, is the starting chat's.
  * **Nor the plugins' `bin` folders on its PATH**: Claude Code adds each
  * enabled plugin's after the PATH it inherits, so a chat started from one
- * that began on an older version ran that version's `plans` first, and its
- * start never cleared the asking deferral, which it did not know
- * (plans/research-order-and-asking-cleared.md).
+ * that began on an older version would run that version's `plans` first.
  */
 export function sessionEnv(env = process.env) {
   const {
@@ -3014,14 +2982,14 @@ function stopLater(sessionId, live) {
   }
   detached(process.execPath, [
     "-e",
-    `setTimeout(() => { try { require("node:child_process").execFileSync("claude", ["stop", ${JSON.stringify(row.id || sessionId)}], { stdio: "ignore" }); } catch {} }, 180000)`,
+    `setTimeout(() => { try { require("node:child_process").execFileSync(${JSON.stringify(claudeBin())}, ["stop", ${JSON.stringify(row.id || sessionId)}], { stdio: "ignore" }); } catch {} }, 180000)`,
   ]);
 }
 
 /**
  * `claude stop` now, which keeps the conversation; the tests' log records the
  * id instead. True when it stopped: a failed stop is said, never reported as
- * an end (Codex, 27 October).
+ * an end.
  */
 function stopNow(id) {
   if (process.env.WORKFLOW_STOP_LOG) {
@@ -3054,20 +3022,25 @@ function commandOf(pid) {
 }
 
 /**
- * Kills the end timer the queue armed for `sessionId`, and only it: a pid is
- * signalled only while its command line is that timer's, since a timer gone
- * leaves its pid to be reused (Codex, 27 October).
+ * Kills a timer the queue armed, and only it: never this process, and a pid
+ * only while its command line matches `pattern`, since a timer gone leaves
+ * its pid to be reused.
  */
-function killTimer(pid, sessionId) {
-  if (!pid || pid === process.pid) return;
-  const command = commandOf(pid);
-  if (!/plan-queue\.mjs end --timer /.test(command) || !command.includes(sessionId)) return;
+function killTimer(pid, pattern) {
+  if (!pid || pid === process.pid || !pattern.test(commandOf(pid))) return;
   try {
     process.kill(pid);
   } catch {
     // The timer is gone already.
   }
 }
+
+/** The command line of a deferral's timer. */
+const START_TIMER = /plan-queue\.mjs start --timer /;
+
+/** The command line of `sessionId`'s end timer. */
+const endTimer = (sessionId) =>
+  new RegExp(`plan-queue\\.mjs end --timer .*${sessionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
 
 /** A timer's own registration, cleared when it has fired, whatever it decided. */
 function clearEnd(sessionId, pid = process.pid) {
@@ -3078,20 +3051,20 @@ function clearEnd(sessionId, pid = process.pid) {
 }
 
 /**
- * **The end timer, armed at each stop** (plans/idle-chats-end.md, part 2):
- * `plan-queue.mjs end --timer <at> <sessionId>`, `defer`'s shape, its pid
- * and time in the session's state as `end`, so a chat of a hundred turns has
- * one sleeping timer, not a hundred. `at` is the cache's life from now: when
- * it fires the last turn is past `WARM`, and `decideEnd` judges it.
+ * **The end timer, armed at each stop**: `plan-queue.mjs end --timer <at>
+ * <sessionId>`, `defer`'s shape, its pid and time in the session's state as
+ * `end`, so a chat of a hundred turns has one sleeping timer, not a hundred.
+ * `at` is the cache's life from now: when it fires the last turn is past
+ * `WARM`, and `decideEnd` judges it.
  */
 function armEnd(sessionId, live = null, at = Date.now() + CACHE_TTL) {
   // The owner's interactive chat (tmux) is never the queue's to end, so it
-  // has no timer and its line no end time (/code-review, 27 October).
+  // has no timer and its line no end time.
   const row = live?.find((r) => r.sessionId === sessionId);
   if (row && row.kind !== "background") return;
   const statePath = files.state(sessionId);
   const state = readJson(statePath) || {};
-  killTimer(state.end?.pid, sessionId);
+  killTimer(state.end?.pid, endTimer(sessionId));
   // The tests' record of the timer, as `stopLater` records stops.
   let pid = null;
   if (process.env.WORKFLOW_STOP_LOG)
@@ -3135,7 +3108,7 @@ function endSwarm(pid) {
  * way: `Ended <name> [<8 hex>]: done, <usage>.` or `Not ended: <name> [<8
  * hex>], <why>.`; `ended` says which.
  */
-export function endSession(
+function endSession(
   sessionId,
   { force = false, immediate = false, live = liveSessions({ fresh: true }) } = {},
 ) {
@@ -3155,7 +3128,7 @@ export function endSession(
   if (!stopNow(row.id || sessionId))
     return { ended: false, line: `Not ended: ${who}, claude stop failed.` };
   endSwarm(row.pid);
-  killTimer(state.end?.pid, sessionId);
+  killTimer(state.end?.pid, endTimer(sessionId));
   clearEnd(sessionId, null);
   const kind = state.agent === "planner" ? "planner" : "executor";
   const words = [
@@ -3164,10 +3137,10 @@ export function endSession(
     usageWords({ kind, usage, fallback: proj().reuse[kind], inputs: reuseNow() }),
   ].filter(Boolean);
   const line = `Ended ${who}: ${words.join(", ")}.`;
-  // **An ended executor holds nothing** (plans/executor-takes-next-ready-
-  // plan.md, part 2): its lock released and its state retired, so the start
-  // the end timer makes on ready plans does not count it as alive while its
-  // process winds down.
+  // **An ended executor holds nothing**
+  // (decisions.md#plans-reach-an-executor): its lock released and its state
+  // retired, so the start the end timer makes on ready plans does not count
+  // it as alive while its process winds down.
   if (
     parseName(row.name || "")?.kind === "executor" ||
     readLocks().some((lock) => lock.sessionId === sessionId)
@@ -3212,7 +3185,7 @@ export function endSession(
  * hex `plans` prints. `immediate` (`--now`) ends the named ones whatever they
  * are doing, and only named ones. One line per session.
  */
-export function endCommand(ids = [], { immediate = false } = {}) {
+function endCommand(ids = [], { immediate = false } = {}) {
   if (immediate && !ids.length)
     return "Not ended: name the chat to end now (plans end <id> --now); plans lists them.";
   const live = liveSessions({ fresh: true });
@@ -3246,8 +3219,9 @@ export function endCommand(ids = [], { immediate = false } = {}) {
   // Each line above says why a session was not ended; with none alive, this says so.
   if (!ids.length && !targets.length)
     lines.push("Nothing to end: no finished chat of this queue is alive.");
-  // **Ready plans never wait with no executor** (plans/executor-takes-next-
-  // ready-plan.md, part 2), unless a handover above started one already.
+  // **Ready plans never wait with no executor**
+  // (decisions.md#plans-reach-an-executor), unless a handover above started
+  // one already.
   const net = handed ? "" : startOnReady();
   if (net) lines.push(net);
   return lines.join("\n");
@@ -3291,13 +3265,7 @@ function defer(
   said = "",
 ) {
   const old = readJson(files.deferred(file));
-  if (old?.pid) {
-    try {
-      process.kill(old.pid);
-    } catch {
-      // The old timer is gone already.
-    }
-  }
+  killTimer(old?.pid, START_TIMER);
   // One timer for every deferred plan, at the later time, so a new
   // deferral never drops a pending one; and never in the past, so a timer
   // cannot fire straight into another deferral. The window's is at the
@@ -3309,9 +3277,9 @@ function defer(
       ? Math.max(Math.min(until, old?.until || Infinity), Date.now() + MINUTE)
       : Math.max(until, old?.until || 0, Date.now() + MINUTE);
   const stop = replace || old?.replace || "";
-  // **A deferred start keeps the owner's word** (plans/loop-guard-counts-
-  // failures.md, part 4): the timer removes this file before it starts, so
-  // the word goes on its command line.
+  // **A deferred start keeps the owner's word**
+  // (decisions.md#starts-bounded): the timer removes this file before it
+  // starts, so the word goes on its command line.
   const word = said || old?.said || "";
   const held = Boolean(pausedSince());
   // The timer runs as the command, so its root is said: this project's.
@@ -3343,33 +3311,22 @@ function defer(
     ...(because ? { retired: because } : {}),
     ...(word ? { said: word } : {}),
   });
-  const hhmm = new Date(when).toTimeString().slice(0, 5);
+  const time = hhmm(when);
   return held
-    ? `Deferred until ${hhmm}, held while the queue is paused: ${why}; ${all.join(", ")}.`
-    : `Deferred until ${hhmm}: ${why}; ${all.join(", ")}.`;
+    ? `Deferred until ${time}, held while the queue is paused: ${why}; ${all.join(", ")}.`
+    : `Deferred until ${time}: ${why}; ${all.join(", ")}.`;
 }
 
 /**
  * **Each brief left with a planner has its own lease**
- * (plans/brief-lease-per-brief.md, part 1): `.claude/handed.deferred` is a
- * table, one entry per brief with its own `until`, `why`, `holder` (the
- * planner's session id) and `held` (sent by message), as SQS gives each
- * message its own visibility timeout. `until`, `pid` and `paths` stay at the
- * top, so `pause`, `resume` and `list` read it as the other deferrals.
+ * (decisions.md#brief-leased): `.claude/handed.deferred` is a table, one
+ * entry per brief with its own `until`, `why`, `holder` (the planner's
+ * session id) and `held` (sent by message), as SQS gives each message its
+ * own visibility timeout. `until`, `pid` and `paths` stay at the top, so
+ * `pause`, `resume` and `list` read it as the other deferrals.
  */
 export function leases() {
   return readJson(files.deferred("handed"))?.leases || {};
-}
-
-/** Kills a deferral's timer, and only one: never this process, never a pid reused since. */
-function killDeferTimer(pid) {
-  if (!pid || pid === process.pid) return;
-  if (!/plan-queue\.mjs start --timer /.test(commandOf(pid))) return;
-  try {
-    process.kill(pid);
-  } catch {
-    // The old timer is gone already.
-  }
 }
 
 /**
@@ -3379,7 +3336,7 @@ function killDeferTimer(pid) {
  */
 function writeLeases(table) {
   const old = readJson(files.deferred("handed"));
-  killDeferTimer(old?.pid);
+  killTimer(old?.pid, START_TIMER);
   const paths = Object.keys(table);
   if (!paths.length) {
     try {
@@ -3436,8 +3393,8 @@ function leaseLines(deferred) {
 
 /**
  * **A brief sent by message is its planner's for the lease**
- * (plans/brief-lease-per-brief.md, part 3), as an acknowledged incident is
- * its responder's: the briefs waiting, less those whose lease is `held` by a
+ * (decisions.md#brief-leased), as an acknowledged incident is its
+ * responder's: the briefs waiting, less those whose lease is `held` by a
  * live, unretired planner other than `self` and `replace`, and not yet ended.
  * A lease waiting for a busy planner leaves its brief free, so whichever
  * planner stops first with room takes it. With the sessions unread, a held
@@ -3468,37 +3425,39 @@ export function freeBriefs(
 }
 
 /**
- * Starts a fresh executor on `paths`, or says why not. The only thing that
- * starts executors and planners: the planner, the assistant, the Stop and StopFailure hooks
- * and the timer all come here.
+ * Starts a fresh session on `paths`, or says why not: the one thing that
+ * starts executors, planners and assistant chats. `plans start` (typed by
+ * the owner or an agent) and its timers, the Stop and StopFailure hooks, the
+ * prompt hook's start on ready plans (`startOnReady`), `plans end --now`'s
+ * hand-over (`endSession`) and a GitHub note's assistant (`handleEvents`)
+ * all come here.
  */
 export function start(paths, options = {}) {
-  // A project that is not the workflow's is left as it is (Codex, 27 October).
+  // A project that is not the workflow's is left as it is.
   if (!proj().found) return NO_PROJECT;
   if (proj().form === "compact") return COMPACT;
-  // **The checkout follows test first** (part 3 of plans/queue-counts-any-
-  // executor.md), so the executor started runs the queue's newest hooks; not
-  // for a dry run or a deferred one, which nobody is watching. A start that
-  // replaces a session comes from a hook, so it moves without fetching.
-  // One that does not sync still ignores the queue's files, so the
-  // executor it starts finds the checkout clean.
+  // **The checkout follows test first**, so the executor started runs the
+  // queue's newest hooks; not for a dry run or a deferred one, which nobody
+  // is watching. A start that replaces a session comes from a hook, so it
+  // moves without fetching. One that does not sync still ignores the queue's
+  // files, so the executor it starts finds the checkout clean.
   const synced = options.dry
     ? ""
     : options.timer || options.at > Date.now()
       ? ignoreQueueFiles(primaryCheckout())
       : sync({ fetch: !options.replace });
   const said = startHere(paths, options);
-  // **The listener is armed with a start** (plans/github-watched.md, part 1).
+  // **The listener is armed with a start** (decisions.md#github-webhook).
   if (!options.dry) armWebhook().catch(() => {});
   return synced ? `${synced}\n${said}` : said;
 }
 
-/** How long a hook's \`executor.starting\` marker holds off another: a launch takes ten seconds. */
-export const STARTING_SPAN = 2 * MINUTE;
+/** How long a hook's `executor.starting` marker holds off another: a launch takes ten seconds. */
+const STARTING_SPAN = 2 * MINUTE;
 
 /**
- * **A plan's header paragraph** (plans/parallel-executors.md, part 3): from
- * its `Plan only` or `Short plan` line to the next blank line.
+ * **A plan's header paragraph**: from its `Plan only` or `Short plan` line
+ * to the next blank line.
  */
 function headerParagraph(text = "") {
   const lines = text.split("\n");
@@ -3523,29 +3482,29 @@ function topicOf(plan) {
 }
 
 /** The files a plan changes: those named under "The change, part by part" and "Building it", else in its text but a `## For ` section. */
-export function changedFiles(text = "") {
+function changedFiles(text = "") {
   const parts = [/^## The change, part by part/m, /^## Building it/m]
     .map((heading) => sectionAfter(text, heading))
     .join("\n");
   const text2 = parts.trim() ? parts : text.replace(/^## For [\s\S]*?(?=^## |(?![\s\S]))/gm, "");
-  // A file at the repository's root, named in backticks (`package.json`; Codex C9).
+  // A file at the repository's root, named in backticks (`package.json`).
   const root = [...text2.matchAll(/`([\w-][\w.-]*\.\w+)`/g)].map((m) => m[1]);
   return [...new Set([...pathsIn(text2), ...root])];
 }
 
 /**
- * **A plan waits on another** (plans/parallel-executors.md, part 3;
- * decisions.md#plan-waits-on): each ready or handed plan not asking, in the
- * queue's order, with `waitsOn: { path, why }` or `null`. It waits on a plan
- * its header paragraph names that is not built (ready, asking, planned,
- * handed or building), two that name each other holding neither; and on a
- * plan in progress (building by a live session, handed over, or claimed) that
- * lands on its topic, or is one of the day's fixes as it is, or changes a
- * file it changes. A plan held is passed over, never reordered.
+ * **A plan waits on another** (decisions.md#plan-waits-on): each ready or
+ * handed plan not asking, in the queue's order, with `waitsOn: { path, why }`
+ * or `null`. It waits on a plan its header paragraph names that is not built
+ * (ready, asking, planned, handed or building), two that name each other
+ * holding neither; and on a plan in progress (building by a live session,
+ * handed over, or claimed) that lands on its topic, or is one of the day's
+ * fixes as it is, or changes a file it changes. A plan held is passed over,
+ * never reordered.
  */
 export function freePlans(plans, { claims = {} } = {}) {
   const byPath = new Map(plans.map((plan) => [plan.path, plan]));
-  // A brief or a plan still being planned is not built either (Codex C10).
+  // A brief or a plan still being planned is not built either.
   const unbuilt = ["ready", "planned", "handed", "building", "brief", "planning"];
   const inProgress = plans.filter(
     (plan) => plan.state === "building" || plan.state === "handed" || claims[plan.path],
@@ -3584,17 +3543,17 @@ export function freePlans(plans, { claims = {} } = {}) {
 }
 
 /** The words for a plan that waits, as `plans start <path>` says them. */
-export function waitsWords(plan) {
+function waitsWords(plan) {
   return `${plan.path} waits on ${plan.waitsOn.path} (${plan.waitsOn.why}): it is taken once that one is built.`;
 }
 
 /**
- * **A plan is claimed before it is taken** (plans/parallel-executors.md, part
- * 4): `.claude/executor.claims.json`, a path to `{ holder, name, at, until }`.
- * A claim ends with its plan's Building line, its holder gone from `claude
- * agents` (when they could be read), or `until`. The live claims.
+ * **A plan is claimed before it is taken**: `.claude/executor.claims.json`, a
+ * path to `{ holder, name, at, until }`. A claim ends with its plan's Building
+ * line, its holder gone from `claude agents` (when they could be read), or
+ * `until`. The live claims.
  */
-export function readClaims(plans = [], live = null, now = Date.now()) {
+function readClaims(plans = [], live = null, now = Date.now()) {
   const table = readJson(files.claims()) || {};
   return Object.fromEntries(
     Object.entries(table).filter(([path, one]) => {
@@ -3665,12 +3624,11 @@ function ownTree(plan, executors, trees = null) {
 }
 
 /**
- * **Who takes a plan** (plans/parallel-executors.md, part 5): `{ number,
- * session }`, `session` the live unretired executor there or null; a handed
- * plan its own worktree's number while that number is within `executors` and
- * its worktree is there, else the lowest number that is free, one with no
- * live unretired executor or with one that is idle, has no plan building and
- * holds no claim; null when none is.
+ * **Who takes a plan**: `{ number, session }`, `session` the live unretired
+ * executor there or null; a handed plan its own worktree's number while that
+ * number is within `executors` and its worktree is there, else the lowest
+ * number that is free, one with no live unretired executor or with one that
+ * is idle, has no plan building and holds no claim; null when none is.
  */
 export function takerFor(
   plan,
@@ -3698,20 +3656,20 @@ function readyForExecutor(plans) {
 }
 
 /**
- * **Ready plans never wait with no executor** (plans/executor-takes-next-
- * ready-plan.md, part 2): a planner's or an assistant's Stop hook, a retired
- * executor's, and the end timer start one when plans are ready and none is
- * alive. A cheap gate first, no sessions read: the project found and not
- * compact, the queue not paused, a ready or handed plan on disk, or one whose
- * Building line may be a dead session's, and the lock absent, released, or
- * held by a pid that is dead or unknown (a lock with no pid is judged by the
- * sessions, in \`canStart\`). Then a marker created exclusively, its stale
- * one reclaimed under a guard, so two hooks at one moment start one executor,
- * and \`start\` with its bounds ("Starts are bounded"). The line \`start\`
- * returns when it started one, else "": a refusal or a deferral is said by
- * \`plans\`, not at every stop.
+ * **Ready plans never wait with no executor**
+ * (decisions.md#plans-reach-an-executor): a planner's or an assistant's Stop
+ * hook, a retired executor's, and the end timer start one when plans are
+ * ready and none is alive. A cheap gate first, no sessions read: the project
+ * found and not compact, the queue not paused, a ready or handed plan on
+ * disk, or one whose Building line may be a dead session's, and the lock
+ * absent, released, or held by a pid that is dead or unknown (a lock with no
+ * pid is judged by the sessions, in `canStart`). Then a marker created
+ * exclusively, its stale one reclaimed under a guard, so two hooks at one
+ * moment start one executor, and `start` with its bounds ("Starts are
+ * bounded"). The line `start` returns when it started one, else "": a refusal
+ * or a deferral is said by `plans`, not at every stop.
  */
-export function startOnReady({ now = Date.now(), alive = pidAlive } = {}) {
+function startOnReady({ now = Date.now(), alive = pidAlive } = {}) {
   if (!proj().found || proj().form === "compact" || pausedSince()) return "";
   // A start already deferred to the window's reset has its timer: none again.
   const deferred = readJson(files.deferred("executor"));
@@ -3784,8 +3742,8 @@ export function startOnReady({ now = Date.now(), alive = pidAlive } = {}) {
     // The net messages nobody: an idle chat in the taker's number is retired for a fresh one.
     const said = start([], { why: "plans were ready and no executor was alive", net: true });
     // Only a start is said at a stop: nothing waiting after all, a refusal or
-    // a deferral would repeat at every turn, and \`plans\` says on its first
-    // line why none starts (part 3).
+    // a deferral would repeat at every turn, and `plans` says on its first
+    // line why none starts.
     return /was started on/.test(said) ? said : "";
   } catch {
     return "";
@@ -3800,8 +3758,8 @@ export function startOnReady({ now = Date.now(), alive = pidAlive } = {}) {
 }
 
 /**
- * The first line's words for no executor alive (part 3): with plans ready,
- * that the next hook or timer starts one, or why none does, from \`canStart\`
+ * The first line's words for no executor alive: with plans ready,
+ * that the next hook or timer starts one, or why none does, from `canStart`
  * run dry.
  */
 function noneAliveWords(plans, live, { many = false } = {}) {
@@ -3827,7 +3785,7 @@ function noneAliveWords(plans, live, { many = false } = {}) {
     taken: [],
     machine: machine().name,
   });
-  // With several, none starts while no number is free (Codex C11).
+  // With several, none starts while no number is free.
   if (many) {
     const sessions = live ? sessionsOf("executor", live, readLocks(), { plans }) : [];
     const claims = readClaims(plans, live);
@@ -3843,9 +3801,9 @@ function noneAliveWords(plans, live, { many = false } = {}) {
 }
 
 /**
- * **The executors, numbered** (plans/parallel-executors.md, part 9), as a
- * Jenkins node lists its executors: a row per number with the session in
- * that worktree, `free` with none, and under them what the free plans wait for.
+ * **The executors, numbered**, as a Jenkins node lists its executors: a row per
+ * number with the session in that worktree, `free` with none, and under them
+ * what the free plans wait for.
  */
 function executorsTable(rows, plans, live) {
   const n = proj().executors;
@@ -3883,19 +3841,19 @@ export function agentEffort(agent, dir = join(here, "..", "agents")) {
 /** Whether a path is a note of what came from GitHub, `plans/github/<n>.md`, there. */
 const isNote = (path) => /^plans\/github\/\d+\.md$/.test(path) && existsSync(join(root, path));
 
-/** `plans start`'s refusal of a planned plan's path (plans/plans-as-github-issues.md, part 3). */
-export function plannedWords(plan) {
+/** `plans start`'s refusal of a planned plan's path. */
+function plannedWords(plan) {
   return `${plan.path} is planned and waits on GitHub (#${plan.issue}): it is built once the issue is labelled status: ready, or ${owner()} says so in the assistant's chat, which writes its "Ready" section.`;
 }
 
 /** `plans start`'s refusal of a dropped plan's path. */
-export function droppedWords(plan) {
+function droppedWords(plan) {
   return `${plan.path} is dropped${plan.droppedDay ? ` (${plan.droppedDay})` : ""}: nothing to build.`;
 }
 
 /**
  * A path as the queue writes it, so `./plans/x.md` or an absolute one is
- * judged as `plans/x.md` (Codex, 30 October).
+ * judged as `plans/x.md`.
  */
 function queuePath(path) {
   const inside = relative(root, resolve(root, path));
@@ -3905,21 +3863,21 @@ function queuePath(path) {
 }
 
 /**
- * **`plans first <path>` and `plans first --undo <path>`** (plans/priority-
- * queue.md, part 2; decisions.md#plan-put-first): on the owner's word, writes
- * `First: <date> <hh:mm:ss>.` as a paragraph of its own after the header
- * paragraph of a waiting plan or brief, in place of one already there, or
- * takes it out; the file's times are put back, so its place among the plans
- * of its day and its asking window stay as they were. It starts nobody.
- * `{ said, status }`.
+ * **`plans first <path>` and `plans first --undo <path>`**
+ * (decisions.md#plan-put-first): on the owner's
+ * word, writes `First: <date> <hh:mm:ss>.` as a paragraph of its own after
+ * the header paragraph of a waiting plan or brief, in place of one already
+ * there, or takes it out; the file's times are put back, so its place among
+ * the plans of its day and its asking window stay as they were. It starts
+ * nobody. `{ said, status }`.
  */
-export function firstCommand(args = [], { now = Date.now(), live } = {}) {
+function firstCommand(args = [], { now = Date.now(), live } = {}) {
   if (!proj().found) return { said: NO_PROJECT, status: 1 };
   if (proj().form === "compact") return { said: COMPACT, status: 1 };
   const undo = args.includes("--undo");
   const paths = args.filter((arg) => arg !== "--undo");
   // One mark at a time, and no option but --undo read as a path
-  // (plans/put-first-review-fixes.md, part 3).
+  // (decisions.md#plan-put-first).
   if (paths.length > 1 || paths.some((arg) => arg.startsWith("--")))
     return {
       said: "plans first takes one path at a time: plans first plans/<x>.md, or plans first --undo plans/<x>.md.",
@@ -3968,7 +3926,7 @@ export function firstCommand(args = [], { now = Date.now(), live } = {}) {
   } else {
     // The time as written, local, read as `firstOf` reads it; a second past
     // the latest mark of another waiting file when it is not later, so the
-    // latest put first is on top even within one second (Codex C3).
+    // latest put first is on top even within one second.
     const local = new Date(now);
     let at = Date.UTC(
       local.getFullYear(),
@@ -4004,31 +3962,26 @@ export function firstCommand(args = [], { now = Date.now(), live } = {}) {
 }
 
 /**
- * **Where `plans first` writes a file's First line** (decisions.md#plan-put-first):
- * after the header paragraph, as `handOverEdit` places a hand-over, or, with
- * `above`, when the header sits under a `## ` section, above the first one,
- * `heading`, where `firstHead` reads it (plans/put-first-review-fixes-follow-
- * up.md, plans/put-first-any-header-place.md). The
+ * **Where `plans first` writes a file's First line**
+ * (decisions.md#plan-put-first): after the header paragraph, as `handOverEdit`
+ * places a hand-over, or, with `above`, when the header sits under a `## `
+ * section, above the first one, `heading`, where `firstHead` reads it. The
  * header is the one `stateOf` read the file by, a plan's own, never a brief's
- * line kept above it (plans/put-first-review-fixes.md, part 1). `lines` are
- * the text's without its First line; `{ header, end, heading, above }`, the
- * first two as `headerEnd` gives them, `heading` as `headEndAt` does.
+ * line kept above it. `lines` are the text's without its First line; `{ header,
+ * end, heading, above }`, the first two as `headerEnd` gives them, `heading` as
+ * `headEndAt` does.
  *
- * `headerEnd` finds the header `stateOf` read (plans/put-first-any-header-
- * place.md, part 3): `withoutStatus` ends a status section at any line
- * `HEADER_LINE` matches and keeps that line, so the file's first line that
- * looks like a plan's header, or a brief's line, is the first `stateOf` sees,
- * with or without status sections above it. Its twelve lines only decide
- * whether the file is in the queue, and `firstCommand` calls this only for a
- * file `stateOf` read, with the kind it gave. A header-looking line quoted in
- * a status section is the header to both, and the line written under its
- * paragraph is still read and still undone.
+ * `headerEnd` finds the header `stateOf` read: `withoutStatus` ends a status
+ * section at any line `HEADER_LINE` matches and keeps that line, so the file's
+ * first line that looks like a plan's header, or a brief's line, is the first
+ * `stateOf` sees, with or without status sections above it. Its twelve lines
+ * only decide whether the file is in the queue, and `firstCommand` calls this
+ * only for a file `stateOf` read, with the kind it gave. A header-looking line
+ * quoted in a status section is the header to both, and the line written under
+ * its paragraph is still read and still undone.
  */
 function firstPlace(lines, kind) {
-  const [header, end] = headerEnd(
-    lines,
-    kind === "Brief" ? /^Brief for the planner\b/ : PLAN_HEADER,
-  );
+  const [header, end] = headerEnd(lines, kind === "Brief" ? BRIEF_HEADER : PLAN_HEADER);
   const heading = headEndAt(lines);
   return { header, end, heading, above: heading >= 0 && heading < header };
 }
@@ -4076,17 +4029,16 @@ function startHere(
 ) {
   if (!proj().found) return NO_PROJECT;
   paths = paths.map(queuePath);
-  // **The owner's word** (plans/loop-guard-counts-failures.md, part 2), as
-  // one line: it passes the two refusals he decides, and the log keeps it.
+  // **The owner's word** (decisions.md#starts-bounded), as one line: it
+  // passes the two refusals he decides, and the log keeps it.
   said = said.replace(/\s+/g, " ").trim();
   const live = liveSessions();
-  // **A start takes over from an executor with no process** (plans/put-
-  // first-review-fixes.md, part 6): each plan its Building line holds is
-  // read as handed over, so it is picked first and resumed. The hand-over is
+  // **A start takes over from an executor with no process**
+  // (decisions.md#plan-put-first): each plan its Building line holds is read
+  // as handed over, so it is picked first and resumed. The hand-over is
   // written only where the session is retired and its lock released below,
   // with the rest `canStart` replaces, and taken back with them when the
-  // launch fails; a refused, deferred or dry start writes nothing (Codex C1,
-  // C2; /code-review).
+  // launch fails; a refused, deferred or dry start writes nothing.
   const gone = {};
   let read = readPlans(join(root, "plans"), liveIds(live));
   if (agent === "executor" && live) {
@@ -4115,12 +4067,12 @@ function startHere(
   // for thirty minutes, neither taken by default nor accepted by path.
   const plans = withAsking(read, live);
   const kind = agent === "planner" || agent === "assistant" ? agent : "executor";
-  // **A planner takes one brief, the oldest** (plans/planner-queue.md); an
-  // executor every plan waiting.
+  // **A planner takes one brief, the oldest**; an executor every plan
+  // waiting.
   if (!paths.length && kind === "assistant")
     return "A built plan's path is needed: plans start --agent assistant plans/<x>.md; plans shows the built plans.";
   // The default pick never takes a brief sent by message to another live
-  // planner (plans/brief-lease-per-brief.md, part 3).
+  // planner (decisions.md#brief-leased).
   if (!paths.length)
     paths =
       kind === "planner"
@@ -4130,8 +4082,9 @@ function startHere(
         : readyForExecutor(plans).map((p) => p.path);
   if (!paths.length) return "Nothing is waiting in the queue.";
   if (kind === "executor") {
-    // **A dropped plan is nobody's to build** (plans/dropped-plan-state.md):
-    // named by path it is refused whole, with nothing started; a timer drops it below.
+    // **A dropped plan is nobody's to build**
+    // (decisions.md#plan-state-in-file): named by path it is refused whole,
+    // with nothing started; a timer drops it below.
     const dropped = plans.filter((p) => p.state === "dropped" && paths.includes(p.path));
     if (dropped.length && !timer) return dropped.map(droppedWords).join("\n");
     // **A planned plan waits for Ready**, refused by path the same way; the
@@ -4155,11 +4108,11 @@ function startHere(
         "asking",
       );
     if (!paths.length) return held.map(askingWords).join("\n");
-    // **A timer's start takes only what is still waiting**: a plan being
-    // built or built since the timer was armed, or gone, is dropped, and with
-    // none left nothing starts. A plan answered and still waiting is started.
-    // In the queue's order as it is now, so a plan put first after the
-    // deferral was written is still named first (plans/priority-queue.md, part 5).
+    // **A timer's start takes only what is still waiting**: a plan being built
+    // or built since the timer was armed, or gone, is dropped, and with none
+    // left nothing starts. A plan answered and still waiting is started. In the
+    // queue's order as it is now, so a plan put first after the deferral was
+    // written is still named first (decisions.md#plan-put-first).
     if (timer) {
       paths = plans
         .filter((p) => paths.includes(p.path) && ["ready", "handed", "old"].includes(p.state))
@@ -4167,9 +4120,9 @@ function startHere(
       if (!paths.length) return "Nothing is waiting in the queue.";
     }
   }
-  // **One plan, to the lowest-numbered free executor** (plans/parallel-
-  // executors.md, parts 2 and 5): the first of the paths that waits on no
-  // other and is claimed by nobody; a path named alone that waits says why.
+  // **One plan, to the lowest-numbered free executor**: the first of the
+  // paths that waits on no other and is claimed by nobody; a path named
+  // alone that waits says why.
   let number = 1;
   let messaged = "";
   if (kind === "executor" && agent === "executor") {
@@ -4212,7 +4165,7 @@ function startHere(
       takerFor(plan, { executors, sessions, claims, trees });
     const pick = open.find(takeOf);
     if (!pick) {
-      // A handed plan waits for its own worktree's executor (part 7).
+      // A handed plan waits for its own worktree's executor.
       const own = ownTree(open[0], executors, trees);
       if (own) {
         const there = sessions.find((one) => one.number === own && !one.retired);
@@ -4247,10 +4200,10 @@ function startHere(
     }
   }
   if (messaged) return messaged;
-  // **A lease's timer reads the table** (plans/brief-lease-per-brief.md, part
-  // 2): a lease whose brief is no longer one ends, the due ones are those
-  // past their own `until`, and the oldest due, in the plans' order, is the
-  // one started on; the rest keep their own times.
+  // **A lease's timer reads the table** (decisions.md#brief-leased): a lease
+  // whose brief is no longer one ends, the due ones are those past their own
+  // `until`, and the oldest due, in the plans' order, is the one started on;
+  // the rest keep their own times.
   const leaseTimer = kind === "planner" && timer && deferral === "handed";
   let due = [];
   if (leaseTimer) {
@@ -4280,7 +4233,7 @@ function startHere(
     const asked = paths[0];
     if (!plans.some((p) => p.path === asked && p.state === "brief"))
       return `${asked} is not a brief waiting for a planner; plans shows the briefs.`;
-    // **A brief sent by message is its holder's for the lease** (part 3):
+    // **A brief sent by message is its holder's for the lease**:
     // named by path, it is refused while another live planner holds it.
     if (!leaseTimer && !freeBriefs(plans, { live, replace }).some((p) => p.path === asked)) {
       const one = leases()[asked];
@@ -4292,7 +4245,7 @@ function startHere(
   if (kind === "assistant") {
     // An assistant is started on one built plan, whose "Built" holds the items.
     const asked = paths[0];
-    // Or a note of what came from GitHub (plans/github-watched.md, part 3).
+    // Or a note of what came from GitHub (decisions.md#github-webhook).
     if (!isNote(asked) && !plans.some((p) => p.path === asked && p.state === "built"))
       return `${asked} is not a built plan with follow-ups; plans shows the built plans.`;
     paths = [asked];
@@ -4310,76 +4263,73 @@ function startHere(
       why,
       said,
     );
-  const probe = !["executor", "planner", "assistant"].includes(agent);
   // A timer's start replacing a session takes the retirement's why its deferral kept.
   if (timer && replace && !why) why = readJson(files.deferred(deferral || kind))?.retired || "";
   // **A brief is judged against the planner it would go to**
-  // (plans/adaptive-reuse.md, part 2): read once, and each live session's
+  // (decisions.md#reuse-check-cheap): read once, and each live session's
   // ceiling is raised by what the work shares with it.
   const briefText = kind === "planner" ? plans.find((p) => p.path === paths[0])?.text || "" : "";
   const fallback = kind === "planner" ? proj().reuse.planner : proj().reuse.executor;
-  const inputs = probe || kind === "assistant" ? {} : reuseNow();
-  const decision = probe
-    ? { start: true, name: `Probe ${Date.now() % 1000}`, note: "" }
-    : canStart({
-        kind,
-        lock: readJson(files.lock(number)),
-        alive: () => holderAlive(readJson(files.lock(number)), live),
-        log: readLog(),
-        progressAt:
-          kind === "planner"
-            ? plannedAt(plans)
-            : kind === "assistant"
-              ? writtenAt(plans)
-              : progressAt(plans),
-        paused,
-        usage: readJson(files.usage()),
-        // The session being replaced and retired ones do not block their successor.
-        sessions:
-          kind === "assistant"
-            ? []
-            : sessionsOf(kind, live, readLocks(), { plans, fallback, inputs })
-                // An executor is judged against its number's sessions alone.
-                .filter((one) => kind !== "executor" || one.number === number)
-                .filter((one) => one.sessionId !== replace && !one.retired)
-                .map((one) => ({
-                  ...one,
-                  // What the chat read or wrote of the files the work names.
-                  shared:
-                    kind === "planner"
-                      ? sharedTokens(briefText, one.seen)
-                      : Math.max(0, ...paths.map((path) => sharedTokens(planText(path), one.seen))),
-                })),
-        brief: kind === "executor" ? "" : paths[0],
-        elsewhere:
-          kind === "executor"
-            ? sessionsOf("executor", live, readLocks(), { plans, usageFor: () => null })
-                .filter((one) => one.number && one.number !== number && !one.retired)
-                .map((one) => one.name)
-            : [],
-        // This checkout's chats only: one in another checkout reads another queue (Codex).
-        open: kind === "assistant" ? openAssistants(live, proj().name) : [],
-        name: proj().name,
-        fallback,
-        inputs,
-        taken: liveNames(),
-        machine: machine().name,
-        // Only the window's and a lease's timer: a usage limit's restart
-        // refuses beside a live executor as before.
-        unwatched: net || (timer && (deferral === "asking" || deferral === "handed")),
-        said,
-      });
+  const inputs = kind === "assistant" ? {} : reuseNow();
+  const decision = canStart({
+    kind,
+    lock: readJson(files.lock(number)),
+    alive: () => holderAlive(readJson(files.lock(number)), live),
+    log: readLog(),
+    progressAt:
+      kind === "planner"
+        ? plannedAt(plans)
+        : kind === "assistant"
+          ? writtenAt(plans)
+          : progressAt(plans),
+    paused,
+    usage: readJson(files.usage()),
+    // The session being replaced and retired ones do not block their successor.
+    sessions:
+      kind === "assistant"
+        ? []
+        : sessionsOf(kind, live, readLocks(), { plans, fallback, inputs })
+            // An executor is judged against its number's sessions alone.
+            .filter((one) => kind !== "executor" || one.number === number)
+            .filter((one) => one.sessionId !== replace && !one.retired)
+            .map((one) => ({
+              ...one,
+              // What the chat read or wrote of the files the work names.
+              shared:
+                kind === "planner"
+                  ? sharedTokens(briefText, one.seen)
+                  : Math.max(0, ...paths.map((path) => sharedTokens(planText(path), one.seen))),
+            })),
+    brief: kind === "executor" ? "" : paths[0],
+    elsewhere:
+      kind === "executor"
+        ? sessionsOf("executor", live, readLocks(), { plans, usageFor: () => null })
+            .filter((one) => one.number && one.number !== number && !one.retired)
+            .map((one) => one.name)
+        : [],
+    // This checkout's chats only: one in another checkout reads another queue.
+    open: kind === "assistant" ? openAssistants(live, proj().name) : [],
+    name: proj().name,
+    fallback,
+    inputs,
+    taken: liveNames(),
+    machine: machine().name,
+    // Only the window's and a lease's timer: a usage limit's restart
+    // refuses beside a live executor.
+    unwatched: net || (timer && (deferral === "asking" || deferral === "handed")),
+    said,
+  });
   if (decision.refuse) {
     // A refused timer's start leaves the due briefs free, under Briefs in `plans`.
     if (leaseTimer && !dry) releaseLease(due);
     return decision.why;
   }
   // **A brief left with a live planner is leased to it for thirty minutes**
-  // (plans/brief-lease-per-brief.md, parts 1 and 2), the one brief its own
-  // lease: `plans` says who holds it and until when, its Planning line ends
-  // the lease, and at its end the timer starts a fresh planner on it unless
-  // its holder is still busy with room, when the lease renews (Javi, 6
-  // November). The other due briefs keep their leases, judged a minute on.
+  // (decisions.md#brief-leased), the one brief its own lease: `plans` says
+  // who holds it and until when, its Planning line ends the lease, and at
+  // its end the timer starts a fresh planner on it unless its holder is
+  // still busy with room, when the lease renews (Javi). The other due
+  // briefs keep their leases, judged a minute on.
   if (decision.wait) {
     if (!dry)
       lease(paths[0], {
@@ -4394,7 +4344,7 @@ function startHere(
   if (decision.defer && kind === "assistant")
     return `No assistant chat was started: ${decision.why}.`;
   // A lease's start, deferred by usage, stays a lease's, each due brief to
-  // the reset with its holder (Codex C2, C3).
+  // the reset with its holder.
   if (decision.defer && leaseTimer) {
     if (!dry) {
       const table = leases();
@@ -4428,29 +4378,27 @@ function startHere(
   const pastWords = decision.past
     ? `${owner()} said to start it ("${said}"), past: ${decision.past}`
     : "";
-  const prompt = probe
-    ? "Reply with the single word ok"
-    : kind === "planner"
+  const prompt =
+    kind === "planner"
       ? plannerPrompt(paths[0])
       : kind === "assistant"
         ? isNote(paths[0])
           ? githubPrompt(paths[0])
           : assistantPrompt(paths[0])
         : startPrompt(paths[0], plans);
-  // **The agent file's effort, on the command line** (part 4): a settings
+  // **The agent file's effort, on the command line**: a settings
   // file's effort for the model outranks the frontmatter, and the user
   // settings set Opus to medium for the assistant; the command line outranks both.
   const effort = agentEffort(agent);
   // **The project's MCP configs reach every chat started here**, first: the
   // flag takes every value up to the next flag, so nothing positional may
-  // follow it. A probe needs none.
-  const mcp = probe
-    ? []
-    : proj().mcp.flatMap((p) => ["--mcp-config", isAbsolute(p) ? p : resolve(root, p)]);
-  // **An executor works in its worktree** (plans/executors-build-in-
-  // worktrees.md, part 3), reaching the checkout's plans/ by its link and by
-  // `--add-dir`, which also takes every value up to the next flag.
-  const tree = kind === "executor" && !probe ? executorTree(number) : "";
+  // follow it.
+  const mcp = proj().mcp.flatMap((p) => ["--mcp-config", isAbsolute(p) ? p : resolve(root, p)]);
+  // **An executor works in its worktree**
+  // (decisions.md#executors-in-worktrees), reaching the checkout's plans/ by
+  // its link and by `--add-dir`, which also takes every value up to the next
+  // flag.
+  const tree = kind === "executor" ? executorTree(number) : "";
   const args = [
     ...mcp,
     ...(tree ? ["--add-dir", join(root, "plans")] : []),
@@ -4461,7 +4409,7 @@ function startHere(
     decision.name,
     "--agent",
     // The plugin's agents are scoped by its name.
-    probe ? agent : `workflow:${agent}`,
+    `workflow:${agent}`,
     ...(effort ? ["--effort", effort] : []),
     prompt,
   ];
@@ -4497,8 +4445,8 @@ function startHere(
     replaced.some(({ old }) => old.sessionId === one.sessionId),
   );
   for (const [path, one] of handed) writeFileSync(join(root, path), one.text);
-  // **The plan and the number are reserved before the launch** (Codex C2):
-  // for this process, so a start beside it at one moment takes neither.
+  // **The plan and the number are reserved before the launch**: for this
+  // process, so a start beside it at one moment takes neither.
   const starter = `start:${process.pid}`;
   // The session this start replaces gives up the plan its stop claimed.
   if (tree && replace) unclaim(paths[0], replace);
@@ -4532,9 +4480,9 @@ function startHere(
   // The deferrals keep the paths this start did not take, and their timers.
   const deferrals = { executor: ["executor", "asking"], planner: ["planner"] }[kind] || [];
   for (const file of deferrals) dropDeferred(file, paths);
-  // **His yes starts one more** (plans/loop-guard-counts-failures.md; Codex
-  // C2): a start on his word spends it, so a deferral still holding it is
-  // re-armed without it, and its timer starts nothing past the guard.
+  // **His yes starts one more** (decisions.md#starts-bounded): a start on
+  // his word spends it, so a deferral still holding it is re-armed without
+  // it, and its timer starts nothing past the guard.
   if (said)
     for (const file of deferrals) {
       const left = readJson(files.deferred(file));
@@ -4552,37 +4500,32 @@ function startHere(
       );
     }
   // The brief started on ends its lease; a timer's other due briefs are left
-  // free, the new planner's at its stops as any planner's (part 2).
+  // free, the new planner's at its stops as any planner's.
   if (kind === "planner") releaseLease([...paths, ...due]);
   const unread =
     seen === "unread" ? " claude agents could not be read, so it is not confirmed." : "";
   const retiredWords = replaced.map(
     ({ old }) => `${old.name} [${String(old.sessionId).slice(0, 8)}] was retired: ${old.why}.`,
   );
-  if (!probe) {
-    const usage = readJson(files.usage());
-    // **The log says why a fresh session started** (plans/reuse-ceiling-per-
-    // agent.md, part 5): the session it retired, a Stop hook's (`replace`,
-    // with the hook's `why`) or the ones replaced here, which `plans` prints.
-    const oldName =
-      live?.find((row) => row.sessionId === replace)?.name || String(replace).slice(0, 8);
-    const because = [
-      ...(replace && why
-        ? [`${oldName} [${String(replace).slice(0, 8)}] was retired: ${why}.`]
-        : []),
-      // A start with nothing replaced says its own why (startOnReady's).
-      ...(!replace && why ? [`${why[0].toUpperCase()}${why.slice(1)}.`] : []),
-      ...retiredWords,
-      ...(pastWords ? [pastWords] : []),
-    ].join(" ");
-    appendFileSync(
-      files.starts(),
-      `${JSON.stringify({ at: Date.now(), name: decision.name, paths, five: usage?.five_hour?.used_percentage ?? null, seven: usage?.seven_day?.used_percentage ?? null, ...(because ? { why: because } : {}), ...(said ? { said } : {}) })}\n`,
-    );
-  }
+  const usage = readJson(files.usage());
+  // **The log says why a fresh session started**: the session it retired, a
+  // Stop hook's (`replace`, with the hook's `why`) or the ones replaced
+  // here, which `plans` prints.
+  const oldName =
+    live?.find((row) => row.sessionId === replace)?.name || String(replace).slice(0, 8);
+  const because = [
+    ...(replace && why ? [`${oldName} [${String(replace).slice(0, 8)}] was retired: ${why}.`] : []),
+    // A start with nothing replaced says its own why (startOnReady's).
+    ...(!replace && why ? [`${why[0].toUpperCase()}${why.slice(1)}.`] : []),
+    ...retiredWords,
+    ...(pastWords ? [pastWords] : []),
+  ].join(" ");
+  appendFileSync(
+    files.starts(),
+    `${JSON.stringify({ at: Date.now(), name: decision.name, paths, five: usage?.five_hour?.used_percentage ?? null, seven: usage?.seven_day?.used_percentage ?? null, ...(because ? { why: because } : {}), ...(said ? { said } : {}) })}\n`,
+  );
   // The session replaced is stopped three minutes on: a tired executor, or a
-  // retired planner whose chat was its plan's until this next planner
-  // (plans/planner-talks-until-built.md).
+  // retired planner whose chat was its plan's until this next planner.
   if (replace) stopLater(replace, live);
   // A replaced session is stopped three minutes on; a planner by the sweep
   // below, which finds it retired.
@@ -4590,8 +4533,8 @@ function startHere(
   // A planner started by the assistant, with nothing to replace, still ends
   // the retired planners' chats: the next planner starting is their cut-off.
   if (kind === "planner") stopRetiredPlanners(live, { except: replace });
-  // **The plan is claimed for the executor started on it** (plans/parallel-
-  // executors.md, part 4), so no other start takes it before its Building line.
+  // **The plan is claimed for the executor started on it**, so no other start
+  // takes it before its Building line.
   if (tree) {
     const row = liveSessions({ fresh: true })?.find((one) => one.name === decision.name);
     unclaim(paths[0], starter);
@@ -4604,7 +4547,7 @@ function startHere(
   ].join(" ");
 }
 
-/** "on main" once a built commit reached `main`, else "on <branch>" (/code-review, 27 October). */
+/** "on main" once a built commit reached `main`, else "on <branch>". */
 function onWhere(sha) {
   if (!sha) return "";
   if (branch() === "main") return "on main";
@@ -4623,7 +4566,7 @@ function onWhere(sha) {
  * The pull requests' states, by number, in lower case (`draft`, `open`,
  * `merged`, `closed`), from one `gh pr list --state all`; null when `gh`
  * cannot be read. An open draft is `draft`: it waits on its owner's review
- * (plans/owner-reviews-before-anyone-else.md).
+ * (decisions.md#draft-until-reviewed).
  */
 function pullStates() {
   try {
@@ -4662,7 +4605,7 @@ function executorTree(n) {
  * The `<n>` of the `executor-<n>` worktree a folder is in, or 0 for any
  * other folder, the checkout and Claude Code's own worktrees included.
  */
-export function numberOf(cwd) {
+function numberOf(cwd) {
   if (!cwd) return 0;
   // As given and by real paths, so a checkout reached through a link
   // (macOS's /tmp, a linked home) still finds its worktrees.
@@ -4692,18 +4635,18 @@ const TRACKED_SETTINGS =
   ".claude/settings.local.json is tracked by git, and an executor's worktree writes its number there: take it out of git (git rm --cached .claude/settings.local.json) and ignore it, then start again.";
 
 /**
- * **An executor builds in its own worktree** (plans/executors-build-in-
- * worktrees.md, part 2): `.claude/worktrees/executor-<n>`, made from
- * `origin/<branch>` with plain git when `git worktree list` lacks it, and
- * left as it is when there, since the executor's "Start clean" deals with
- * what is in it. Its `plans` is a link to the checkout's; the git-ignored
- * files it lacks come by `.worktreeinclude`, the `.env` files with none, and
- * an untracked project file always, so the executor and its hooks read one
- * file at one path (plans/executors-build-in-worktrees-follow-up.md); and
- * its number reaches the chat by the tree's `.claude/settings.local.json`
- * `env`, since `claude --bg` hands the chat to a process started before the
- * launch, with the daemon's environment, which is why a tracked one refuses
- * the start: the worktree would start dirty. The path, or the refusal's line.
+ * **An executor builds in its own worktree**
+ * (decisions.md#executors-in-worktrees): `.claude/worktrees/executor-<n>`,
+ * made from `origin/<branch>` with plain git when `git worktree list` lacks
+ * it, and left as it is when there, since the executor's "Start clean" deals
+ * with what is in it. Its `plans` is a link to the checkout's; the
+ * git-ignored files it lacks come by `.worktreeinclude`, the `.env` files
+ * with none, and an untracked project file always, so the executor and its
+ * hooks read one file at one path; and its number reaches the chat by the
+ * tree's `.claude/settings.local.json` `env`, since `claude --bg` hands the
+ * chat to a process started before the launch, with the daemon's
+ * environment, which is why a tracked one refuses the start: the worktree
+ * would start dirty. The path, or the refusal's line.
  */
 function ensureTree(n) {
   // Tracked in the checkout's index or at the branch the worktree is made from.
@@ -4774,7 +4717,7 @@ function ensureTree(n) {
     const to = join(path, file);
     try {
       // The project file is the checkout's, whatever its date: a restored
-      // older copy still carries a newly denied tool (Codex C1).
+      // older copy still carries a newly denied tool.
       const same =
         file === projectPath
           ? existsSync(to) && readFileSync(to, "utf8") === readFileSync(from, "utf8")
@@ -4840,8 +4783,8 @@ function carried() {
 /**
  * The primary checkout, the one the hooks run from, even from inside a
  * worktree; else the root. A repository with a separate git folder lists
- * that folder first, no checkout (plans/executors-build-in-worktrees-
- * follow-up.md): the root, which `checkoutOf` found, is the checkout then.
+ * that folder first, no checkout: the root, which `checkoutOf` found, is the
+ * checkout then.
  */
 function primaryCheckout() {
   try {
@@ -4856,11 +4799,11 @@ function primaryCheckout() {
 }
 
 /**
- * **`plans sync`**: moves the checkout, detached or on a branch, whose
- * tracked files are unchanged and which holds no commit the project's branch
- * lacks, to `origin/<branch>`, detached, or says why not. One line either
- * way. Nobody builds in the checkout (plans/executors-build-in-
- * worktrees.md, part 5), so a branch left checked out there is moved too.
+ * **`plans sync`**: moves the checkout, detached or on a branch, whose tracked
+ * files are unchanged and which holds no commit the project's branch lacks, to
+ * `origin/<branch>`, detached, or says why not. One line either way. Nobody
+ * builds in the checkout (decisions.md#executors-in-worktrees), so a branch
+ * left checked out there is moved too.
  *
  * Always the primary checkout, the one the hooks run from, even when run
  * from inside a worktree. `fetch: false` inside a hook, which the plugin's
@@ -4895,12 +4838,10 @@ export function sync({ fetch = true } = {}) {
     } catch {
       // Detached.
     }
-    // **An untracked file never holds the checkout**
-    // (plans/executor-over-ceiling-hands-on.md, part 3, widened by
-    // plans/owners-untracked-files-left-alone.md): git carries an untracked
-    // file across a detach unchanged, the queue's working files under
-    // `plans/` and the owner's `.env` alike. A tracked file changed
-    // (` M plans/x.md`, ` M README`) still holds it, a commit perhaps not made.
+    // **An untracked file never holds the checkout**: git carries an untracked file across a
+    // detach unchanged, the queue's working files under `plans/` and the
+    // owner's `.env` alike. A tracked file changed (` M README`) still holds
+    // it, a commit perhaps not made.
     const changes = run(["status", "--porcelain"])
       .split("\n")
       .filter((line) => line && !line.startsWith("?? "));
@@ -4974,10 +4915,10 @@ function versionOfPid(pid) {
 }
 
 /**
- * **Which chats run an older Claude Code** (plans/planner-queue.md, part 5):
- * it updates itself in the background, and a session takes the new version
- * when it starts, so the queue's are current and the owner's long chats are not.
- * "" when every readable one matches.
+ * **Which chats run an older Claude Code**: it updates itself in the
+ * background, and a session takes the new version when it starts, so the
+ * queue's are current and the owner's long chats are not. "" when every
+ * readable one matches.
  */
 export function versionLine(
   live,
@@ -5016,9 +4957,9 @@ export function list({ all = false, live, related = true, readers = null } = {})
   const out = [];
   if (!proj().found) out.push(NO_PROJECT);
   const trees = worktrees();
-  // **The executor line comes from the sessions** (plans/queue-counts-any-
-  // executor.md): a retired executor that kept working held no lock and read
-  // as "none alive". The lock alone speaks only when the sessions cannot be read.
+  // **The executor line comes from the sessions**: a retired executor that kept
+  // working held no lock and read as "none alive". The lock alone speaks only
+  // when the sessions cannot be read.
   let executor = "";
   const executorRows = live
     ? withShare(
@@ -5040,8 +4981,8 @@ export function list({ all = false, live, related = true, readers = null } = {})
   if (!executor || executor === "The executor: none alive.")
     executor = proj().found ? noneAliveWords(plans, live) : "The executor: none alive.";
   const here = machine();
-  out.push(`Plans on ${here.name}, ${today(now)} ${now.toTimeString().slice(0, 5)}. ${executor}`);
-  // **The planner line** (plans/planner-queue.md): the queue's planners only.
+  out.push(`Plans on ${here.name}, ${today(now)} ${hhmm(now)}. ${executor}`);
+  // **The planner line**: the queue's planners only.
   if (live)
     out.push(
       sessionsLine(
@@ -5059,19 +5000,19 @@ export function list({ all = false, live, related = true, readers = null } = {})
         ),
       ),
     );
-  // **The ceilings, and why the last fresh session of each kind started**
-  // (plans/reuse-ceiling-per-agent.md, part 5), with a project file.
+  // **The ceilings, and why the last fresh session of each kind
+  // started**, with a project file.
   if (proj().found)
     out.push(ceilingsLine(proj().reuse, reuseNow()), ...lastFreshLines(readLog(), proj().name));
   // **The assistant line**, only while a chat the queue started is alive
-  // (plans/project-follow-ups-reach-the-project.md, part 6).
+  // (decisions.md#leave-back-as-brief).
   const assistants = live ? sessionsOf("assistant", live, locks, { trees, plans }) : [];
   if (assistants.length) out.push(sessionsLine("assistant", assistants));
   const versions = versionLine(live);
   if (versions) out.push(versions);
-  // **The webhook's line**, in a project with issues (plans/github-watched.md),
-  // or with pull requests and the webhook's secret (plans/executor-never-
-  // watches-ci.md, part 2).
+  // **The webhook's line**, in a project with issues
+  // (decisions.md#github-webhook), or with pull requests and the webhook's
+  // secret.
   const issues = proj().found && hasIssues();
   if (
     issues ||
@@ -5079,11 +5020,10 @@ export function list({ all = false, live, related = true, readers = null } = {})
   )
     out.push(webhookLine());
   // **What GitHub would not give**, with pull requests, a webhook or none:
-  // with none the Stop hook's read is the only route (plans/checks-read-
-  // with-the-app.md, part 2).
+  // with none the Stop hook's read is the only route.
   if (proj().found && proj().land === "pull-request") out.push(...unreadLines(readSeen()));
-  // **A worktree that is no executor's is left over** (plans/parallel-
-  // executors.md, part 11): the executors' own are in their rows above.
+  // **A worktree that is no executor's is left over**: the executors'
+  // own are in their rows above.
   const under = join(root, ".claude", "worktrees") + "/";
   const leftOver = trees.filter((tree) => tree.path.startsWith(under) && !numberOf(tree.path));
   if (leftOver.length)
@@ -5099,21 +5039,20 @@ export function list({ all = false, live, related = true, readers = null } = {})
     out.push(`The queue is paused since ${paused} ("resume the queue" in any session lifts it).`);
   for (const kind of QUEUE_KINDS) {
     const deferred = readJson(files.deferred(kind));
-    // A brief's lease, one line each (plans/brief-lease-per-brief.md, part 1).
+    // A brief's lease, one line each (decisions.md#brief-leased).
     if (deferred && kind === "handed") out.push(...leaseLines(deferred));
     else if (deferred)
       out.push(
-        `Deferred until ${new Date(deferred.until).toTimeString().slice(0, 5)}: ${deferred.why ? `${deferred.why}; ` : ""}${deferred.paths.join(", ")}${deferred.pid ? "" : ", held while the queue is paused"}`,
+        `Deferred until ${hhmm(deferred.until)}: ${deferred.why ? `${deferred.why}; ` : ""}${deferred.paths.join(", ")}${deferred.pid ? "" : ", held while the queue is paused"}`,
       );
   }
   const width = Math.max(40, ...plans.map((p) => p.path.length + 2));
   const row = (path, rest) => `  ${path.padEnd(width)} ${rest}`;
   // **What each brief and ready plan looks related to**, in the pull request
-  // mode (plans/collaborating-when-claude-writes-the-code.md, part 2): read
-  // once, and only when such a row exists, as `pullStates` is.
+  // mode: read once, and only when such a row exists, as `pullStates` is.
   const byPull = proj().land === "pull-request";
   const briefRows = plans.filter((p) => p.state === "brief" || p.state === "planning");
-  // **What each waits on or who takes it** (plans/parallel-executors.md, part 9).
+  // **What each waits on or who takes it**.
   const claims = readClaims(plans, live);
   const waits = new Map(freePlans(plans, { claims }).map((p) => [p.path, p.waitsOn]));
   const treeNumbers = worktrees().map((tree) => numberOf(tree.path));
@@ -5121,7 +5060,7 @@ export function list({ all = false, live, related = true, readers = null } = {})
   const readyRows = plans
     .filter((p) => (p.state === "ready" || p.state === "handed") && !p.askingIn)
     .map((p) => {
-      // A handed plan whose own worktree's executor is at work waits for it (part 7).
+      // A handed plan whose own worktree's executor is at work waits for it.
       const own = ownTree(p, proj().executors, treeNumbers);
       const busyThere =
         own &&
@@ -5161,7 +5100,7 @@ export function list({ all = false, live, related = true, readers = null } = {})
   };
   const group = (title, items, rest, under = () => []) => {
     if (!items.length) return;
-    // **A group with a row put first says so** (plans/priority-queue.md, part 3).
+    // **A group with a row put first says so** (decisions.md#plan-put-first).
     out.push(
       "",
       items.some((p) => p.first)
@@ -5199,15 +5138,16 @@ export function list({ all = false, live, related = true, readers = null } = {})
     (p) =>
       `${p.kind}, ${p.day.replace(/ \d{4}$/, "")}${p.first ? `, ${firstWords(p)}` : ""}, in ${p.askingIn.row.name || "a planner"} [${String(p.askingIn.row.sessionId).slice(0, 8)}], ${statusOf(p.askingIn.row)}, the executor decides at ${hhmm(p.askingIn.until)}`,
   );
-  // **A plan with an issue waits for Ready** (plans/plans-as-github-issues.md,
-  // part 3): its issue, and the day it was planned.
+  // **A plan with an issue waits for Ready**: its issue, and the day it was
+  // planned.
   group(
     "Planned, waiting on GitHub",
     plans.filter((p) => p.state === "planned" && !p.askingIn),
     (p) =>
       `#${p.issue}${p.first ? `, ${firstWords(p)}` : ""}, since ${p.day.replace(/ \d{4}$/, "")}`,
   );
-  // **What was opened on GitHub and nothing carries yet** (plans/github-watched.md, part 3).
+  // **What was opened on GitHub and nothing carries yet**
+  // (decisions.md#github-webhook).
   if (issues) {
     const carried = new Set(plans.filter((p) => p.issue).map((p) => p.issue));
     const fresh = Object.entries(readJson(files.githubSeen())?.fresh || {}).filter(
@@ -5220,8 +5160,8 @@ export function list({ all = false, live, related = true, readers = null } = {})
         ...fresh.map(([n, one]) => `  #${n} ${one.title || ""}`.trimEnd()),
       );
   }
-  // A note waits with issues on or off: failed runs and merges are noted in
-  // any project with pull requests (plans/merged-pr-refreshes-the-rest.md, part 2).
+  // A note waits with issues on or off: failed runs and merges are noted in any
+  // project with pull requests (decisions.md#merge-refreshes-the-rest).
   if (proj().found && proj().land === "pull-request") {
     const waiting = notesWaiting();
     if (waiting.length)
@@ -5256,7 +5196,10 @@ export function list({ all = false, live, related = true, readers = null } = {})
     relatedUnder,
   );
   const built = plans.filter((p) => p.state === "built");
-  const shown = all ? built : built.filter((p) => p.builtDay.startsWith(today(now)));
+  // The date a Built or Dropped heading starts with, whatever follows it.
+  const onDay = (day) =>
+    parseDay(new RegExp(`^(?:${DAY})`).exec(day.trim())?.[0] || "") === parseDay(today(now));
+  const shown = all ? built : built.filter((p) => onDay(p.builtDay));
   // A plan landed by pull request is listed by it, its state from one `gh`
   // call, made only when a row names one.
   const states = shown.some((p) => p.pr) ? pullStates() : null;
@@ -5269,20 +5212,20 @@ export function list({ all = false, live, related = true, readers = null } = {})
           ? `topic ${p.topic}, waiting`
           : [p.sha, onWhere(p.sha), p.fix ? "a fix" : ""].filter(Boolean).join(", "),
   );
-  // **A dropped plan is on screen only on its day** (plans/dropped-plan-
-  // state.md), with its date and its why; every one with `--all`.
+  // **A dropped plan is on screen only on its day**
+  // (decisions.md#plan-state-in-file), with its date and its why; every
+  // one with `--all`.
   const dropped = plans.filter((p) => p.state === "dropped");
   group(
     all ? "Dropped" : "Dropped today",
-    // By the calendar day, so a drop dated 2026-10-30 is today's too (Codex).
-    all ? dropped : dropped.filter((p) => parseDay(p.droppedDay) === parseDay(today(now))),
+    // By the calendar day, so a drop dated 2026-10-30 is today's too.
+    all ? dropped : dropped.filter((p) => onDay(p.droppedDay)),
     (p) =>
       `dropped${p.droppedDay ? `, ${p.droppedDay.replace(/ \d{4}$/, "")}` : ""}${p.why ? `: ${p.why}` : ""}`,
   );
   // **The topics built and waiting for their pull request**, oldest first:
-  // a topic none of whose built plans names one yet.
-  // The ready plan's Built names the pull request, not the topic: its
-  // `Lands` line does (/code-review).
+  // a topic none of whose built plans names one yet. The ready plan's
+  // Built names the pull request, not the topic: its `Lands` line does.
   const opened = new Set(
     built.filter((p) => p.pr).flatMap((p) => [p.topic, p.lands?.name].filter(Boolean)),
   );
@@ -5303,9 +5246,9 @@ export function list({ all = false, live, related = true, readers = null } = {})
       `Older, by path only: ${old} plan${old === 1 ? "" : "s"} dated before 24 October with no Built`,
     );
   const unread = unreadPlans();
-  // A plan still to land whose Lands line is not read (plans/lands-line-
-  // suffix.md): listed, never taken for a topic named for its file unsaid;
-  // only where the line means something, the pull request mode (Codex).
+  // A plan still to land whose Lands line is not read: listed, never taken
+  // for a topic named for its file unsaid; only where the line means
+  // something, the pull request mode.
   const landsNotRead = byPull
     ? plans
         .filter(
@@ -5313,9 +5256,9 @@ export function list({ all = false, live, related = true, readers = null } = {})
         )
         .map((p) => p.path)
     : [];
-  // A waiting file's First line the queue does not read (plans/priority-
-  // queue.md, part 3), in either landing mode: said, so the order is not
-  // silently oldest first.
+  // A waiting file's First line the queue does not read
+  // (decisions.md#plan-put-first), in either landing mode: said, so the
+  // order is not silently oldest first.
   const firstNotRead = plans
     .filter((p) => WAITING_STATES.includes(p.state) && !p.first && firstUnread(p.text))
     .map((p) => p.path);
@@ -5327,8 +5270,8 @@ export function list({ all = false, live, related = true, readers = null } = {})
     out.push(`Not read by the queue (the file could not be read): ${unread.failed.join(", ")}`);
   if (landsNotRead.length) out.push(`Lands line not read: ${landsNotRead.join(", ")}`);
   if (firstNotRead.length) out.push(`First line not read: ${firstNotRead.join(", ")}`);
-  // **The label is said where the queue is read** (plans/session-names-
-  // across-machines.md), while the hostname stands in for it.
+  // **The label is said where the queue is read**
+  // (decisions.md#session-names), while the hostname stands in for it.
   if (!here.set)
     out.push(
       "",
@@ -5384,7 +5327,7 @@ function imageRun({ only = null, tree = root } = {}) {
  * **The pull requests' checks, then the run of a fix pushed straight**, as
  * one answer for `decideStop`: the pull request is named first, and a run
  * not green on HEAD rides along in its words and its id, so the loop guard
- * does not let a continued stop pass a run never named (/code-review).
+ * does not let a continued stop pass a run never named.
  */
 export function pullThenRun(pull, run) {
   const green = (r) => r.status === "completed" && r.conclusion === "success";
@@ -5407,7 +5350,7 @@ const isContext = (check) =>
  * beats running. Cancelled, action required and stale are not red: a
  * cancelled check was superseded or stopped by a person, one that needs
  * action waits on a person, on the pull request's page, and only GitHub
- * marks one stale (plans/failed-runs-the-webhook-misses.md, part 3).
+ * marks one stale (decisions.md#github-webhook).
  */
 export function checksVerdict(rollup = []) {
   let running = false;
@@ -5426,10 +5369,9 @@ export function checksVerdict(rollup = []) {
 }
 
 /**
- * **The checks by another service** in a `statusCheckRollup`: the commit statuses and
- * the check runs whose `detailsUrl` is no Actions run, which no Actions
- * event carries to the webhook (plans/failed-runs-the-webhook-misses.md,
- * part 4).
+ * **The checks by another service** in a `statusCheckRollup`: the commit
+ * statuses and the check runs whose `detailsUrl` is no Actions run, which no
+ * Actions event carries to the webhook (decisions.md#github-webhook).
  */
 export function otherServices(rollup = []) {
   return (rollup || []).filter(
@@ -5445,8 +5387,8 @@ export function otherServices(rollup = []) {
  * about again), for `decideStop`. With `brought`, a webhook brings the
  * Actions runs to the assistant, and only another service's checks are
  * judged (`other` in the answer). Running checks are not waited on
- * (plans/executor-never-watches-ci.md, part 4). Null when none is red, none
- * is this checkout's, or `gh` cannot be read.
+ * (decisions.md#push-not-waited-on). Null when none is red, none is this
+ * checkout's, or `gh` cannot be read.
  */
 function pullChecks({ brought = false, only = null } = {}) {
   try {
@@ -5475,8 +5417,8 @@ function pullChecks({ brought = false, only = null } = {}) {
     );
     const open = JSON.parse(out)
       .filter((pull) => local.get(pull.headRefName) === pull.headRefOid)
-      // **Each executor answers for its own** (plans/parallel-executors.md,
-      // part 8): the pull requests of the plans this session took.
+      // **Each executor answers for its own**: the pull requests of the
+      // plans this session took.
       .filter((pull) => !only || only.includes(pull.number))
       .map((pull) => ({
         ...pull,
@@ -5508,12 +5450,12 @@ function pullChecks({ brought = false, only = null } = {}) {
 }
 
 /**
- * **The checks read with the person's token, then the app's**
- * (plans/checks-read-with-the-app.md, part 1): `gh` on the person's token
- * and, when GitHub refuses it and the project has an app, again as `plans
- * gh`, the one way the queue calls as the app. `{ out, why }`, `out` null
- * when both failed and `why` the first failure's reason. Eight seconds each,
- * so both fit the Stop hook's ninety in hooks.json with the rest of the hook.
+ * **The checks read with the person's token, then the app's**: `gh` on the
+ * person's token and, when GitHub refuses it and the project has an app,
+ * again as `plans gh`, the one way the queue calls as the app. `{ out, why
+ * }`, `out` null when both failed and `why` the first failure's reason. Eight
+ * seconds each, so both fit the Stop hook's ninety in hooks.json with the
+ * rest of the hook.
  */
 function checksRead(args) {
   const person = ghAsk(args, 8000);
@@ -5558,13 +5500,12 @@ const BRANCH_DAYS = 30;
 const BRANCHES_MAX = 20;
 
 /**
- * **What a brief or a plan looks related to** (plans/collaborating-when-
- * claude-writes-the-code.md, part 2): the open pull requests (`pulls`,
- * `{number, title, author, headRefName, files}`) and the pushed branches with
- * none (`branches`, `{name, author, title, files}`) whose changed files
- * include a path in `paths`, the test Gerrit's `conflicts:` makes. A path
- * named matches a changed file equal to it or ending with `/<path>`, since a
- * brief names `scripts/x.mjs` where the repository has
+ * **What a brief or a plan looks related to**: the open pull requests
+ * (`pulls`, `{number, title, author, headRefName, files}`) and the pushed
+ * branches with none (`branches`, `{name, author, title, files}`) whose
+ * changed files include a path in `paths`, the test Gerrit's `conflicts:`
+ * makes. A path named matches a changed file equal to it or ending with
+ * `/<path>`, since a brief names `scripts/x.mjs` where the repository has
  * `plugins/workflow/scripts/x.mjs`. The most files in common first, a pull
  * request before a branch at the same count, three at most; `own` maps a pull
  * request's number, or a branch or topic name, to the plan of this queue that
@@ -5663,10 +5604,10 @@ export function openPulls({ run = execFileSync, timeout = 10_000 } = {}) {
 /**
  * **The merged pull requests' heads**, each branch name to the commit it was
  * merged at, from one `gh pr list --state merged`: a branch squash-merged and
- * not deleted still has files past the branch (/code-review, 30 October), so
- * one whose tip is still that commit is no open work. Empty when unread.
+ * not deleted still has files past the branch, so one whose tip is still that
+ * commit is no open work. Empty when unread.
  */
-export function mergedHeads({ run = execFileSync, timeout = 10_000 } = {}) {
+function mergedHeads({ run = execFileSync, timeout = 10_000 } = {}) {
   try {
     const out = run(
       "gh",
@@ -5698,12 +5639,11 @@ export function pushedBranches({
   merged = new Map(),
   now = Date.now(),
   fetch = true,
-  fetchTimeout = 8000,
   deadline = Infinity,
 } = {}) {
   if (fetch) {
     try {
-      run(["fetch", "--prune", "--quiet", "origin"], { timeout: left(deadline, fetchTimeout) });
+      run(["fetch", "--prune", "--quiet", "origin"], { timeout: left(deadline, 8000) });
     } catch {
       // Offline, or no origin: what was fetched already.
     }
@@ -5763,10 +5703,10 @@ export function pushedBranches({
 /**
  * What `relatedLines` reads: the open pull requests (null when unread) and the
  * pushed branches, inside one `budget` of milliseconds. No fetch while an
- * executor holds a lock, which fetches and pushes in this checkout itself
- * (/code-review, 30 October): the branches are then as last fetched.
+ * executor holds a lock, which fetches and pushes in this checkout itself: the
+ * branches are then as last fetched.
  */
-export function relatedReaders({ budget = 25_000 } = {}) {
+function relatedReaders({ budget = 25_000 } = {}) {
   const deadline = Date.now() + budget;
   const pulls = openPulls({ timeout: left(deadline, 10_000) });
   const merged = pulls ? mergedHeads({ timeout: left(deadline, 5000) }) : new Map();
@@ -5780,15 +5720,13 @@ export function relatedReaders({ budget = 25_000 } = {}) {
 }
 
 /**
- * **The related lines for a text**, in "The words" of
- * plans/collaborating-when-claude-writes-the-code.md: one per match of
- * `relatedWork`, the pull request by its number and title, a branch by its
+ * **The related lines for a text**: one per match of `relatedWork`, the pull request by its number and title, a branch by its
  * name and its last commit's title, then whose it is and two files at most.
  * A plan's own topic (`topic`, its branch and its pull request's head) is
- * never related to it (/code-review, 30 October); `own` is `ownOf(plans)`,
- * built once by a caller with many rows. A pull request of this queue's own
- * names its topic, the head branch a `Lands` line needs to land in it
- * (plans/related-plans-share-a-pull-request.md); the hook decides nothing.
+ * never related to it; `own` is `ownOf(plans)`, built once by a caller with
+ * many rows. A pull request of this queue's own names its topic, the head
+ * branch a `Lands` line needs to land in it
+ * (decisions.md#pull-requests-heading); the hook decides nothing.
  */
 export function relatedLines(
   text,
@@ -5822,6 +5760,19 @@ export function relatedLines(
 function hookOutput(event, context) {
   process.stdout.write(
     JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: context } }),
+  );
+}
+
+/** A PreToolUse hook's refusal of the call, with its reason. */
+function deny(reason) {
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: reason,
+      },
+    }),
   );
 }
 
@@ -5936,16 +5887,14 @@ function readLocks() {
 }
 
 /**
- * **What a planner's Stop hook does: the executor's rule, for briefs**
- * (plans/planner-continues.md, part 2, replacing plans/planner-queue.md's
- * one brief per planner). Nothing while a brief carries this session's live
- * Planning line (`current`), while paused, or when retired. With briefs
- * waiting that this session was not told of: it takes the oldest it is under
- * its ceiling for, each brief judged with what it shares with the chat
- * (`shared`, plans/adaptive-reuse.md, part 2); else it is retired for a
- * fresh planner (plans/reuse-ceiling-per-agent.md). With
- * nothing waiting it stays alive, idle and unretired, and a brief reaches it
- * by message.
+ * **What a planner's Stop hook does: the executor's rule, for briefs**.
+ * Nothing while a brief carries this session's live Planning line
+ * (`current`), while paused, or when retired. With briefs waiting that this
+ * session was not told of: it takes the oldest it is under its ceiling for,
+ * each brief judged with what it shares with the chat
+ * (decisions.md#reuse-check-cheap, `shared`); else it is retired for a fresh
+ * planner. With nothing waiting it stays alive, idle and unretired, and a
+ * brief reaches it by message.
  */
 export function decidePlannerStop({
   current = null,
@@ -5960,11 +5909,12 @@ export function decidePlannerStop({
 }) {
   if (retired || current || paused) return null;
   const fresh = waiting.filter((brief) => !told.includes(brief.path));
-  // **A brief named and not taken goes to a fresh planner** (/code-review, 27
-  // October): this live planner refuses every start, so the brief it
-  // stopped without taking would otherwise wait for good.
+  // **A brief named and not taken goes to a fresh planner**: this live
+  // planner refuses every start, so the brief it stopped without taking would
+  // otherwise wait for good.
   if (!fresh.length) return waiting.length ? { retire: true, declined: true } : null;
-  // Each brief with what it shares with this planner's plans (plans/adaptive-reuse.md, part 2).
+  // Each brief with what it shares with this planner's plans
+  // (decisions.md#reuse-check-cheap).
   const judged = fresh.map((brief) => ({
     brief,
     verdict: mayReuse({
@@ -5988,19 +5938,20 @@ export function decidePlannerStop({
 }
 
 /**
- * **A plan is taken once an executor has written on it**
- * (plans/planner-talks-until-built.md): a Building, Built, Handing over or
- * Resumed line, live or not, since a dead executor's work is on its branch.
- * From then on the plan is the executor's and its planner changes nothing.
+ * **A plan is taken once an executor has written on it**: a Building,
+ * Built, Handing over or Resumed line, live or not, since a dead executor's
+ * work is on its branch. From then on the plan is the executor's and its
+ * planner changes nothing.
  */
 export function planTaken(text = "") {
   // The executor's own lines, dated, never a plan's "## Building it" section.
-  return /^## (?:Building, |Resumed, |Handing over\b|Built(?:,|\s*$))/m.test(text);
+  return /^## (?:Building, |Resumed, |Handing over\b)/m.test(text) || BUILT_SECTION.test(text);
 }
 
 /**
  * Whether a retired planner is done with a plan: taken by an executor, or
- * dropped on the owner's word (plans/dropped-plan-state.md), which nobody takes.
+ * dropped on the owner's word (decisions.md#plan-state-in-file), which nobody
+ * takes.
  */
 function doneWith(text = "") {
   return planTaken(text) || Boolean(droppedOf(text));
@@ -6021,13 +5972,13 @@ export function landsWords(lands) {
 
 /**
  * Who took a plan, for the planner's messages: "Executor 5 [b92bfc2b] on
- * 26 October 2026" (the live row's name, else "session b92bfc2b"), or
+ * <date>" (the live row's name, else "session b92bfc2b"), or
  * "built, commit <sha>" once it is built ("built, pull request #<n>" when it
  * landed by one, "built, straight to <branch>" for a fix pushed straight,
  * "built, on topic <name>" for a topic waiting); "" when nothing took it.
  */
 export function whoTook(text = "", live = null) {
-  if (/^## Built(?:,|\s*$)/m.test(text)) {
+  if (BUILT_SECTION.test(text)) {
     const built = stateOf(text);
     if (built?.refresh) return "built, a refresh";
     if (built?.pr) return `built, pull request #${built.pr}`;
@@ -6058,11 +6009,11 @@ function takenBy(brief, text, live) {
 }
 
 /**
- * Stops the queue's retired planners whose plan is `path`, once an executor
- * has taken it (plans/planner-talks-until-built.md): a background row the
- * queue counts as a planner, retired, its state naming the plan. the owner's own
- * planner chats are not the queue's. Asked once per half hour, so the
- * executor's sweep on every stop does not pile up timers.
+ * Stops the queue's retired planners whose plan is `path`, once an executor has
+ * taken it: a background row the queue counts as a planner, retired, its state
+ * naming the plan. the owner's own planner chats are not the queue's. Asked
+ * once per half hour, so the executor's sweep on every stop does not pile up
+ * timers.
  */
 export function stopPlannersOn(
   path,
@@ -6078,9 +6029,9 @@ export function stopPlannersOn(
   for (const row of live || []) {
     const state = withPlans(stateFor(row.sessionId));
     if (!isSession("planner", row, state, null)) continue;
-    // **Only when every plan of its own is taken** (plans/planner-continues.md,
-    // part 5): an unretired planner is never stopped by a Building line, being
-    // the warm context the next brief goes to.
+    // **Only when every plan of its own is taken**: an unretired planner is
+    // never stopped by a Building line, being the warm context the next brief
+    // goes to.
     const plans = state?.plans || [];
     if (!state?.retired || !plans.includes(path)) continue;
     if (!plans.every((one) => one === path || doneWith(textOf(one)))) continue;
@@ -6122,28 +6073,19 @@ export function stopTakenPlanners(
 }
 
 /**
- * **A planner may still edit its own plans, and only them, until an
- * executor takes each** (plans/planner-open-decisions.md, widened by
- * plans/planner-talks-until-built.md and plans/planner-continues.md): the owner
- * goes on discussing a plan in its chat and the planner revises any section,
- * which the executor reads. True for Edit, Write or MultiEdit on one of
- * `plans` or the brief in hand (a plan is written over its brief) or under
- * its sketch folder (`plans/<topic>/`); a Bash command that writes one stays
- * refused.
+ * **A planner may still edit its own plans, and only them, until an executor
+ * takes each**: the owner goes on discussing a plan in its chat and the planner
+ * revises any section, which the executor reads. True for Edit, Write or
+ * MultiEdit on one of `plans` or under its sketch folder (`plans/<topic>/`); a
+ * Bash command that writes one stays refused.
  */
-export function plannerMayEdit({
-  plans = [],
-  brief = "",
-  toolName = "",
-  filePath = "",
-  base = root,
-}) {
+export function plannerMayEdit({ plans = [], toolName = "", filePath = "", base = root }) {
   if (!["Edit", "Write", "MultiEdit"].includes(toolName)) return false;
-  return Boolean(planEdited({ plans: [...plans, brief], filePath, base }));
+  return Boolean(planEdited({ plans, filePath, base }));
 }
 
 /** Which of `plans` an edit of `filePath` is to, itself or its sketch folder; "" for none. */
-export function planEdited({ plans = [], filePath = "", base = root }) {
+function planEdited({ plans = [], filePath = "", base = root }) {
   if (!filePath) return "";
   const target = resolve(base, filePath);
   return (
@@ -6167,19 +6109,17 @@ function planText(path) {
 export const PLANNER_PROMPT = /\bPlan (plans\/\S+\.md): it is a brief/;
 
 /**
- * **What a planner holding plans is told on every prompt**, retired or not
- * (plans/planner-continues.md, part 5): where each of its plans stands, read
- * from the file at that moment, a line each; a retired one is told so
- * (plans/simpler-agents.md, part 3: the state, the rules in the agent file).
+ * **What a planner holding plans is told on every prompt**, retired or not:
+ * where each of its plans stands, read from the file at that moment, a line
+ * each; a retired one is told so (the state, the rules in the agent file).
  */
 export function plannerContext(state, live = null, textOf = planText, options = {}) {
   const lines = (state?.plans || []).map((path) => {
     const text = textOf(path);
     if (!text) return `${path} is no longer in plans/.`;
     const dropped = droppedOf(text);
-    if (dropped)
-      return `${path} is dropped${dropped.droppedDay ? ` (${dropped.droppedDay})` : ""}.`;
-    if (/^## Built(?:,|\s*$)/m.test(text)) return `${path} is ${whoTook(text, live)}.`;
+    if (dropped) return droppedWords({ path, ...dropped });
+    if (BUILT_SECTION.test(text)) return `${path} is ${whoTook(text, live)}.`;
     if (planTaken(text))
       return `${path} was taken by ${whoTook(text, live)}: it is the executor's.`;
     const yours = `${path} is in the queue and still yours.`;
@@ -6203,9 +6143,9 @@ function byMessage() {
 
 /**
  * Why a planner is too tired for `brief`, or "": the reuse rule with what the
- * brief shares with the chat (`sharedTokens` over its `seen`,
- * plans/shared-file-share.md): a context over its ceiling for that brief, or
- * a cold cache over a large context.
+ * brief shares with the chat (decisions.md#shared-is-what-is-held,
+ * `sharedTokens` over its `seen`): a context over its ceiling for that brief,
+ * or a cold cache over a large context.
  */
 export function tiredFor(
   state,
@@ -6225,20 +6165,18 @@ export function tiredFor(
 }
 
 /** "plans/a.md" or "plans/a.md and plans/b.md", for a planner's messages. */
-function ownWords(plans, brief) {
-  const all = plans.length ? plans : brief ? [brief] : [];
-  return all.length === 1
-    ? `Only its own plan, ${all[0]}, and its sketch folder may still be edited, until an executor starts it.`
-    : `Only its own plans, ${andList(all)}, and their sketch folders may still be edited, until an executor starts each.`;
+function ownWords(plans) {
+  return plans.length === 1
+    ? `Only its own plan, ${plans[0]}, and its sketch folder may still be edited, until an executor starts it.`
+    : `Only its own plans, ${andList(plans)}, and their sketch folders may still be edited, until an executor starts each.`;
 }
 
 /**
- * **What a brief handed to a planner looks related to** (plans/collaborating-
- * when-claude-writes-the-code.md, part 2), in the pull request mode: `text`,
- * the heading and the related lines, or "" with none; `read`, whether the
- * pull requests were read, so a brief is said once only when they were. One
- * budget of eight seconds, inside the prompt hook's twenty with the sessions
- * read before it (Codex and /code-review, 30 October).
+ * **What a brief handed to a planner looks related to**, in the pull request
+ * mode: `text`, the heading and the related lines, or "" with none; `read`,
+ * whether the pull requests were read, so a brief is said once only when they
+ * were. One budget of eight seconds, inside the prompt hook's twenty with the
+ * sessions read before it.
  */
 function briefRelated(path, plans) {
   if (proj().land !== "pull-request") return { text: "", read: true };
@@ -6257,24 +6195,16 @@ function noteFinished(state, plans) {
   const inHand = state.brief ? plans.find((p) => p.path === state.brief) : null;
   if (!inHand || inHand.state === "brief" || inHand.state === "planning") return state;
   if (state.plans.includes(inHand.path)) return state;
-  return { ...state, plans: [...state.plans, inHand.path], planned: true };
+  return { ...state, plans: [...state.plans, inHand.path] };
 }
 
 /**
- * **A decided or dropped plan stops asking**: a planner's write that gives it a
- * "Decided" covering every decision, or a planner's or the assistant's write
- * of its `## Dropped` section (plans/dropped-plan-state.md), takes it out of
- * the asking deferral, so `plans` no longer prints it as waiting on the
- * owner. A shell command names no file, so every plan the deferral holds is read.
- */
-/**
- * **The chat he said it in writes it** (plans/agents-pass-messages-directly.md):
- * a new plan a planner writes of its own, a follow-up to a taken plan, joins
- * the session's list as it is written, so its question holds it ("Asked
- * once") and an executor's Building line closes it to this chat, as for the
- * plan of a brief. `content` is the new file's text: only a plan (a "Plan
- * only" or "Short plan" header) joins, never a brief, and never by a retired
- * chat, which writes nothing new.
+ * **The chat he said it in writes it**: a new plan a planner writes of its own,
+ * a follow-up to a taken plan, joins the session's list as it is written, so
+ * its question holds it ("Asked once") and an executor's Building line closes
+ * it to this chat, as for the plan of a brief. `content` is the new file's
+ * text: only a plan (a "Plan only" or "Short plan" header) joins, never a
+ * brief, and never by a retired chat, which writes nothing new.
  */
 export function noteWritten(state, path, content) {
   if (!path || state?.retired) return state;
@@ -6282,9 +6212,16 @@ export function noteWritten(state, path, content) {
   if (plans.includes(path) || path === state?.brief) return state;
   const plan = stateOf(content);
   if (!plan || plan.kind === "Brief") return state;
-  return { ...state, plans: [...plans, path], planned: true };
+  return { ...state, plans: [...plans, path] };
 }
 
+/**
+ * **A decided or dropped plan stops asking**: a planner's write that gives it a
+ * "Decided" covering every decision, or a planner's or the assistant's write of
+ * its `## Dropped` section (decisions.md#plan-state-in-file), takes it out of
+ * the asking deferral, so `plans` no longer prints it as waiting on the owner.
+ * A shell command names no file, so every plan the deferral holds is read.
+ */
 function leaveAsking(input) {
   const written = planPath(input.tool_input?.file_path);
   const held = written
@@ -6301,11 +6238,10 @@ function leaveAsking(input) {
 }
 
 /**
- * **A Planning line ends a brief's lease** (plans/briefs-reach-a-free-
- * planner.md, part 3): the brief written, or with a shell command every brief
- * the lease holds, that any session now has under way (or has planned, or is
- * gone) leaves the `handed`
- * deferral, so `plans` no longer says it waits on anyone.
+ * **A Planning line ends a brief's lease** (decisions.md#brief-leased): the
+ * brief written, or with a shell command every brief the lease holds, that
+ * any session now has under way (or has planned, or is gone) leaves the
+ * `handed` deferral, so `plans` no longer says it waits on anyone.
  */
 function leaveHanded(input) {
   const written = planPath(input.tool_input?.file_path);
@@ -6371,34 +6307,20 @@ function plannerHook(mode, input, sessionId, statePath) {
     const editing = ["Edit", "Write", "MultiEdit"].includes(input.tool_name);
     // **A taken plan refuses every edit**, retired or not, one plan at a time:
     // an executor can take it while the planner is still in the turn that
-    // handed it over (plans/planner-continues.md, part 5).
+    // handed it over.
     const target = editing ? planEdited({ plans: [...state.plans, state.brief], filePath }) : "";
     if (target) {
       const text = planText(target);
       if (planTaken(text)) {
-        process.stdout.write(
-          JSON.stringify({
-            hookSpecificOutput: {
-              hookEventName: "PreToolUse",
-              permissionDecision: "deny",
-              permissionDecisionReason: `${takenBy(target, text, null)}: the plan is the executor's now, and nothing in it changes from this session (your agent file, "A change to a taken plan").`,
-            },
-          }),
+        deny(
+          `${takenBy(target, text, null)}: the plan is the executor's now, and nothing in it changes from this session (your agent file, "A change to a taken plan").`,
         );
         return;
       }
     }
     const kept = editing ? firstDropped(input) : "";
     if (kept) {
-      process.stdout.write(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: "PreToolUse",
-            permissionDecision: "deny",
-            permissionDecisionReason: kept,
-          },
-        }),
-      );
+      deny(kept);
       return;
     }
     if (!state.retired) return;
@@ -6406,14 +6328,8 @@ function plannerHook(mode, input, sessionId, statePath) {
     if (command !== null && allowedWhileLocked(command)) return;
     // Only the plans this session wrote: a brief it was cut off on went to the next planner.
     if (plannerMayEdit({ plans: state.plans, toolName: input.tool_name, filePath })) return;
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: `This session is retired: its plans are in the queue. Do not plan again; say so, and stop. ${ownWords(state.plans, state.brief)}`,
-        },
-      }),
+    deny(
+      `This session is retired: its plans are in the queue. Do not plan again; say so, and stop.${state.plans.length ? ` ${ownWords(state.plans)}` : ""}`,
     );
     return;
   }
@@ -6435,7 +6351,7 @@ function plannerHook(mode, input, sessionId, statePath) {
       hookOutput("UserPromptSubmit", lines.join("\n"));
       return;
     }
-    // **The planner's hooks decide whether it has room** (part 4): a brief
+    // **The planner's hooks decide whether it has room**: a brief
     // named while it is tired is not taken, and its Stop hook retires it for
     // a fresh planner.
     const tired = named
@@ -6446,7 +6362,7 @@ function plannerHook(mode, input, sessionId, statePath) {
         })
       : "";
     const queued = named ? readPlans(join(root, "plans"), liveIds(live)) : [];
-    // A brief named mid-plan does not replace the one in hand (/code-review, 27 October).
+    // A brief named mid-plan does not replace the one in hand.
     const inHand = queued.some(
       (p) => p.state === "planning" && p.session === sessionId && p.path !== named,
     );
@@ -6481,21 +6397,13 @@ function plannerHook(mode, input, sessionId, statePath) {
   if (mode === "cutoff") {
     if (input.error && input.error !== "rate_limit") return;
     // Only a brief in hand, unfinished, is handed on: an idle planner cut off
-    // while talking about its plans stays the warm chat it is (the reviews of
-    // 27 October).
+    // while talking about its plans stays the warm chat it is.
     if (!current || state.retired) return;
     state.retired = true;
     // The plans written before the limit stay this session's own; the
     // unfinished brief goes to the next planner, whose plan this one may not write.
-    state.planned = state.plans.length > 0;
     writeJson(statePath, state);
-    let transcript = "";
-    try {
-      transcript = readFileSync(input.transcript_path, "utf8").slice(-200_000);
-    } catch {
-      // No transcript: the usage file alone says when.
-    }
-    const at = (resetTime(readJson(files.usage()), transcript) + AFTER_RESET) * 1000;
+    const at = startAfterReset(input.transcript_path);
     // The brief stands, without this session's Planning line, for the next
     // planner.
     writeFileSync(current.file, current.text.replace(/^## Planning, [^\n]*\n\n?/m, ""));
@@ -6507,7 +6415,7 @@ function plannerHook(mode, input, sessionId, statePath) {
     // A planner the queue gave nothing (the owner's own) is left alone.
     if (!state.brief && !state.plans.length) return;
     // A brief sent by message to another live planner is that planner's
-    // (plans/brief-lease-per-brief.md, part 3), so two never plan one brief.
+    // (decisions.md#brief-leased), so two never plan one brief.
     const waiting = freeBriefs(plans, { live, self: sessionId }).map((p) => ({
       ...p,
       shared: sharedTokens(p.text, seenOf(sessionId)),
@@ -6522,16 +6430,17 @@ function plannerHook(mode, input, sessionId, statePath) {
       inputs: reuseNow(),
       fallback: proj().reuse.planner,
     });
-    // **Ready plans never wait with no executor** (plans/executor-takes-next-
-    // ready-plan.md, part 2): a plan this planner wrote and did not hand on,
-    // or whose start an executor that then died refused, is started here.
+    // **Ready plans never wait with no executor**
+    // (decisions.md#plans-reach-an-executor): a plan this planner wrote and
+    // did not hand on, or whose start an executor that then died refused, is
+    // started here.
     const withNet = (context) => {
       const net = startOnReady();
       return [context, net].filter(Boolean).join("\n\n");
     };
     if (!decision) {
       writeJson(statePath, state);
-      // **A finished chat ends an hour after it goes quiet** (plans/idle-chats-end.md).
+      // **A finished chat ends an hour after it goes quiet**.
       armEnd(sessionId, live);
       const net = withNet("");
       if (net) hookOutput("Stop", net);
@@ -6541,7 +6450,7 @@ function plannerHook(mode, input, sessionId, statePath) {
       state.told = [...state.told, ...decision.told];
       // The brief named is the one in hand from here, so the plan written
       // over it joins the list even when its Planning line is gone by the
-      // next Stop (Codex, 27 October).
+      // next Stop.
       state.brief = decision.told[0];
       // Why it was kept, which `plans` says beside the session.
       state.kept = decision.kept;
@@ -6557,7 +6466,6 @@ function plannerHook(mode, input, sessionId, statePath) {
       return;
     }
     state.retired = true;
-    state.planned = state.plans.length > 0;
     writeJson(statePath, state);
     const why = decision.declined
       ? "the brief named at the last stop is still waiting, untaken"
@@ -6575,7 +6483,7 @@ function plannerHook(mode, input, sessionId, statePath) {
 /**
  * A path under the root as `plans/<x>.md`, or "" for any other file. Its
  * folder is read by its real path, so a plan written through a worktree's
- * `plans` link (`<tree>/plans/x.md`) is the checkout's `plans/x.md`.
+ * `plans` link is the checkout's `plans/x.md`.
  */
 function planPath(file) {
   if (!file) return "";
@@ -6604,9 +6512,9 @@ function within(path, folder) {
 }
 
 /**
- * **An executor edits only its own worktree and plans/** (plans/executors-
- * build-in-worktrees.md, part 4): an editing tool's file, by its real path,
- * outside both is refused with the words; "" for any other call.
+ * **An executor edits only its own worktree and plans/**
+ * (decisions.md#executors-in-worktrees): an editing tool's file, by its
+ * real path, outside both is refused with the words; "" for any other call.
  */
 function outsideTree(input) {
   if (!["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(input.tool_name)) return "";
@@ -6639,16 +6547,16 @@ function sessionTree(input) {
 }
 
 /**
- * **The planner keeps a waiting file's First line** (plans/put-first-review-
- * fixes.md, part 4; decisions.md#plan-put-first): an Edit, Write or MultiEdit
- * to any `plans/*.md` file that waits and is put first, whose new text the
- * queue would read no First line in, is refused with the line as it stands.
- * `plans first` keeps the file's times, so Claude Code's stale-file check
- * does not see its write; a line changed to another day the queue reads
- * passes. The words, or "". They name one place for every shape of header,
- * above the first `## ` section: `firstHead`'s text, where `Lands` is read
- * too, and no reading of the phrase leaves it; a place worked out per shape
- * sent a planner where the line is not read (plans/put-first-any-header-place.md).
+ * **The planner keeps a waiting file's First line**
+ * (decisions.md#plan-put-first): an Edit, Write or MultiEdit to any
+ * `plans/*.md` file that waits and is put first, whose new text the queue would
+ * read no First line in, is refused with the line as it stands. `plans first`
+ * keeps the file's times, so Claude Code's stale-file check does not see its
+ * write; a line changed to another day the queue reads passes. The words, or
+ * "". They name one place for every shape of header, above the first `## `
+ * section: `firstHead`'s text, where `Lands` is read too, and no reading of the
+ * phrase leaves it; a place worked out per shape sent a planner where the line
+ * is not read.
  */
 function firstDropped(input) {
   const path = planPath(input.tool_input?.file_path);
@@ -6667,20 +6575,20 @@ function firstDropped(input) {
 
 /**
  * **The executor's tool hook refuses a Building line on a plan still asking**
- * (plans/asking-plan-guarded.md): an Edit, Write or MultiEdit to a plan whose
- * new text adds a Building line, while `askingIn` holds the plan. The live
+ * (decisions.md#asked-once): an Edit, Write or MultiEdit to a plan whose new
+ * text adds a Building line, while `askingIn` holds the plan. The live
  * sessions are read only then, so every other edit costs nothing.
  */
-/** The refusal of a second plan to a session building one (Codex C6). */
+/** The refusal of a second plan to a session building one. */
 function oneAtATime(path, other) {
   return `${path} is not taken: this session is building ${other}, and an executor builds one plan at a time.`;
 }
 
 /**
- * **A Building line is refused on a plan that is not this session's to take**
- * (plans/parallel-executors.md, part 6): one built already, one another live
- * session is building or holds a claim on, one that waits on another. The
- * plans as read before the line; "" when it may take it.
+ * **A Building line is refused on a plan that is not this session's to
+ * take**: one built already, one another live session is building or holds a
+ * claim on, one that waits on another. The plans as read before the line; ""
+ * when it may take it.
  */
 function takenWords(path, plans, live, sessionId) {
   const plan = plans.find((p) => p.path === path);
@@ -6713,16 +6621,18 @@ function buildingRefusal(input, statePath) {
   const before = planText(path);
   const after = editedText(input.tool_name, input.tool_input, before);
   if (!buildingAdded(before, after).length) return "";
-  // **A dropped plan is nobody's to build** (plans/dropped-plan-state.md), whoever named it.
+  // **A dropped plan is nobody's to build** (decisions.md#plan-state-in-file),
+  // whoever named it.
   const dropped = droppedOf(before);
   if (dropped) return droppedWords({ path, ...dropped });
-  // A planned plan is refused from its text alone, before the sessions are read (/code-review).
+  // A planned plan is refused from its text alone, before the sessions are
+  // read.
   const planned = heldFromBuilding(path, after, null, { mtime: mtimeOf(path) });
   if (planned?.planned) return holdWords(path, planned);
   const live = liveSessions({ timeout: 4000 });
   const asking = heldFromBuilding(path, after, live, { mtime: mtimeOf(path) });
   if (asking) return holdWords(path, asking);
-  // **Not out of turn** (plans/priority-queue.md, part 4): while a free ready
+  // **Not out of turn** (decisions.md#plan-put-first): while a free ready
   // plan is put first ahead of this one; with no sessions read, nothing.
   if (live) {
     // Each plan's time is its file's, read by `readPlans`, as `mtimeOf` reads this one's.
@@ -6731,7 +6641,7 @@ function buildingRefusal(input, statePath) {
     if (ahead.length) return outOfTurnWords(path, ahead[0]);
   }
   // Judged with the sessions unread too, from the plans' text and the
-  // claims (Codex C5).
+  // claims.
   const taken = takenWords(
     path,
     readPlans(join(root, "plans"), liveIds(live)),
@@ -6741,7 +6651,7 @@ function buildingRefusal(input, statePath) {
   if (taken) return taken;
   // Judged with the sessions in hand, the plan is not judged again by the
   // shell's check; unjudged (no sessions read), the next shell command's
-  // check reads them again (Codex, 28 October).
+  // check reads them again.
   if (live) {
     const state = readState(input.session_id);
     if (!(state.taken || []).includes(path))
@@ -6762,11 +6672,24 @@ function planTimes(dir = join(root, "plans")) {
   return times;
 }
 
-/** The line a plain chat that opened before its agent's setting says (plans/agent-set-by-the-project.md, The words). */
+/** The line a plain chat that opened before its agent's setting says (decisions.md#chats-open-as-the-agent). */
 export function agentLine(kind) {
   return (
     `Chats in this project now open as the workflow's ${kind}, set in .claude/settings.local.json. ` +
     "This one opened before that: start a new chat."
+  );
+}
+
+/** A line said once at a session's start: `systemMessage` for the owner, the context with the agent's step. */
+function sayOnce(line) {
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "SessionStart",
+        additionalContext: `${line}\n\nSay this line to the owner in its own words, then go on with what was asked.`,
+      },
+      systemMessage: line,
+    }),
   );
 }
 
@@ -6775,9 +6698,9 @@ export function agentLine(kind) {
  * wrote, says so once in the owner's own chat: not in one the queue started
  * (`WORKFLOW_STARTED`), nor in one opened as an agent on purpose (its
  * `agent_type`, there when started with `--agent`, whichever agent it names:
- * the setting changed nothing for it; /code-review 3). The line as the install
- * check says its own: `systemMessage` for the owner, the context with the
- * agent's step. Any failure says nothing: a session's start never fails on it.
+ * the setting changed nothing for it). The line as the install check says its
+ * own: `systemMessage` for the owner, the context with the agent's step. Any
+ * failure says nothing: a session's start never fails on it.
  */
 function sayAgent(input) {
   try {
@@ -6786,15 +6709,7 @@ function sayAgent(input) {
     if (input?.agent_type) return false;
     const kind = agent.slice(agent.lastIndexOf(":") + 1);
     const line = agentLine(kind);
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "SessionStart",
-          additionalContext: `${line}\n\nSay this line to the owner in its own words, then go on with what was asked.`,
-        },
-        systemMessage: line,
-      }),
-    );
+    sayOnce(line);
     return true;
   } catch {
     // Said nothing, which is the start without it.
@@ -6803,9 +6718,8 @@ function sayAgent(input) {
 }
 
 /**
- * The line that tells the owner his app sends no failed run
- * (plans/app-old-registration-said.md, The words): what it lacks and where to
- * add it, or, the registration having it, where to accept it.
+ * The line that tells the owner his app sends no failed run: what it lacks
+ * and where to add it, or, the registration having it, where to accept it.
  */
 export function appLine(lacks) {
   const opening = "The project's Claude is sent no failed run by GitHub: ";
@@ -6818,9 +6732,8 @@ export function appLine(lacks) {
 /**
  * **An app that cannot send a failed run is said once** in a chat the queue
  * did not start, whatever agent it opened as, while the listener's record says
- * it lacks something (plans/app-old-registration-said.md, part 4); said again
- * only when what it lacks changes. As `sayAgent` says its line; any failure
- * says nothing.
+ * it lacks something; said again only when what it lacks changes. As
+ * `sayAgent` says its line; any failure says nothing.
  */
 function sayApp() {
   try {
@@ -6830,15 +6743,7 @@ function sayApp() {
     const key = `${lacks.where}: ${lacks.what.join(", ")}`;
     if (readJson(files.webhookTold())?.told === key) return;
     const line = appLine(lacks);
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "SessionStart",
-          additionalContext: `${line}\n\nSay this line to the owner in its own words, then go on with what was asked.`,
-        },
-        systemMessage: line,
-      }),
-    );
+    sayOnce(line);
     writeJson(files.webhookTold(), { told: key, at: Date.now() });
   } catch {
     // Said nothing, which is the start without it.
@@ -6871,21 +6776,14 @@ function sayRefreshed() {
 
 function hook(mode, input) {
   // **No agent marks a pull request ready**, in every session with the
-  // plugin, whatever its project or agent (plans/no-agent-marks-ready.md).
+  // plugin, whatever its project or agent
+  // (decisions.md#draft-until-reviewed).
   if (
     mode === "tool" &&
     input.tool_name === "Bash" &&
     marksReady(input.tool_input?.command || "")
   ) {
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: READY_REFUSED,
-        },
-      }),
-    );
+    deny(READY_REFUSED);
     return;
   }
   // **A project with no project file is not the workflow's**: its own hooks,
@@ -6893,13 +6791,14 @@ function hook(mode, input) {
   // queue until its file lands).
   if (!proj().found) return;
   // **A project's chats open as its agent, from the project's own settings**
-  // (plans/agent-set-by-the-project.md, part 3): before the compact return,
-  // since a compact project needs its maker.
+  // (decisions.md#chats-open-as-the-agent): before the compact return, since
+  // a compact project needs its maker.
   const saidAgent = mode === "session" && sayAgent(input);
   // **The compact form has no queue**: the maker is one chat, and the queue's
   // hooks do nothing (the catalogue's hooks run in both forms).
   if (proj().form === "compact") return;
-  // **The session's start arms the webhook's listener** (plans/github-watched.md, part 1).
+  // **The session's start arms the webhook's listener**
+  // (decisions.md#github-webhook).
   if (mode === "session") {
     // Not awaited: the process stays up the port's check, at most 300 ms.
     armWebhook().catch(() => {});
@@ -6911,25 +6810,25 @@ function hook(mode, input) {
   const executor = kindOf(input) === "executor";
   const statePath = files.state(sessionId);
   // Only an executor's Building line takes a plan, and only a planner's
-  // "Decided" lets one go; any other session's edit returns at once.
+  // "Decided" or a planner's or the assistant's `## Dropped` lets one go; any
+  // other session's edit returns at once.
   if (mode === "wrote" && kindOf(input) === "assistant") {
     leaveAsking(input);
     return;
   }
   // **He hears what was refreshed at his next message** in his own assistant
-  // chat (plans/merged-pr-refreshes-the-rest.md, part 6).
+  // chat (decisions.md#merge-refreshes-the-rest).
   if (mode === "prompt" && kindOf(input) === "assistant") {
     sayRefreshed();
     return;
   }
   if (mode === "wrote" && !executor && kindOf(input) !== "planner") return;
-  // **What a plan or brief shares with a chat is what the chat read or wrote
-  // of it** (plans/shared-file-share.md, part 1;
-  // decisions.md#shared-is-what-is-held, decisions.md#reuse-check-cheap): a
-  // planner's or an executor's tool call appends its tokens to its log, from
-  // the hook's own input (plans/shared-count-fixes.md, part 1). A subagent's
-  // call carries the subagent's `agent_type`, so it returned above. A Read
-  // has its own hook, `seen.mjs`, which counts it alone.
+  // **What a plan or brief shares with a chat is what the chat read or wrote of
+  // it** (decisions.md#shared-is-what-is-held, decisions.md#reuse-check-cheap):
+  // a planner's or an executor's tool call appends its tokens to its log, from
+  // the hook's own input. A subagent's call carries the subagent's
+  // `agent_type`, so it returned above. A Read has its own hook, `seen.mjs`,
+  // which counts it alone.
   if (mode === "wrote")
     try {
       noteSeen(sessionId, seenIn(input, { checkout: root }));
@@ -6937,15 +6836,16 @@ function hook(mode, input) {
       // A temp folder that cannot be written loses this count, not the hook's work.
     }
   // **An assistant chat the queue started ends an hour after it goes quiet**
-  // (plans/project-follow-ups-reach-the-project.md, part 6), by its numbered
-  // name; the owner's own assistant chat is never the queue's to end.
+  // (decisions.md#leave-back-as-brief), by its numbered name; the owner's
+  // own assistant chat is never the queue's to end.
   if (mode === "stop" && kindOf(input) === "assistant") {
-    // **Ready plans never wait with no executor** (plans/executor-takes-next-
-    // ready-plan.md, part 2): the owner's chat too, whose cheap gate reads no
-    // sessions unless a plan is ready and the lock is free.
+    // **Ready plans never wait with no executor**
+    // (decisions.md#plans-reach-an-executor): the owner's chat too, whose
+    // cheap gate reads no sessions unless a plan is ready and the lock is
+    // free.
     const net = startOnReady();
     // Only a chat the queue launched carries the mark, so the owner's own
-    // chat never waits on `claude agents` at its stops (/code-review).
+    // chat never waits on `claude agents` at its stops.
     if (process.env.WORKFLOW_STARTED === "assistant") {
       const live = liveSessions();
       const row = live?.find((r) => r.sessionId === sessionId);
@@ -6965,12 +6865,12 @@ function hook(mode, input) {
   if (mode === "tool" && input.tool_name === "AskUserQuestion") return;
   if (mode === "wrote") {
     // **The Building line takes the plan from its planner**: a retired
-    // planner whose plan this is has its chat stopped (decision 1 of
-    // plans/planner-talks-until-built.md). Anything else returns at once.
-    const building = new RegExp(`^## Building, [^,\\n]+, session ${sessionId}\\b`, "m");
+    // planner whose plan this is has its chat stopped. Anything else
+    // returns at once.
+    const building = buildingBy(sessionId);
     // **Every plan this session took, kept past its Building line**
-    // (plans/project-follow-ups-reach-the-project.md, part 4): "Built" takes
-    // the line out, and the Stop hook still asks what the built plan owes.
+    // (decisions.md#leave-back-as-brief): "Built" takes the line out, and
+    // the Stop hook still asks what the built plan owes.
     const hold = (paths) => {
       const state = readState(sessionId);
       const held = [...new Set([...(state.held || []), ...paths])];
@@ -6978,10 +6878,10 @@ function hook(mode, input) {
     };
     // A Building line written by a shell command: found by reading the plans
     // after the fact, since no tool hook could refuse it. **On a plan still
-    // asking it is taken out again** (plans/asking-plan-guarded.md), with the
-    // tool hook's words. A plan judged once (`taken`) is not judged again, so
-    // the live sessions are read once per plan; one whose line is gone drops
-    // from the list. Before any question the window opens at the plan's time
+    // asking it is taken out again** (decisions.md#asked-once), with the tool
+    // hook's words. A plan judged once (`taken`) is not judged again, so the
+    // live sessions are read once per plan; one whose line is gone drops from
+    // the list. Before any question the window opens at the plan's time
     // before the command (`plansAt`, which the tool hook records), since the
     // command has just written the file.
     if (input.tool_name === "Bash") {
@@ -6995,17 +6895,15 @@ function hook(mode, input) {
         const live = liveSessions({ timeout: 4000 });
         const own = new RegExp(`${building.source}[^\\n]*\\n?`, "gm");
         // The queue with the sessions in hand, for a plan put first ahead
-        // (plans/priority-queue.md, part 4); none with no sessions read.
-        // The plans this command claimed are judged as they stood before it,
-        // so one command claiming two is not let through by its own lines (Codex C2),
-        // their times too: the command's write would open a plan's window
-        // again, and a plan put first still asking would stop holding the
-        // other back (Codex C1, plans/waiting-means-a-question-follow-up.md).
-        // One time per plan for its asking window, its own Building line's and
-        // a plan put first's alike (plans/put-first-review-fixes-follow-up.md):
-        // its time before the command; with none, a plan this command claimed
-        // has none, since the command's write would open its window again,
-        // and any other its file's, written by someone else (/code-review 1).
+        // (decisions.md#plan-put-first); none with no sessions read. The plans
+        // this command claimed are judged as they stood before it, so one
+        // command claiming two is not let through by its own lines, their times
+        // too: the command's write would open a plan's window again, and a plan
+        // put first still asking would stop holding the other back. One time
+        // per plan for its asking window, its own Building line's and a plan
+        // put first's alike: its time before the command; with none, a plan
+        // this command claimed has none, since the command's write would open
+        // its window again, and any other its file's, written by someone else.
         const claimed = (p) => unjudged.some((one) => one.path === p.path);
         const hookTime = (p) => state.plansAt?.[p.path] || (claimed(p) ? 0 : p.mtime || 0);
         const queued = live
@@ -7028,8 +6926,8 @@ function hook(mode, input) {
             : firstAhead(plan.path, queued, { live, timeOf: hookTime, sessionId });
           // No sessions read is the hook doing nothing, as when it fails:
           // judged, so a failing list is not asked again on every command.
-          // Judged as the plans stood before the line (part 6).
-          // One line a command: a second taken in it is refused (Codex C6).
+          // Judged as the plans stood before the line. One line a
+          // command: a second taken in it is refused.
           const refused =
             asking || ahead.length
               ? ""
@@ -7057,8 +6955,8 @@ function hook(mode, input) {
       }
       if (String(taken) !== String(state.taken || []))
         writeJson(statePath, { ...readState(sessionId), taken });
-      // A Building line that stays holds the plan, and the plan stops
-      // asking; one the asking check took out is not this session's (/code-review).
+      // A Building line that stays holds the plan, and the plan stops asking;
+      // one the asking check took out is not this session's.
       if (taken.length) hold(taken);
       if (newly.length) dropDeferred("asking", newly);
       if (said.length)
@@ -7088,27 +6986,19 @@ function hook(mode, input) {
     // for the wrote hook's judgement.
     if (!reason && command !== null) writeJson(statePath, { ...state, plansAt: planTimes() });
     if (reason) {
-      process.stdout.write(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: "PreToolUse",
-            permissionDecision: "deny",
-            permissionDecisionReason: reason,
-          },
-        }),
-      );
+      deny(reason);
     }
     return;
   }
   const live = liveSessions();
   if (mode === "prompt") {
-    // **The checkout is for reading** (plans/executors-build-in-worktrees.md,
-    // part 4): an executor's chat opened anywhere but its worktree builds nothing.
+    // **The checkout is for reading** (decisions.md#executors-in-worktrees): an
+    // executor's chat opened anywhere but its worktree builds nothing.
     if (!executorNumber(input)) {
       process.stdout.write(JSON.stringify({ decision: "block", reason: IN_CHECKOUT }));
       return;
     }
-    // The session's own number's lock (plans/parallel-executors.md, part 1).
+    // The session's own number's lock.
     const number = executorNumber(input);
     const lock = readJson(files.lock(number));
     if (lockHeldByOther(lock, sessionId, () => holderAlive(lock, live))) {
@@ -7159,20 +7049,14 @@ function hook(mode, input) {
           (executorNumber(input) ? `executor-${executorNumber(input)}` : ""),
       }),
     );
-    let transcript = "";
-    try {
-      transcript = readFileSync(input.transcript_path, "utf8").slice(-200_000);
-    } catch {
-      // No transcript: the usage file alone says when.
-    }
-    const at = (resetTime(readJson(files.usage()), transcript) + AFTER_RESET) * 1000;
+    const at = startAfterReset(input.transcript_path);
     start([plan.path], { replace: sessionId, at });
     return;
   }
   if (mode === "stop") {
     const lock = readJson(files.lock(executorNumber(input)));
-    // **A finished chat ends an hour after it goes quiet** (plans/idle-chats-end.md):
-    // every stop that does not block arms the end timer.
+    // **A finished chat ends an hour after it goes quiet**: every stop that
+    // does not block arms the end timer.
     if (lockHeldByOther(lock, sessionId, () => holderAlive(lock, live))) {
       armEnd(sessionId, live);
       return;
@@ -7182,10 +7066,10 @@ function hook(mode, input) {
     // hook that failed) still stops the retired planner whose plan it took.
     stopTakenPlanners(live);
     // "Asked once": a plan its planner is still asking about is not named.
-    // **One plan at a time** (plans/parallel-executors.md, parts 2 and 5):
-    // the first plan free for this session, one that waits on none and that
-    // no other session holds a claim on; a handed plan only its own
-    // number's, or one whose worktree is no executor's now.
+    // **One plan at a time**: the first plan free for this session, one
+    // that waits on none and that no other session holds a claim on; a
+    // handed plan only its own number's, or one whose worktree is no
+    // executor's now.
     const mine = executorNumber(input) || 1;
     const claims = Object.fromEntries(
       Object.entries(readClaims(plans, live)).filter(([, one]) => one.holder !== sessionId),
@@ -7193,7 +7077,7 @@ function hook(mode, input) {
     const free = freePlans(withAsking(plans, live), { claims }).filter(
       (p) => !p.waitsOn && !claims[p.path],
     );
-    // Claimed before it is named, so two stops at one moment name it once (part 4).
+    // Claimed before it is named, so two stops at one moment name it once.
     const current = plans.find((p) => p.state === "building" && p.session === sessionId) || null;
     const name = live?.find((row) => row.sessionId === sessionId)?.name || "";
     const mayName = !current && !state.retired && !pausedSince();
@@ -7208,7 +7092,7 @@ function hook(mode, input) {
     )
       .filter(Boolean)
       // Judged again with the claims as they are now: another stop may have
-      // claimed a plan this one waits on meanwhile (Codex C3).
+      // claimed a plan this one waits on meanwhile.
       .filter((p) => {
         const now = Object.fromEntries(
           Object.entries(readClaims(plans, live)).filter(([, one]) => one.holder !== sessionId),
@@ -7226,7 +7110,7 @@ function hook(mode, input) {
       const n = Number(/^executor-(\d+)$/.exec(p.tree || "")?.[1]) || 0;
       return !n || n === mine || n > proj().executors || !existsSync(executorTree(n));
     });
-    const building = new RegExp(`^## Building, [^,\\n]+, session ${sessionId}\\b`, "m");
+    const building = buildingBy(sessionId);
     const carry = carryOf(
       plans.filter(
         (p) =>
@@ -7242,12 +7126,11 @@ function hook(mode, input) {
       handed,
       // The pull request mode reads its pull requests' failed checks that no
       // webhook brings to the assistant (two fixes would cross): every one
-      // with no secret or no listener alive (/code-review), another
-      // service's with one (plans/failed-runs-the-webhook-misses.md, part 4);
-      // then the run a fix pushed straight sets off. The push mode reads its
-      // run. `webhookAlive` is the pid alone, no port's wait in a Stop hook: a
-      // record a reboot left can read as alive until the next session's start
-      // drops it.
+      // with no secret or no listener alive, another service's with one
+      // (decisions.md#github-webhook); then the run a fix pushed straight sets
+      // off. The push mode reads its run. `webhookAlive` is the pid alone, no
+      // port's wait in a Stop hook: a record a reboot left can read as alive
+      // until the next session's start drops it.
       run:
         proj().land === "pull-request"
           ? pullThenRun(
@@ -7282,8 +7165,8 @@ function hook(mode, input) {
     if (waiting.length && !decision?.kept && !decision?.retire) unclaim(waiting[0].path, sessionId);
     if (!decision) {
       armEnd(sessionId, live);
-      // A retired session whose successor's start was refused, deferred or
-      // died hands on at its next stop (plans/executor-takes-next-ready-plan.md).
+      // A retired session whose successor's start was refused, deferred or died
+      // hands on at its next stop (decisions.md#plans-reach-an-executor).
       const net = state.retired ? startOnReady() : "";
       if (net) hookOutput("Stop", net);
       return;
@@ -7371,7 +7254,7 @@ export function checkDeny(project = proj(), agents = pluginAgents()) {
  * catalogue, a project entry that says it overrides a `file#id` no inherited
  * catalogue has. Then the count.
  */
-export function checkCatalogues(project = proj(), dir = root) {
+function checkCatalogues(project = proj(), dir = root) {
   const locs = locations(project, dir);
   const named = [...project.inherits, project.catalogue].filter(Boolean);
   if (!named.length)
@@ -7435,7 +7318,7 @@ export function checkCatalogues(project = proj(), dir = root) {
  * the project's `mcp` configs (beside what the user settings load) and its
  * inherited catalogues as added directories.
  */
-export function chatCommand(args = [], project = proj(), dir = root) {
+function chatCommand(args = [], project = proj(), dir = root) {
   const at = (p) => (isAbsolute(p) ? p : resolve(dir, p));
   const agent = project.form === "compact" ? "maker" : "assistant";
   const effort = agent === "maker" ? agentEffort("maker") : "";
@@ -7452,18 +7335,19 @@ export function chatCommand(args = [], project = proj(), dir = root) {
 }
 
 // **What people write on GitHub reaches the queue on its own**
-// (plans/github-watched.md): `plans webhook` listens, `plans github` reads
-// what was missed, both through `githubEvents`, and what is done with an
-// event is below: the note, the assistant started, the issue closed.
+// (decisions.md#github-webhook): `plans webhook` listens, `plans github`
+// reads what was missed, both through `githubEvents`, and what is done
+// with an event is below: the note, the assistant started, the issue
+// closed.
 
 /**
  * **The values of a dotenv file**: `NAME=value` a line, `export ` before it
  * allowed, `#` lines and a ` #` after an unquoted value comments (a value
- * that begins with `#` is the value, as Compose reads it); a
- * single-quoted value as written, a double-quoted one running over lines to
- * its closing quote, its `\n`, `\"` and `\\` escapes read.
+ * that begins with `#` is the value, as Compose reads it); a single-quoted
+ * value as written, a double-quoted one running over lines to its closing
+ * quote, its `\n`, `\"` and `\` escapes read.
  */
-export function dotenv(text = "") {
+function dotenv(text = "") {
   const source = String(text).replace(/\r\n?/g, "\n");
   const values = {};
   const start = /^[ \t]*(?:export[ \t]+)?([A-Za-z_]\w*)[ \t]*=[ \t]*/gm;
@@ -7494,12 +7378,12 @@ export function dotenv(text = "") {
 
 /**
  * **A secret, read when it is used** (decisions.md#push-token): the
- * environment's value of `name` when it is set, else its value in the
- * private dotenv file `WORKFLOW_SECRETS_FILE` names (a relative path from the
- * checkout's root, so `plans gh` from a subfolder and the listener started
- * at the root read the same file; Codex), read again at each call
- * and never put into `process.env`, so no program the queue starts inherits
- * it; "" when neither has it or the file cannot be read.
+ * environment's value of `name` when it is set, else its value in the private
+ * dotenv file `WORKFLOW_SECRETS_FILE` names (a relative path from the
+ * checkout's root, so `plans gh` from a subfolder and the listener started at
+ * the root read the same file), read again at each call and never put into
+ * `process.env`, so no program the queue starts inherits it; "" when neither
+ * has it or the file cannot be read.
  */
 export function secret(name, env = process.env) {
   if (env[name]) return env[name];
@@ -7535,8 +7419,7 @@ const webhookPort = (env = process.env) => Number(secret("WORKFLOW_WEBHOOK_PORT"
 /**
  * Whether the project file turns issues on: its `## Issues` heading, read
  * only with `land: pull-request`, since issues need pull requests; a `land`
- * line taken out by hand turns them off
- * (plans/related-plans-share-a-pull-request-follow-up-5.md).
+ * line taken out by hand turns them off.
  */
 export function hasIssues(body = proj().body || "", land = proj().land) {
   return land === "pull-request" && /^## Issues[ \t]*$/m.test(withoutFences(body));
@@ -7583,7 +7466,7 @@ function portAnswers(port, ms = 300) {
  * **A listener is alive when its port answers**: the record's pid alive and
  * its port taking a connection. The record sits in the checkout and outlives
  * a container's reboot, where a new container's pid can name another process
- * (plans/webhook-stale-record.md).
+ * (decisions.md#github-webhook).
  */
 async function webhookListening() {
   const record = webhookAlive();
@@ -7607,8 +7490,7 @@ function dropWebhookRecord(seen) {
 /**
  * **The copy of the plugin this is**: when this `plan-queue.mjs` was
  * written. Each installed version is its own folder, written when it was
- * installed, so a later version's is higher (plans/checks-read-with-the-
- * app.md, part 3).
+ * installed, so a later version's is higher.
  */
 function codeStamp() {
   return statSync(fileURLToPath(import.meta.url)).mtimeMs;
@@ -7620,34 +7502,52 @@ export function listenerOlder(record, code = codeStamp()) {
 }
 
 /**
- * **A listener of an older copy is replaced** (plans/checks-read-with-the-
- * app.md, part 3, as Bazel's client stops a server of another version):
- * when `alive` was started by an older copy, it is stopped and its record
- * removed, as `--stop` does, and true is returned once its port is free
- * (two seconds at most), so the new one can take it. Only an older one, so
- * two chats on two versions do not take turns stopping each other's.
+ * **A listener of an older copy is replaced** (as Bazel's client stops a
+ * server of another version): when `alive` was started by an older copy,
+ * it is stopped and its record removed, as `--stop` does, and true is
+ * returned once its port is free (two seconds at most), so the new one can
+ * take it. Only an older one, so two chats on two versions do not take
+ * turns stopping each other's.
  */
 async function replaceOlder(alive) {
-  if (!listenerOlder(alive) || !ourListener(alive.pid)) return false;
+  return listenerOlder(alive) && (await stopListener(alive));
+}
+
+/**
+ * Stops the listener `record` names and removes its record, true once its
+ * port is free (two seconds at most). Only a listener of the queue's: a pid
+ * another process took since, or another user's, is not stopped. Still
+ * answering, it keeps its record, so `plans` and `--stop` still find it.
+ */
+async function stopListener(record) {
+  if (!ourListener(record.pid)) return false;
   try {
-    process.kill(alive.pid);
+    process.kill(record.pid);
   } catch (error) {
     // Another user's process is not ours to stop; one gone already is.
     if (error.code === "EPERM") return false;
   }
   const until = Date.now() + 2000;
-  while ((await portAnswers(alive.port)) && Date.now() < until)
+  while ((await portAnswers(record.port)) && Date.now() < until)
     await new Promise((done) => setTimeout(done, 100));
-  // Still answering, it keeps its record, so `plans` and `--stop` still find it (/code-review).
-  if (await portAnswers(alive.port)) return false;
-  dropWebhookRecord(alive);
+  if (await portAnswers(record.port)) return false;
+  dropWebhookRecord(record);
   return true;
+}
+
+/** Starts a detached listener, removing first the stale record `seen`; its pid. */
+function spawnListener(seen, env) {
+  dropWebhookRecord(seen);
+  return detached(process.execPath, [fileURLToPath(import.meta.url), "webhook", "--serve"], {
+    ...env,
+    WORKFLOW_ROOT: root,
+  });
 }
 
 /**
  * Whether `pid` runs a listener of the queue's, by its command line where
  * the system shows one (`/proc`); elsewhere taken as one. A pid a reboot
- * gave another process is not stopped by a start (/code-review).
+ * gave another process is not stopped by a start.
  */
 function ourListener(pid) {
   let line;
@@ -7659,12 +7559,11 @@ function ourListener(pid) {
   return line.includes("plan-queue.mjs") && line.includes("webhook");
 }
 
-/** `plans`'s webhook line, in a project with issues: listening or none. */
+/** The webhook's line in `plans` and `plans webhook`: listening or none. */
 export function webhookLine(record = webhookAlive()) {
   if (!record) return "The webhook: none; plans webhook starts it.";
   const last = record.lastAt ? `, last delivery ${hhmm(record.lastAt)}` : "";
-  // **An app that cannot send a failed run is said while it holds**
-  // (plans/app-old-registration-said.md, part 3).
+  // **An app that cannot send a failed run is said while it holds**.
   const lacks = record.lacks;
   const why = !lacks?.what?.length
     ? ""
@@ -7680,25 +7579,21 @@ export function webhookLine(record = webhookAlive()) {
 /**
  * **The listener is armed where it can listen**: in a project with `land:
  * pull-request` and the secret set, issues on or off, since a failed run on
- * a pull request reaches the assistant by it (plans/executor-never-watches-
- * ci.md, part 2), when none is alive, a detached `plans webhook --serve`.
- * `plans start` and the session's start call it; it says nothing.
+ * a pull request reaches the assistant by it (decisions.md#github-webhook),
+ * when none is alive, a detached `plans webhook --serve`. `plans start` and
+ * the session's start call it; it says nothing.
  */
-export async function armWebhook(env = process.env) {
+async function armWebhook(env = process.env) {
   if (!proj().found || proj().land !== "pull-request" || !secret("WORKFLOW_WEBHOOK_SECRET", env))
     return 0;
   const seen = readJson(files.webhook());
   const alive = await webhookListening();
   if (alive && !(await replaceOlder(alive))) return 0;
-  dropWebhookRecord(seen);
-  return detached(process.execPath, [fileURLToPath(import.meta.url), "webhook", "--serve"], {
-    ...env,
-    WORKFLOW_ROOT: root,
-  });
+  return spawnListener(seen, env);
 }
 
 /** What the checkout's plans hold for `githubEvents`: carried, planned and own. */
-export function githubContext(plans = readPlans(join(root, "plans"))) {
+function githubContext(plans = readPlans(join(root, "plans"))) {
   const own = ownOf(plans);
   return {
     carried: plans.filter((p) => p.issue && p.state !== "dropped").map((p) => p.issue),
@@ -7708,18 +7603,17 @@ export function githubContext(plans = readPlans(join(root, "plans"))) {
 }
 
 /** `gh` for a read, the person's token: the queue's reads, as `openPulls` does. */
-function ghRead(args, timeout, env = process.env) {
-  return ghAsk(args, timeout, env).out;
+function ghRead(args, timeout) {
+  return ghAsk(args, timeout).out;
 }
 
 /**
- * `gh` for a read that is said when it fails (plans/checks-read-with-the-
- * app.md, part 2): `{ out, why }`, `out` null and `why` GitHub's reason
- * (`whyOf`) when the call fails.
+ * `gh` for a read that is said when it fails: `{ out, why }`, `out` null
+ * and `why` GitHub's reason (`whyOf`) when the call fails.
  */
-function ghAsk(args, timeout, env = process.env) {
+function ghAsk(args, timeout) {
   try {
-    const out = execFileSync(env.WORKFLOW_GH || "gh", args, {
+    const out = execFileSync(process.env.WORKFLOW_GH || "gh", args, {
       cwd: root,
       encoding: "utf8",
       timeout,
@@ -7737,7 +7631,7 @@ function ghAsk(args, timeout, env = process.env) {
  * 120 characters, its last period dropped; "no answer in <n> seconds" when
  * its timeout killed it; the error's own first line when `gh` wrote nothing.
  */
-export function whyOf(error, timeout = 0) {
+function whyOf(error, timeout = 0) {
   if (error?.code === "ETIMEDOUT")
     return `no answer in ${Math.max(1, Math.round(timeout / 1000))} seconds`;
   const first = (text) =>
@@ -7759,7 +7653,8 @@ function withPermissions(seen, items, repo, deadline) {
   const permissions = { ...seen.permissions };
   const checked = { ...(seen.checked || {}) };
   for (const login of new Set(items.map((item) => item.author).filter(Boolean))) {
-    // Read again after a day, so a person whose access was taken away stops counting (/code-review).
+    // Read again after a day, so a person whose access was taken away stops
+    // counting.
     const fresh = Date.now() - (checked[login] || 0) < 24 * 60 * MINUTE;
     if ((permissions[login] && fresh) || login.endsWith("[bot]") || Date.now() >= deadline)
       continue;
@@ -7795,9 +7690,9 @@ export function githubPrompt(path) {
 }
 
 /**
- * **What is done with the events** (plans/github-watched.md, part 3), in
- * their order, a line printed per thing: `merged` closes the issue as the
- * app with `Merged as #<m>.` and writes `Issue #<n> closed <date>.` in its
+ * **What is done with the events** (decisions.md#github-webhook), in their
+ * order, a line printed per thing: `merged` closes the issue as the app
+ * with `Merged as #<m>.` and writes `Issue #<n> closed <date>.` in its
  * plan's "Built"; every other kind but `issue` is appended to
  * `plans/github/<n>.md` and the assistant started on the oldest note not
  * handled, under the queue's bounds; `issue` is kept for `plans` to list.
@@ -7809,13 +7704,25 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
   const plans = readPlans(join(root, "plans"));
   let login = seen.login || "";
   // Read once a batch, at its first merge: the open pull requests do not
-  // change between its events (/code-review).
+  // change between its events.
   let open;
+  // Appends `event`'s note to its pull request's or issue's file, and marks
+  // the line said next as that note's.
+  const note = (event) => {
+    const dir = join(root, "plans", "github");
+    const file = join(dir, `${event.number}.md`);
+    if (!dry) {
+      mkdirSync(dir, { recursive: true });
+      appendFileSync(file, noteFor(event, { first: !existsSync(file) }));
+    }
+    noted.push({ path: `plans/github/${event.number}.md`, line: said.length });
+  };
   for (const event of events) {
     if (event.kind === "merged") {
       if (event.issue) said.push(await closeIssue(event, plans, dry));
-      // **What the merge left behind** (plans/merged-pr-refreshes-the-rest.md,
-      // part 2): the open pull requests, read as they are now.
+      // **What the merge left behind**
+      // (decisions.md#merge-refreshes-the-rest): the open pull requests, read
+      // as they are now.
       if (proj().land !== "pull-request" || !event.base) continue;
       if (open === undefined) {
         const { out } = ghAsk(
@@ -7841,8 +7748,8 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
         if (!login) login = String(ghRead(["api", "user", "--jq", ".login"], 5000) || "").trim();
       }
       // An unread login would leave every person's pull request as another's,
-      // so it is unread as the list is (Codex). A merge from the project's own
-      // branch into another (a release) leaves nothing stacked on it (/code-review).
+      // so it is unread as the list is. A merge from the project's own branch
+      // into another (a release) leaves nothing stacked on it.
       const behind =
         open && login
           ? behindOf(
@@ -7858,13 +7765,7 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
         );
         continue;
       }
-      const dir = join(root, "plans", "github");
-      const file = join(dir, `${event.number}.md`);
-      if (!dry) {
-        mkdirSync(dir, { recursive: true });
-        appendFileSync(file, noteFor({ ...event, behind }, { first: !existsSync(file) }));
-      }
-      noted.push({ path: `plans/github/${event.number}.md`, line: said.length });
+      note({ ...event, behind });
       said.push(
         behind.unread
           ? `GitHub: #${event.number} merged into ${event.base}, noted: behind not read.`
@@ -7877,13 +7778,7 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
       said.push(`GitHub: #${event.number} opened by ${event.by}, listed.`);
       continue;
     }
-    const dir = join(root, "plans", "github");
-    const file = join(dir, `${event.number}.md`);
-    if (!dry) {
-      mkdirSync(dir, { recursive: true });
-      appendFileSync(file, noteFor(event, { first: !existsSync(file) }));
-    }
-    noted.push({ path: `plans/github/${event.number}.md`, line: said.length });
+    note(event);
     said.push(
       event.kind === "failed"
         ? `GitHub: #${event.number} ${event.by} run failed, noted.`
@@ -7945,13 +7840,13 @@ async function closeIssue(event, plans, dry) {
 }
 
 /**
- * **What a merge leaves behind** (plans/merged-pr-refreshes-the-rest.md,
- * part 2), pure: of the open pull requests (`number`, `headRefName`,
- * `baseRefName`, `author`), the queue's own by `own` (a number or a head)
- * whose base is the merged one's base or its head. `{ own, stacked, theirs }`,
- * each `[{ number, head, login }]`: `stacked` on the merged head, `theirs`
- * by a person who is not `login`, the token's own (with `login` empty, every
- * person's: unread, the safe side is to leave it), `own` the rest.
+ * **What a merge leaves behind** (decisions.md#merge-refreshes-the-rest),
+ * pure: of the open pull requests (`number`, `headRefName`, `baseRefName`,
+ * `author`), the queue's own by `own` (a number or a head) whose base is the
+ * merged one's base or its head. `{ own, stacked, theirs }`, each `[{ number,
+ * head, login }]`: `stacked` on the merged head, `theirs` by a person who is
+ * not `login`, the token's own (with `login` empty, every person's: unread,
+ * the safe side is to leave it), `own` the rest.
  */
 export function behindOf(event, pulls = [], own = [], login = "") {
   const ours = new Set(own);
@@ -8027,7 +7922,7 @@ function readSeen() {
 /**
  * The seen file written by a read, with the Stop hook's `checksUnread` as it
  * is on disk now, not as the read found it seconds before: the Stop hook
- * alone sets it (Codex).
+ * alone sets it.
  */
 function writeSeen(next) {
   const { checksUnread } = readJson(files.githubSeen()) || {};
@@ -8040,8 +7935,8 @@ function writeSeen(next) {
 /**
  * Items and the seen file through `githubEvents`, the permissions read first,
  * then handled. With issues off only failed runs and merges make events
- * (`issuesOff`); a failed run whose pull request GitHub left out is given
- * the open one of its head branch (plans/executor-never-watches-ci.md, part 1).
+ * (`issuesOff`); a failed run whose pull request GitHub left out is given the
+ * open one of its head branch (decisions.md#github-webhook).
  */
 async function act(items, { deadline = Date.now() + 25_000, dry = false } = {}) {
   const issues = hasIssues();
@@ -8074,13 +7969,13 @@ async function act(items, { deadline = Date.now() + 25_000, dry = false } = {}) 
   const context = { ...githubContext(), slug: seen.slug, issuesOff: !issues };
   const { events, seen: next } = githubEvents(seen, items, context);
   const { said, seen: kept } = await handleEvents(events, next, { dry });
-  // A dry run changes nothing on disk, so the real one still sees it all (/code-review).
+  // A dry run changes nothing on disk, so the real one still sees it all.
   if (!dry) writeSeen(kept);
   return said;
 }
 
 /** The inbox's deliveries not seen yet, oldest first, as items. */
-function inboxItems(seen = readSeen()) {
+function inboxItems(seen) {
   let names = [];
   try {
     names = readdirSync(files.githubInbox()).filter((name) => name.endsWith(".json"));
@@ -8127,18 +8022,18 @@ function inboxItems(seen = readSeen()) {
  * requests' comments and reviews, and the pull requests merged since;
  * then the inbox's own deliveries; all through `githubEvents`.
  */
-export async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {}) {
+async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {}) {
   const deadline = Date.now() + budget;
-  // The read's own start is the next one's line, so nothing made while it runs is lost (/code-review).
+  // The read's own start is the next one's line, so nothing made while it runs
+  // is lost.
   const began = new Date().toISOString();
   const seen = readSeen();
   const since = seen.readAt || "";
   const items = [];
   // The listener's handling: the inbox alone, no read; nothing once pull
-  // requests are off, so a listener left running acts on no delivery
-  // (plans/related-plans-share-a-pull-request-follow-up-5.md, Codex); with
+  // requests are off, so a listener left running acts on no delivery; with
   // issues off, `act` takes the failed runs alone
-  // (plans/executor-never-watches-ci.md, part 2).
+  // (decisions.md#github-webhook).
   if (inbox && proj().land !== "pull-request") return ["GitHub: nothing new."];
   if (inbox) {
     const said = await act(inboxItems(seen), { deadline, dry });
@@ -8146,14 +8041,13 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
   }
   const newer = (at) => !since || (at && at > since);
   // The runs' own line, moved only when every run list was read, so a read
-  // that fails or runs out of time does not pass a failure it missed (Codex).
+  // that fails or runs out of time does not pass a failure it missed.
   const runsSince = seen.runsReadAt ?? since;
   const newerRun = (at) => !runsSince || (at && at > runsSince);
-  // **A list it could not read is said, and its line holds**
-  // (plans/checks-read-with-the-app.md, part 2): each failed read is kept by
-  // its name and GitHub's reason, and the lines below move only past what
-  // was read. `runs` is a run list, `pulls` the open pull requests, which
-  // hold both lines, anything else `readAt` alone.
+  // **A list it could not read is said, and its line holds**: each failed
+  // read is kept by its name and GitHub's reason, and the lines below move
+  // only past what was read. `runs` is a run list, `pulls` the open pull
+  // requests, which hold both lines, anything else `readAt` alone.
   const unread = [];
   const listOf = (name, line, args, most) => {
     if (Date.now() >= deadline) {
@@ -8174,10 +8068,10 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
     unread.push({ name, line, why: "an answer that is not JSON" });
     return null;
   };
-  // What changed since the last read, not the newest fifty (/code-review).
+  // What changed since the last read, not the newest fifty.
   const searched = (what) => (since ? ["--search", `${what}:>=${since.slice(0, 19)}Z`] : []);
   // With issues off, the queue's own pull requests' failed runs alone
-  // (plans/executor-never-watches-ci.md, part 2).
+  // (decisions.md#github-webhook).
   const issuesOn = hasIssues();
   const issues = !issuesOn
     ? []
@@ -8251,7 +8145,7 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
         "50",
         "--json",
         // No checks: a token that cannot read them would fail the whole list
-        // (plans/failed-runs-the-webhook-misses.md, part 2).
+        // (decisions.md#github-webhook).
         "number,title,url,headRefName,headRefOid,comments,reviews",
       ],
       10_000,
@@ -8268,7 +8162,7 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
       head: pull.headRefName,
     };
     // The head commit's runs alone, so a busy branch's older runs do not
-    // crowd a failed one out (Codex).
+    // crowd a failed one out.
     const runs = listOf(
       `the runs of #${pull.number}`,
       "runs",
@@ -8314,7 +8208,7 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
     );
     // Unread, the pull request's comments and reviews wait for the next read
     // too: one told now would move its last seen past the review comment
-    // missed, and `githubEvents` would pass that (/code-review).
+    // missed, and `githubEvents` would pass that.
     if (!notes) {
       for (let at = items.length - 1; at >= 0; at--)
         if (items[at].number === pull.number && items[at].pull && items[at].kind !== "failed")
@@ -8333,8 +8227,8 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
         });
   }
   // **The merges since the last read**, issues on or off, with their base
-  // (plans/merged-pr-refreshes-the-rest.md, part 1); none on a first read,
-  // which has no line yet and would tell the last hundred.
+  // (decisions.md#merge-refreshes-the-rest); none on a first read, which
+  // has no line yet and would tell the last hundred.
   const merged = !(proj().land === "pull-request" && since)
     ? []
     : listOf(
@@ -8376,7 +8270,7 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
   const readOk = !unread.some((one) => one.line !== "runs");
   const runsOk = !unread.some((one) => one.line !== "read");
   const groups = unreadSaid(unread);
-  if (!dry && !inbox) {
+  if (!dry) {
     const next = {
       ...readSeen(),
       readAt: readOk ? began : seen.readAt,
@@ -8391,12 +8285,11 @@ export async function githubCommand({ budget = 25_000, dry = false, inbox = fals
 }
 
 /**
- * **The lists a read could not get, said** (plans/checks-read-with-the-
- * app.md, part 2): grouped by their reason, in the order met, each group
- * `<names> (<why>)`, one kind's pull requests joined ("the runs of #132 and
- * #118").
+ * **The lists a read could not get, said**: grouped by their reason, in the
+ * order met, each group `<names> (<why>)`, one kind's pull requests joined
+ * ("the runs of #132 and #118").
  */
-export function unreadSaid(unread = []) {
+function unreadSaid(unread = []) {
   const groups = new Map();
   for (const { name, why } of unread) {
     if (!groups.has(why)) groups.set(why, []);
@@ -8417,10 +8310,9 @@ export function unreadSaid(unread = []) {
 }
 
 /**
- * **`plans`'s lines for what GitHub would not give** (plans/checks-read-
- * with-the-app.md, parts 1 and 2): the lists the last `plans github` could
- * not read, and the pull requests' checks the Stop hook could not, each
- * while it holds.
+ * **`plans`'s lines for what GitHub would not give**: the lists the last
+ * `plans github` could not read, and the pull requests' checks the Stop
+ * hook could not, each while it holds.
  */
 export function unreadLines(seen = {}) {
   const out = [];
@@ -8436,14 +8328,13 @@ export function unreadLines(seen = {}) {
 }
 
 /**
- * **A pull request's failed runs, as read** (plans/failed-runs-the-webhook-misses.md,
- * part 2): from `gh run list --branch <head>`, which needs the token's
- * Actions read alone, whatever set each run off. One `failed` item per row
- * on the pull request's head commit that has completed in a failing
- * conclusion (`FAILED_CONCLUSIONS`) and is `newer` than the last read; a run
- * still going is read once it ends (Codex). `at` is the row's `updatedAt`,
- * as a delivery's `updated_at`, and the run and attempt make the same
- * `seen.runs` key, so a run both bring is told once.
+ * **A pull request's failed runs, as read** (decisions.md#github-webhook): from
+ * `gh run list --branch <head>`, which needs the token's Actions read alone,
+ * whatever set each run off. One `failed` item per row on the pull request's
+ * head commit that has completed in a failing conclusion (`FAILED_CONCLUSIONS`)
+ * and is `newer` than the last read; a run still going is read once it ends.
+ * `at` is the row's `updatedAt`, as a delivery's `updated_at`, and the run and
+ * attempt make the same `seen.runs` key, so a run both bring is told once.
  */
 export function failedRunsOf(pull, base, runs = [], newer = () => true) {
   const items = [];
@@ -8475,7 +8366,7 @@ export function failedRunsOf(pull, base, runs = [], newer = () => true) {
 /**
  * **Who put a label on an issue**, from its events (`gh api
  * .../issues/<n>/events`), the last `labeled` one with that label; "" when
- * it cannot be read, so the item is no event (the Claude review).
+ * it cannot be read, so the item is no event.
  */
 function labeller(number, label, deadline) {
   if (Date.now() >= deadline) return "";
@@ -8494,12 +8385,11 @@ function labeller(number, label, deadline) {
 }
 
 /**
- * **`plans webhook`**: with `--serve`, the listener itself; with
- * `--stop`, the listener ended; else a listener started when none is
- * alive. With no secret, one line and nothing runs. The listener asks GitHub
- * what its app has and, while the app cannot send a failed run, reads them
- * itself every `every` milliseconds (plans/app-old-registration-said.md,
- * part 2).
+ * **`plans webhook`**: with `--serve`, the listener itself; with `--stop`,
+ * the listener ended; else a listener started when none is alive. With no
+ * secret, one line and nothing runs. The listener asks GitHub what its app
+ * has and, while the app cannot send a failed run, reads them itself every
+ * `every` milliseconds.
  */
 export async function webhookCommand(
   args = [],
@@ -8511,16 +8401,7 @@ export async function webhookCommand(
     // process's: nothing is killed, and the next start removes the record.
     const record = await webhookListening();
     if (!record) return { said: "The webhook: none was running.", status: 0 };
-    try {
-      process.kill(record.pid);
-    } catch {
-      // Gone already.
-    }
-    try {
-      unlinkSync(files.webhook());
-    } catch {
-      // Gone already.
-    }
+    if (!(await stopListener(record))) return { said: webhookLine(record), status: 1 };
     return { said: "The webhook: stopped.", status: 0 };
   }
   const webhookSecret = secret("WORKFLOW_WEBHOOK_SECRET", env);
@@ -8532,11 +8413,7 @@ export async function webhookCommand(
   if (!args.includes("--serve")) {
     // The listener writes its own record once it listens, so only the starter
     // removes a stale one: two starts racing never remove the winner's.
-    dropWebhookRecord(seen);
-    detached(process.execPath, [fileURLToPath(import.meta.url), "webhook", "--serve"], {
-      ...env,
-      WORKFLOW_ROOT: root,
-    });
+    spawnListener(seen, env);
     // Two seconds for it to answer; `sleep` blocks the loop a connect needs.
     const until = Date.now() + 2000;
     let up = null;
@@ -8548,11 +8425,10 @@ export async function webhookCommand(
   mkdirSync(files.githubInbox(), { recursive: true });
   const record = { pid: process.pid, port, at: Date.now(), lastAt: 0, code: codeStamp() };
   // **The handling runs in a child**, one at a time, so a start's wait never
-  // keeps the server from answering GitHub within its ten seconds (/code-review).
+  // keeps the server from answering GitHub within its ten seconds.
   let child = null;
   // What waits on the child: null, the inbox, or a whole read, which reads the
-  // inbox too, so a timer's read that finds the child busy is not lost to it
-  // (plans/app-old-registration-said.md, part 2).
+  // inbox too, so a timer's read that finds the child busy is not lost to it.
   let again = null;
   const run = (args) => {
     if (child) {
@@ -8578,7 +8454,8 @@ export async function webhookCommand(
     port,
     secret: webhookSecret,
     // Every verified delivery moves when GitHub last reached it; only one the
-    // queue takes something from is written (plans/merged-pr-refreshes-the-rest.md, part 3).
+    // queue takes something from is written
+    // (decisions.md#merge-refreshes-the-rest).
     heard: () => {
       record.lastAt = Date.now();
       writeJson(files.webhook(), record);
@@ -8590,8 +8467,8 @@ export async function webhookCommand(
   });
   // **What the app has**, asked of GitHub: "has", "lacks" (set on the record),
   // "unknown" when GitHub's answer or the record's write failed, the record's
-  // `lacks` left as it was, and "none" with no app's id, key or repository here.
-  // Never throws: the listener outlives a failed check (/code-review).
+  // `lacks` left as it was, and "none" with no app's id, key or repository
+  // here. Never throws: the listener outlives a failed check.
   const check = async () => {
     try {
       const id = secret("WORKFLOW_APP_ID", env);
@@ -8624,9 +8501,9 @@ export async function webhookCommand(
     // **While the app cannot send a failed run, the listener reads them
     // itself**, asking GitHub again each time, so the read ends once it can:
     // also while what the app has is unknown, or its id, key or repository
-    // cannot be read for a moment (/code-review); one read more when it gains
-    // them, for a run that failed since the last; and none once pull requests
-    // are off, the project file read afresh (Codex).
+    // cannot be read for a moment; one read more when it gains them, for a
+    // run that failed since the last; and none once pull requests are off,
+    // the project file read afresh.
     let checking = false;
     const timer = setInterval(async () => {
       if (checking) return;
@@ -8647,14 +8524,14 @@ export async function webhookCommand(
 /**
  * The events the app is subscribed to, as `noAppWords` and `noSecretWords`
  * say them: "the events Issues, … and Workflow run", from the webhook's own
- * list (plans/webhook-events-from-the-parser.md).
+ * list.
  */
 function eventsWords() {
   const labels = WEBHOOK_EVENTS.map((e) => e.label);
   return `the events ${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
 }
 
-/** `plans gh`'s refusal with no app here (plans/plans-as-github-issues.md, part 1). */
+/** `plans gh`'s refusal with no app here. */
 export function noAppWords(repo = "", env = process.env, project = proj().name) {
   return `The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; ${eventsWords()}), install it on ${repo || "this repository"}, and ${setWhere("WORKFLOW_APP_ID and WORKFLOW_APP_KEY", env, project)}`;
 }
@@ -8680,12 +8557,12 @@ function repoHere(run = spawnSync, env = process.env, ask = true) {
 }
 
 /**
- * **`plans gh <args...>`: `gh` as the project's own GitHub App**
- * (plans/plans-as-github-issues.md, part 1): `gh` run with `GH_TOKEN` set to
- * the app's installation token, its output the terminal's, so the token is
- * never printed. `gh pr ready` without `--undo` is refused as the tool hook
- * refuses it; with no app's id or key here, one line says what to register
- * and nothing runs. `{ said, status }`, `said` the refusal or "".
+ * **`plans gh <args...>`: `gh` as the project's own GitHub App**: `gh` run
+ * with `GH_TOKEN` set to the app's installation token, its output the
+ * terminal's, so the token is never printed. `gh pr ready` without `--undo`
+ * is refused as the tool hook refuses it; with no app's id or key here, one
+ * line says what to register and nothing runs. `{ said, status }`, `said`
+ * the refusal or "".
  */
 export async function ghCommand(
   args = [],
@@ -8727,7 +8604,8 @@ export async function ghCommand(
       status: 1,
     };
   }
-  // Where it was run, so gh finds the branch and the relative paths it is given (/code-review).
+  // Where it was run, so gh finds the branch and the relative paths it is
+  // given.
   const done = run(env.WORKFLOW_GH || "gh", args, {
     cwd: process.cwd(),
     stdio: "inherit",
@@ -8760,7 +8638,7 @@ export function main(args = process.argv.slice(2)) {
   const [mode, ...rest] = args;
   if (!mode || mode === "list" || mode === "--all") {
     // The sweep needs every live session on the machine, any project's:
-    // unread, nothing is removed (/code-review).
+    // unread, nothing is removed.
     const live = liveSessions();
     if (liveAll) sweepTemp({ live: liveIds(liveAll) });
     process.stdout.write(`${list({ all: args.includes("--all"), live })}\n`);
@@ -8770,7 +8648,7 @@ export function main(args = process.argv.slice(2)) {
     process.stdout.write(`${init(root)}\n`);
     return;
   }
-  // **`plans cost`** (plans/reuse-ceiling-per-agent.md, part 6).
+  // **`plans cost`**.
   if (mode === "cost") {
     costCommand(rest);
     return;
@@ -8835,9 +8713,10 @@ export function main(args = process.argv.slice(2)) {
           } catch {
             // A timer that fails ends nothing: the supervisor's own clock remains.
           }
-          // **The end timer is the queue's sweep** (plans/executor-takes-next-
-          // ready-plan.md, part 2): plans ready and no executor alive start one,
-          // unless the end handed a plan over and started one already.
+          // **The end timer is the queue's sweep**
+          // (decisions.md#plans-reach-an-executor): plans ready and no executor
+          // alive start one, unless the end handed a plan over and started one
+          // already.
           try {
             if (!handed) startOnReady();
           } catch {
@@ -8858,7 +8737,7 @@ export function main(args = process.argv.slice(2)) {
     );
     return;
   }
-  // **`plans first`** (plans/priority-queue.md, part 2).
+  // **`plans first`** (decisions.md#plan-put-first).
   if (mode === "first") {
     const { said, status } = firstCommand(rest);
     process.stdout.write(`${said}\n`);
@@ -8881,11 +8760,7 @@ export function main(args = process.argv.slice(2)) {
       const deferred = readJson(files.deferred(kind));
       if (!deferred) continue;
       if (deferred.pid) {
-        try {
-          process.kill(deferred.pid);
-        } catch {
-          // The timer is gone already.
-        }
+        killTimer(deferred.pid, START_TIMER);
         writeJson(files.deferred(kind), { ...deferred, pid: null });
       }
       held.push(deferredWords(deferred));
@@ -8940,15 +8815,19 @@ export function main(args = process.argv.slice(2)) {
     for (let i = 0; i < rest.length; i++) {
       if (rest[i] === "--dry") options.dry = true;
       else if (rest[i] === "--agent") options.agent = rest[++i];
-      else if (rest[i] === "--at") options.at = Number(rest[++i]);
       else if (rest[i] === "--replace") options.replace = rest[++i];
       else if (rest[i] === "--timer") timer = Number(rest[++i]);
       else if (rest[i] === "--deferral") options.deferral = rest[++i];
       else if (rest[i] === "--owner-said") options.said = rest[++i] ?? "";
       else paths.push(rest[i]);
     }
-    // **The owner's words, or nothing starts** (plans/loop-guard-counts-
-    // failures.md, part 3): words left out, or a path or a flag taken for them.
+    // An agent that is none of the three is refused, as an unknown subcommand is.
+    if (options.agent && !["executor", "planner", "assistant"].includes(options.agent)) {
+      process.stdout.write(`${USAGE}\n`);
+      return;
+    }
+    // **The owner's words, or nothing starts** (decisions.md#starts-bounded):
+    // words left out, or a path or a flag taken for them.
     if ("said" in options) {
       const words = options.said.trim();
       if (!words || words.startsWith("--") || /^\S+\.md$/.test(words)) {
@@ -8959,18 +8838,18 @@ export function main(args = process.argv.slice(2)) {
       }
     }
     if (timer) {
-      // The deferred start: a wait and then the same start, nothing else.
-      // **A timer clears only its own deferral**: one whose plans were all
+      // The deferred start: a wait and then the same start, nothing else. **A
+      // timer clears only its own deferral**: one whose plans were all
       // decided or taken lost its file, and a newer deferral with another
       // timer may stand there now. **The leases' file stays**: the start
-      // reads each lease's own time (plans/brief-lease-per-brief.md, part 2).
+      // reads each lease's own time (decisions.md#brief-leased).
       setTimeout(
         () => {
           const file = files.deferred(
             options.deferral || (options.agent === "planner" ? "planner" : "executor"),
           );
           // A lease timer that fires takes its pid out of the table, so a
-          // lease written while it starts a planner never kills it (Codex C1).
+          // lease written while it starts a planner never kills it.
           if (options.deferral === "handed" && readJson(file)?.pid === process.pid)
             writeJson(file, { ...readJson(file), pid: null, firing: process.pid });
           else if (readJson(file)?.pid === process.pid)

@@ -21,10 +21,10 @@ import { basename, join } from "node:path";
 import { owner } from "./project.mjs";
 
 /** Refusals in one turn; the next call passes, as the turn audit passes its second stop. */
-export const MAX_REFUSALS = 2;
+const MAX_REFUSALS = 2;
 
 /** The turn's count, in the OS temp directory as `agentPath` keeps the agent; none without a session. */
-export function countPath(sessionId) {
+function countPath(sessionId) {
   return sessionId ? join(tmpdir(), `workflow-plain-words-${sessionId}.json`) : "";
 }
 
@@ -48,7 +48,7 @@ const SIGNALS = [
 const ADDRESS = /https?:\/\/\S+/g;
 
 /** The code names in a text, once each; a name inside another found (the file of a path) is the longer one's. */
-export function codeNames(text) {
+function codeNames(text) {
   const plain = String(text || "").replace(ADDRESS, " ");
   const found = [];
   for (const signal of SIGNALS)
@@ -61,7 +61,7 @@ export function codeNames(text) {
 }
 
 /** Whether a question states something before it asks: fewer than two sentence ends is one sentence. */
-export function singleSentence(text) {
+function singleSentence(text) {
   const plain = String(text || "").replace(ADDRESS, " ");
   // A full stop may close a quotation or a bracket first: 'He said "keep it." Should it close?'
   return (plain.match(/[.!?]["'\u201d\u2019)\]]*(?=\s|$)/g) || []).length < 2;

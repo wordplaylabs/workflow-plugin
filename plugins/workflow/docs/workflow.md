@@ -495,9 +495,9 @@ while its file waits; `plans first --undo <path>` takes it out.
 **A queue has as many executors as its project file's `executors`
 says**, one by default, numbered; each works in its own worktree, holds
 its number's lock (`.claude/executor.<n>.lock`) and builds one plan at a
-time, and the lowest-numbered free one takes the next plan it may build.
-Its Stop hook holds the stop on a red or
-unfinished `run` of its push, or a pull request of the plans it took
+time, and the lowest-numbered free one takes the next plan it may build;
+a usage reset starts as many as are free. Its Stop hook holds the stop
+on a red or unfinished `run` of its push, or a pull request of the plans it took
 with a failed check no webhook brings to the assistant, whose fix is pushed
 where the red one was, before anything else, then names
 the next plan free for it to a session it may reuse ("A chat is kept

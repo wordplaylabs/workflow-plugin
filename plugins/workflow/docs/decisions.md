@@ -452,10 +452,13 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   `plans end --now` alone. The hold is on the project's `run`, and on a
   pull request's failed checks only where no webhook brings them
   (`push-not-waited-on`); with more than one executor, only on the pull
-  requests of the plans its session took. plans/parallel-executors.md,
+  requests of the plans its session took. A usage reset starts as many
+  as are free, each on the next free plan, since one start a reset left
+  the rest of its plans to the next stop. plans/parallel-executors.md,
   plans/cache-aware-queue.md, plans/base-at-building-line.md,
   plans/executor-over-ceiling-hands-on.md, plans/simpler-agents.md,
-  plans/executor-never-watches-ci.md.
+  plans/executor-never-watches-ci.md,
+  plans/usage-reset-starts-every-free.md.
   - ~~One checkout has one executor, and its Stop hook holds the stop
     on a red run or pull request, then reuses or retires the
     session.~~ (Javi, 27 October; one checkout held one build)

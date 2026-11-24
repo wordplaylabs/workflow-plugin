@@ -3446,7 +3446,35 @@ export function start(paths, options = {}) {
     : options.timer || options.at > Date.now()
       ? ignoreQueueFiles(primaryCheckout())
       : sync({ fetch: !options.replace });
-  const said = startHere(paths, options);
+  // **A usage reset starts as many as are free** (decisions.md#executor-pool):
+  // the timer's start goes on with the paths it has not started, each start
+  // with its own bounds and claim, until one starts nothing, at most one try
+  // a path and a number. A number started here, or refused for the session
+  // there, is passed over by the next start, which may read the sessions
+  // before the new chat is listed; a chat started here is at work beside the
+  // next start, listed or not; the session replaced and the owner's word go
+  // with the first start.
+  let out = {};
+  let said = startHere(paths, { ...options, out });
+  const kind = options.agent === "planner" || options.agent === "assistant" ? "" : "executor";
+  if (options.timer && kind && !options.dry) {
+    const started = [];
+    const passed = [];
+    const going = [];
+    const { replace: _r, said: _s, ...next } = options;
+    for (let i = 1; i < paths.length + proj().executors; i++) {
+      if (out.started) {
+        going.push(out.started.name);
+        started.push(out.started.path);
+        if (out.started.number) passed.push(out.started.number);
+      } else if (out.refused) passed.push(out.refused);
+      else break;
+      const rest = paths.filter((path) => !started.includes(queuePath(path)));
+      if (!rest.length) break;
+      out = {};
+      said = `${said}\n${startHere(rest, { ...next, passed, going, again: true, out })}`;
+    }
+  }
   // **The listener is armed with a start** (decisions.md#github-webhook).
   if (!options.dry) armWebhook().catch(() => {});
   return synced ? `${synced}\n${said}` : said;
@@ -4025,6 +4053,10 @@ function startHere(
     why = "",
     said = "",
     net = false,
+    passed = [],
+    going = [],
+    again = false,
+    out = {},
   } = {},
 ) {
   if (!proj().found) return NO_PROJECT;
@@ -4097,8 +4129,9 @@ function startHere(
     if (held.length && !timer) return held.map(askingWords).join("\n");
     paths = paths.filter((path) => !held.some((p) => p.path === path));
     // A timer's held plans, asked again since it was armed, get the window's
-    // deferral back at the earliest of their windows.
-    if (timer && held.length && !dry)
+    // deferral back at the earliest of their windows, once: not again at
+    // each further start of a usage reset's.
+    if (timer && held.length && !dry && !again)
       defer(
         Math.min(...held.map((p) => p.askingIn.until)) + WINDOW_SLACK,
         `${owner()} has thirty minutes to answer`,
@@ -4125,10 +4158,14 @@ function startHere(
   // alone that waits says why.
   let number = 1;
   let messaged = "";
+  let batch = null;
+  let sessionAt = false;
   if (kind === "executor" && agent === "executor") {
-    const claims = Object.fromEntries(
-      Object.entries(readClaims(plans, live)).filter(([, one]) => one.holder !== replace),
-    );
+    const claims = Object.fromEntries([
+      ...Object.entries(readClaims(plans, live)).filter(([, one]) => one.holder !== replace),
+      // The numbers this timer started or was refused at, held as a start holds its own.
+      ...passed.map((n) => [`slot:${n}`, { holder: "started", until: Infinity }]),
+    ]);
     const free = freePlans(plans, { claims });
     const sessions = sessionsOf("executor", live, readLocks(), { plans })
       // A chat in the checkout is no number's: it builds nothing there.
@@ -4176,6 +4213,9 @@ function startHere(
     }
     const taker = takeOf(pick);
     number = taker.number;
+    sessionAt = Boolean(taker.session);
+    // A usage reset's start deferred again keeps every plan it still has.
+    if (timer) batch = paths;
     paths = [pick.path];
     // An idle chat with room is sent the plan by message, as a planner is a
     // brief; a timer's start, which nobody watches, starts a fresh one.
@@ -4306,6 +4346,7 @@ function startHere(
         ? sessionsOf("executor", live, readLocks(), { plans, usageFor: () => null })
             .filter((one) => one.number && one.number !== number && !one.retired)
             .map((one) => one.name)
+            .concat(going)
         : [],
     // This checkout's chats only: one in another checkout reads another queue.
     open: kind === "assistant" ? openAssistants(live, proj().name) : [],
@@ -4320,6 +4361,8 @@ function startHere(
     said,
   });
   if (decision.refuse) {
+    // A number whose session refused a usage reset's start is passed over by the next.
+    if (kind === "executor" && sessionAt) out.refused = number;
     // A refused timer's start leaves the due briefs free, under Briefs in `plans`.
     if (leaseTimer && !dry) releaseLease(due);
     return decision.why;
@@ -4366,7 +4409,7 @@ function startHere(
     return defer(
       decision.until,
       decision.why,
-      paths,
+      batch || paths,
       replace,
       kind,
       deferral === "asking" ? deferral : kind,
@@ -4535,6 +4578,7 @@ function startHere(
   if (kind === "planner") stopRetiredPlanners(live, { except: replace });
   // **The plan is claimed for the executor started on it**, so no other start
   // takes it before its Building line.
+  out.started = { name: decision.name, path: paths[0], number: tree ? number : 0 };
   if (tree) {
     const row = liveSessions({ fresh: true })?.find((one) => one.name === decision.name);
     unclaim(paths[0], starter);

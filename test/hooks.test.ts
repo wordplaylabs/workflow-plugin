@@ -12280,6 +12280,103 @@ describe("several executors build at once", () => {
     },
   );
 
+  /** Fires a usage reset's timer on `paths`, as `defer` arms it; it prints nothing. */
+  const reset = (one: ReturnType<typeof pool>, paths: string[]) =>
+    one.queue(["start", "--timer", String(Date.now()), ...paths]);
+  /** What the reset started, from the starts log and the chats listed: "<name>: <plan> in <worktree>". */
+  const startedBy = (one: ReturnType<typeof pool>) => {
+    const log = readFileSync(join(one.dir, ".claude", "starts.log"), "utf8")
+      .trim()
+      .split("\n");
+    const rows: { name: string; cwd: string }[] = one.read();
+    return log.map((line) => {
+      const { name, paths } = JSON.parse(line);
+      const row = rows.find((r) => r.name === name);
+      return `${name}: ${paths.join(", ")} in ${row ? basename(row.cwd) : "none"}`;
+    });
+  };
+  const three = {
+    "a.md": plan("A", "Change src/a.js."),
+    "b.md": plan("B", "Change src/b.js."),
+    "c.md": plan("C", "Change src/c.js."),
+  };
+
+  it(
+    "starts three executors at a usage reset on three plans deferred together, one each, in the queue's order",
+    { timeout: 60_000 },
+    () => {
+      const one = pool("Reset", three);
+      expect(reset(one, ["plans/a.md", "plans/b.md", "plans/c.md"])).toBe("");
+      expect(startedBy(one)).toEqual([
+        "Reset Executor 1 (lab): plans/a.md in executor-1",
+        "Reset Executor 2 (lab): plans/b.md in executor-2",
+        "Reset Executor 3 (lab): plans/c.md in executor-3",
+      ]);
+    },
+  );
+
+  it(
+    "starts two at a usage reset with executors: 2 and leaves the third ready for a free executor, with no new deferral",
+    { timeout: 60_000 },
+    () => {
+      const one = pool("Twice", three, "executors: 2\n");
+      reset(one, ["plans/a.md", "plans/b.md", "plans/c.md"]);
+      expect(startedBy(one)).toEqual([
+        "Twice Executor 1 (lab): plans/a.md in executor-1",
+        "Twice Executor 2 (lab): plans/b.md in executor-2",
+      ]);
+      expect(existsSync(join(one.dir, ".claude", "executor.deferred"))).toBe(false);
+      const listed = one.queue(["list"]);
+      expect(listed).toContain("1 plan free, but none starts: every executor is at work.");
+      expect(listed).toMatch(/\n  plans\/c\.md +Plan only, 24 November\n/);
+    },
+  );
+
+  it(
+    "leaves a plan deferred with another that changes its file waiting on it at the reset",
+    { timeout: 60_000 },
+    () => {
+      const one = pool("Shared", {
+        "a.md": plan("A", "Change src/x.js."),
+        "b.md": plan("B", "Change src/x.js and src/y.js."),
+        "c.md": plan("C", "Change src/c.js."),
+      });
+      reset(one, ["plans/a.md", "plans/b.md", "plans/c.md"]);
+      expect(startedBy(one)).toEqual([
+        "Shared Executor 1 (lab): plans/a.md in executor-1",
+        "Shared Executor 2 (lab): plans/c.md in executor-2",
+      ]);
+      expect(one.queue(["list"])).toMatch(
+        /plans\/b\.md +Plan only, 24 November, waits on plans\/a\.md \(both change src\/x\.js\)/,
+      );
+    },
+  );
+
+  it(
+    "goes on at a usage reset past a plan whose file name has a space, and past a number whose idle session refuses",
+    { timeout: 60_000 },
+    () => {
+      const one = pool("Past", {
+        "api cleanup.md": plan("A", "Change src/a.js."),
+        "b.md": plan("B", "Change src/b.js."),
+      });
+      one.write([
+        {
+          sessionId: "past-idle-1",
+          name: "Past Executor 9 (lab)",
+          kind: "background",
+          status: "idle",
+          cwd: one.tree(1),
+        },
+      ]);
+      reset(one, ["plans/api cleanup.md", "plans/b.md"]);
+      expect(startedBy(one)).toEqual([
+        "Past Executor 10 (lab): plans/api cleanup.md in executor-2",
+        "Past Executor 11 (lab): plans/b.md in executor-3",
+      ]);
+    },
+  );
+
   it(
     "holds a plan that changes a file the one in hand changes, says why, refuses its Building line, and names it once the first is built",
     { timeout: 60_000 },

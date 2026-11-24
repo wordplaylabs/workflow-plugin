@@ -2141,10 +2141,13 @@ function outOfTurnWords(path, ahead) {
   return `${ahead.path} is first (${firstWords(ahead).replace(/^first /, "")}): build it before ${path}. Only ${owner()}'s word, through the assistant chat, changes the order.`;
 }
 
-/** "plans/x.md asks Javi in Planner 3 [9b372186] until 14:32: ...", the start's refusal of a held plan. */
+/**
+ * "plans/x.md asks Javi through the assistant chat until 14:32: ...", the
+ * start's refusal of a held plan: he answers only in the assistant chat
+ * (decisions.md#one-chat), not in the planner's, which he cannot open.
+ */
 function askingWords(plan) {
-  const { row, until } = plan.askingIn;
-  return `${plan.path} asks ${owner()} in ${row.name || "a planner"} [${String(row.sessionId).slice(0, 8)}] until ${hhmm(until)}: he answers there, or the executor takes it then and decides by the recommended options.`;
+  return `${plan.path} asks ${owner()} through the assistant chat until ${hhmm(plan.askingIn.until)}: he answers in the assistant chat, or the executor takes it then and decides by the recommended options.`;
 }
 
 /**
@@ -2610,7 +2613,7 @@ export function canStart({
   ) {
     return {
       refuse: true,
-      why: `An executor is alive: ${lock.name || "an executor"} [${String(lock.sessionId).slice(0, 8)}]. Message it instead.`,
+      why: `An executor is alive: ${lock.name || "an executor"} [${String(lock.sessionId).slice(0, 8)}]. Have the assistant message it or end it (plans end ${String(lock.sessionId).slice(0, 8)}), then start again.`,
     };
   }
   let note = "";

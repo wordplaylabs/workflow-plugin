@@ -1645,7 +1645,10 @@ describe("plan-queue", () => {
         const lock = { sessionId: "abc", pid: 1, name: "Executor 5" };
         expect(
           canStart({ now, log: five, said, lock, alive: () => true, usage: usage(10) }),
-        ).toMatchObject({ refuse: true, why: expect.stringContaining("An executor is alive") });
+        ).toMatchObject({
+          refuse: true,
+          why: "An executor is alive: Executor 5 [abc]. Have the assistant message it or end it (plans end abc), then start again.",
+        });
       });
 
       it("counts a GitHub note an assistant handled as written, and not one with an event after", () => {
@@ -8082,7 +8085,7 @@ describe("asked once", () => {
       expect(all).toContain("plans/plain.md");
       expect(all).not.toContain("plans/asks.md");
       expect(start("plans/asks.md").trim()).toBe(
-        `plans/asks.md asks Javi in Asks Planner 3 [a1000000] until ${hhmm(at + 30 * MIN)}: he answers there, or the executor takes it then and decides by the recommended options.`,
+        `plans/asks.md asks Javi through the assistant chat until ${hhmm(at + 30 * MIN)}: he answers in the assistant chat, or the executor takes it then and decides by the recommended options.`,
       );
       // Refused whole, with another plan beside it.
       expect(start("plans/plain.md", "plans/asks.md")).not.toContain("Would run");
@@ -8592,7 +8595,7 @@ describe("asked once", () => {
           },
         },
       );
-      expect(out).toContain("plans/asks.md asks Javi in Asks Planner 3");
+      expect(out).toContain("plans/asks.md asks Javi through the assistant chat until");
       const written = takeDeferral();
       expect(written.paths).toEqual(["plans/asks.md"]);
       expect(written.until).toBe(at + 30 * MIN + 5000);

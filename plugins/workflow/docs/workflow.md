@@ -546,7 +546,10 @@ write code is `executors`; how many run a heavy step at once is the
 resource's number, so the first can be more than the machine runs of
 the second. The executor that built a plan runs its checks and
 reviews and fixes what they find: the reviews read, each in a
-context of its own, and take no slot. (decisions.md#resource-slots)
+context of its own, and take no slot. From 24 November a word
+`plans` does not know exits 2, so a step written for a newer copy
+fails on an older one rather than passing having run nothing; a copy
+from before then still passes it. (decisions.md#resource-slots)
 
 **A push is not waited on.** The executor runs the project's checks
 once, under **Before the push**, pushes and starts the next plan: it

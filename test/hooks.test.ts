@@ -3638,20 +3638,74 @@ describe("the queue's faults, closed", () => {
       env: { ...process.env, CLAUDE_PROJECT_DIR: dir, WORKFLOW_LIVE: "[]", ...env },
     });
 
-  it("plans start --agent tester prints the usage text and starts nothing", () => {
-    const dir = fixture("Tester");
-    writeFileSync(
-      join(dir, "plans", "x.md"),
-      "# X\n\nPlan only, 24 November 2026, for Javi; the executor builds it.\n",
-    );
-    const ran = join(dir, "ran");
-    const stub = fakeClaude(temp("tester-claude-"), { calls: ran });
-    const out = runIn(dir, ["start", "--agent", "tester", "plans/x.md"], {
-      WORKFLOW_CLAUDE: stub,
+  /**
+   * **An unknown word fails** (plans/unknown-subcommand-fails.md): a step
+   * written for a newer copy must not pass on an older one having run nothing.
+   */
+  describe("a word plans does not know", () => {
+    const usageStart = "plans                 the queue";
+    const spawnIn = (dir: string, args: string[], env: Record<string, string> = {}) =>
+      spawnSync("node", [join(here, queue), ...args], {
+        input: "",
+        encoding: "utf8",
+        env: { ...process.env, CLAUDE_PROJECT_DIR: dir, WORKFLOW_LIVE: "[]", ...env },
+      });
+
+    it("When plans nosuchword runs, then it exits 2, names the word on stderr and prints nothing on stdout", () => {
+      const dir = fixture("Unknown");
+      for (const word of ["nosuchword", ""]) {
+        const done = spawnIn(dir, [word]);
+        expect(done.status).toBe(2);
+        expect(done.stdout).toBe("");
+        const [first, second] = done.stderr.split("\n");
+        expect(first).toBe(`plans: unknown command "${word}"`);
+        expect(second.startsWith(usageStart)).toBe(true);
+      }
     });
-    expect(out).toContain("plans start --agent planner <brief>   start a planner on a brief");
-    expect(out.startsWith("plans                 the queue")).toBe(true);
-    expect(existsSync(ran)).toBe(false);
+
+    it("When plans start --agent nobody runs, then it exits 2, names the agent on stderr and starts nothing", () => {
+      const dir = fixture("Tester");
+      writeFileSync(
+        join(dir, "plans", "x.md"),
+        "# X\n\nPlan only, 24 November 2026, for Javi; the executor builds it.\n",
+      );
+      const ran = join(dir, "ran");
+      const stub = fakeClaude(temp("tester-claude-"), { calls: ran });
+      const done = spawnIn(dir, ["start", "--agent", "nobody", "plans/x.md"], {
+        WORKFLOW_CLAUDE: stub,
+      });
+      expect(done.status).toBe(2);
+      expect(done.stdout).toBe("");
+      expect(done.stderr.split("\n")[0]).toBe('plans: unknown agent "nobody"');
+      expect(done.stderr).toContain(
+        "plans start --agent planner <brief>   start a planner on a brief",
+      );
+      // A value left out or empty is not taken for the executor.
+      for (const args of [
+        ["start", "plans/x.md", "--agent"],
+        ["start", "--agent", "", "plans/x.md"],
+      ]) {
+        const empty = spawnIn(dir, args, { WORKFLOW_CLAUDE: stub });
+        expect(empty.status).toBe(2);
+        expect(empty.stdout).toBe("");
+        expect(empty.stderr.split("\n")[0]).toBe('plans: unknown agent ""');
+      }
+      expect(existsSync(ran)).toBe(false);
+    });
+
+    it("When plans or plans help runs, then it exits 0 with the queue or the usage on stdout", () => {
+      const dir = fixture("Known");
+      const listed = spawnIn(dir, []);
+      expect(listed.status).toBe(0);
+      expect(listed.stdout).not.toBe("");
+      expect(listed.stdout.startsWith(usageStart)).toBe(false);
+      for (const word of ["help", "--help", "-h"]) {
+        const done = spawnIn(dir, [word]);
+        expect(done.status).toBe(0);
+        expect(done.stdout.startsWith(usageStart)).toBe(true);
+        expect(done.stderr).toBe("");
+      }
+    });
   });
 
   describe("the read-only list", () => {

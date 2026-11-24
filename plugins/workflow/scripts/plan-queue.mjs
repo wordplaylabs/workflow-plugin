@@ -30,6 +30,8 @@
 //   plan-queue.mjs hold      `plans hold`: a heavy step run when a slot of
 //                            its resource is free (decisions.md#resource-slots)
 //   plan-queue.mjs pause | resume | sync | init
+//   plan-queue.mjs help      the usage, on stdout; any other word: named on
+//                            stderr with the usage, exit 2
 //
 // **Bounded, as every loop over model calls is**: as many executors at a time as the project says
 // (the lock); no start without usage headroom, deferred to the window's
@@ -9188,9 +9190,16 @@ plans gh <args...>    gh as the project's own GitHub App (WORKFLOW_APP_ID, WORKF
 plans webhook [--stop]  listen for the app's webhook on this container, or stop listening
 plans github          read what GitHub has that the webhook missed, and act on it`;
 
+/** A word `main` does not take: named on stderr, the usage after it, exit 2, stdout empty. */
+function refuse(what) {
+  process.stderr.write(`plans: ${what}\n${USAGE}\n`);
+  process.exitCode = 2;
+}
+
 export function main(args = process.argv.slice(2)) {
   const [mode, ...rest] = args;
-  if (!mode || mode === "list" || mode === "--all") {
+  // Only no word at all lists: an empty one (`plans "$step"`) is unknown.
+  if (mode === undefined || mode === "list" || mode === "--all") {
     // The sweep needs every live session on the machine, any project's:
     // unread, nothing is removed.
     const live = liveSessions();
@@ -9316,10 +9325,14 @@ export function main(args = process.argv.slice(2)) {
     return holdCommand(rest).then((code) => {
       process.exitCode = code;
     });
-  if (!["sync", "pause", "resume", "start", ...HOOK_MODES].includes(mode)) {
+  if (["help", "--help", "-h"].includes(mode)) {
     process.stdout.write(`${USAGE}\n`);
     return;
   }
+  // **An unknown word fails**: a step written for a newer copy (`plans hold`,
+  // say) must not pass on an older one having run nothing.
+  if (!["sync", "pause", "resume", "start", ...HOOK_MODES].includes(mode))
+    return refuse(`unknown command "${mode}"`);
   if (mode === "sync") {
     process.stdout.write(`${sync()}\n`);
     return;
@@ -9394,10 +9407,9 @@ export function main(args = process.argv.slice(2)) {
       else paths.push(rest[i]);
     }
     // An agent that is none of the three is refused, as an unknown subcommand is.
-    if (options.agent && !["executor", "planner", "assistant"].includes(options.agent)) {
-      process.stdout.write(`${USAGE}\n`);
-      return;
-    }
+    // A value left out or empty is refused too, not taken for the executor.
+    if ("agent" in options && !["executor", "planner", "assistant"].includes(options.agent))
+      return refuse(`unknown agent "${options.agent ?? ""}"`);
     // **The owner's words, or nothing starts** (decisions.md#starts-bounded):
     // words left out, or a path or a flag taken for them.
     if ("said" in options) {

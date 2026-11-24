@@ -640,8 +640,12 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   resource a lock names and nobody defined. A separate stage that
   tests and reviews what the executors built was not taken: its
   findings would go back to a chat that no longer holds the change,
-  and the reviews already read in contexts of their own.
-  plans/parallel-executors-follow-up.md.
+  and the reviews already read in contexts of their own. A word
+  `plans` does not know exits 2, the usage-error code grep and the
+  shell's builtins use, with the word named on stderr: a `plans hold`
+  step on a copy older than it had printed the usage, exited 0 and
+  passed having run nothing.
+  plans/parallel-executors-follow-up.md, plans/unknown-subcommand-fails.md.
 - `queues-in-parallel` **Each project's queue runs apart from every
   other, in parallel.** (Javi, 27 October) A change to the workflow is
   never held by the project it was noticed in.

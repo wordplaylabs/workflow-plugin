@@ -121,13 +121,16 @@ settings, until these are added.
   and builds (`claude --agent workflow:maker`), not the assistant. When
   it names `mcp` or `inherits`, keep a line: `plans chat` in this folder
   prints the command that opens a chat with this project's settings.
+  When it names `executors`, keep a line: that many executors build at
+  once in this project, each in its own worktree under
+  `.claude/worktrees/`.
 - When it is the home folder: say nothing about a project.
 
 ## 6. Tell the person
 
 End with this message, adding only the lines kept above (GitHub access,
 settings declined, `/workflow:setup` after the restart, the maker, `plans
-chat`):
+chat`, the executors):
 
 "Done. You now have three helpers in Claude Code. Start a chat with the
 assistant (`claude --agent workflow:assistant`, or pick it in the Claude

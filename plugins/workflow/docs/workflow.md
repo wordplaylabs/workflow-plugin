@@ -13,14 +13,26 @@ its paragraph.
 **Plan, then build, in two sessions.** A change of any size is planned by
 one session and built by another, with the context cleared between: the
 plan is the spec for one change, and the project's docs are the standing
-context. Each agent runs as the whole session, since a subagent cannot use
-the question tool: `workflow:planner` (Fable, effort high) writes the
+context. Each agent runs as the whole session: `workflow:planner` (Fable, effort high) writes the
 plan; `workflow:executor` (Opus, `--effort high`, which outranks a
 settings file's effort) builds it through the checks, three reviews and
 the push; `workflow:assistant` (Opus, effort medium, the agent a project's plain
 chats open as) answers and routes; `workflow:maker` (Opus, effort high) is the compact
 form's one chat, which decides, builds and records.
 (decisions.md#plan-then-build)
+
+**The owner talks to one chat.** `<Project> Assistant` is the only chat
+that asks him anything or tells him anything: a planner's question
+reaches him there, in the planner's words, and every plan built is said
+there. Planners and executors work behind it; they stay in his list, to
+be opened and looked at, and what he writes in one is passed to the
+assistant. With none open, whoever has something for it opens it
+(`plans start --agent assistant`). While work is under way the chat is
+kept warm by a scheduled prompt twice an hour, and one over its ceiling
+(`reuse.assistant`, 150k) writes a hand-over file and is replaced, once
+quiet ten minutes, by a fresh chat of the same name, since a scheduled
+`/compact` reaches a background chat as a plain message.
+(decisions.md#one-chat)
 
 **An agent file is the agent's instructions, and a start prompt names
 the work.** Each agent file says what the agent does, in the order it
@@ -34,14 +46,17 @@ find by opening a file the plan or the project file names is left out;
 and a string the scripts parse (a section heading, a line `plans`
 reads, a message's first line) is written out exactly, in backticks.
 The prompt the queue starts a chat with is one line: the path and what
-it is (`Plan plans/<x>.md: it is a brief.`, `Build plans/<x>.md.`, `Follow-ups ready: plans/<x>.md.`), and a hook's words
+it is (`Plan plans/<x>.md: it is a brief.`, `Build plans/<x>.md.`, `Built: plans/<x>.md.`), and a hook's words
 are the state and the facts, with the rule named by its heading in the
 agent file where the agent must act. (decisions.md#agent-file-is-instructions)
 
-**An agent's report is short.** A final message leads with what changed
-for the owner and what waits on him, a behavior as When … then …, then
-where the record is (the plan's path, the pull request's link), in at
-most ten lines; a "Built" section opens with its landing line, then one
+**An agent's report is short.** What is said to the owner, by the
+assistant or the maker, leads with what changed for him and what waits
+on him, a behavior as When … then …, then where the record is (the
+plan's path, the pull request's link), in at most ten lines; a planner's
+or an executor's final message is the record alone, what it wrote or
+pushed and how it was handed on, since the `Planned:` or `Built:`
+message to the assistant carries what was for him; a "Built" section opens with its landing line, then one
 line for the "Done when" lines that hold, with the commands run and
 their counts, one line per line that does not hold or was checked
 another way, the deviations, the decisions taken for the owner, "Needs
@@ -148,31 +163,32 @@ a brief or nothing yet; a clear bug, an objective fix or a request to
 build, plan or file asks nothing, and a doubt between the two is asked
 (the assistant's "Where each topic ends"). (decisions.md#idea-asked-first)
 
-**Every new topic starts in the assistant's chat.** A planner's chat holds
+**Every new topic starts in the assistant's chat**, and what he writes in
+a worker's chat is passed there. A planner's chat holds
 the plans it wrote until an executor's `## Building` line takes each. The
 owner carries no message between agents, and no chat sends him a
 command to run. (decisions.md#new-topic-to-assistant)
 
-**The chat he said it in writes it, and the agents pass the rest.** A
-change the owner asks for is written by the chat he asked in when that
-chat may write it: the assistant writes a follow-up for a taken plan, the
-planner one for its own taken or built plan (`plans/<topic>-follow-up.md`).
-What a chat cannot write goes by one `SendMessage` to the chat that can,
-opening `<Kind> from <owner>: plans/<x>.md.`, then where and when he said
-it and his words, then what to do; one per change, never repeated, never
-taken as delivered by silence. A relayed
-word is his only once he confirms it in the receiving chat, by "Asked in
-plain words", the relayed version recommended, and meanwhile stands in
-the plan as a numbered decision with it recommended ("Asked once"). A
-message that only informs is information; one that asks anything else is
-reported and not acted on. (decisions.md#chat-that-heard-it)
+**What he writes in a worker's chat is passed on, and the assistant
+writes it.** A planner or an executor sends his words to the assistant
+chat, `From <owner>: said in <chat's name>, <d Month>.`, then his words,
+and does nothing else with them; the assistant puts them to him once
+and writes the short plan, brief or follow-up. A change he asks the
+assistant for, to a plan a live planner holds, goes to that planner as
+`Change from <owner>: plans/<x>.md.` with his words, and is his word:
+it goes in "Decided" with no second question. A message that only
+informs is information; one that asks anything else is reported and
+not acted on. (decisions.md#chat-that-heard-it)
 
-**Handed to the assistant** is one route for the executor's and the
-planner's follow-ups: `ListAgents`; this project's `<project> Assistant`
-chat on this machine (kind `interactive` or `bg`, never `Remote
-Control`), idle first, else busy; one message. With none, the executor
-runs `plans start --agent assistant plans/<x>.md`.
-(decisions.md#handed-to-the-assistant)
+**Handed to the assistant** is one route for every worker's message to
+him: `ListAgents`; this project's `<Project> Assistant` chat on this
+machine (kind `interactive` or `bg`, never `Remote Control`); one
+message, its first line one of four: `Question for <owner>:
+plans/<x>.md.` and `Planned: plans/<x>.md.` from a planner, `Built:
+plans/<x>.md.` from an executor after every push, `From <owner>: said in
+<chat's name>, <d Month>.` from either. With none open, `plans start
+--agent assistant [<path>]` opens it, or names the one open, and the
+message goes to it. (decisions.md#handed-to-the-assistant)
 
 **Asked in plain words.** The owner reads a question on his phone, in the
 question tool's dialog, with none of the chat in front of him: first what
@@ -577,20 +593,22 @@ reset; none after a quick death; none once the last five of a kind, in
 a day, ended with nothing built, planned or written, however many
 started and pushed before them; `plans pause` and `plans resume` on the
 owner's "pause the queue" and "resume the queue". After a quick death
-or five with nothing the owner decides: on his yes in its chat, the
-assistant or a planner runs `plans start --owner-said "<his words>"`,
+or five with nothing the owner decides: on his yes, the assistant runs `plans start --owner-said "<his words>"`,
 which starts one more and logs the words. No hook and no executor
 passes it, and it passes nothing else.
 (decisions.md#starts-bounded)
 
 **Sessions the queue starts are Remote Control chats named after the
-project and the machine**, `<Project> Executor 2 (lab)`.
+project and the machine**, `<Project> Executor 2 (lab)`; the assistant's
+is one name, `<Project> Assistant`.
 (decisions.md#session-names)
 
 **A finished chat ends an hour after it goes quiet**, by `claude stop`,
 which keeps its conversation; a replaced one three minutes after its
-successor starts; one with a question or a prompt open never. `plans end`
-ends this queue's finished chats now, `plans end <id>` one of them.
+successor starts; one with a question or a prompt open never; the
+assistant's never for going quiet ("The owner talks to one chat").
+`plans end` ends this queue's finished chats now, `plans end <id>` one
+of them.
 (decisions.md#chat-ends-after-an-hour)
 
 **A chat waits for the owner only while a question or a prompt is open
@@ -652,13 +670,14 @@ unless its holder is still busy with room, which takes it at its stop
 while the lease renews (decisions.md#brief-leased).
 (decisions.md#planner-takes-next-brief)
 
-**Asked once.** A decision a plan leaves to the owner is asked by its
-planner, in its chat, and by nobody else; a question a plan did not
+**Asked once.** A decision a plan leaves to the owner is asked for its
+planner by the assistant, once, by the planner's `Question for` message,
+and by nobody else; a question a plan did not
 foresee is decided by its executor, never asked ("An executor never
 waits on the owner"). For thirty minutes from the
 question the plan is the planner's: `plans` lists it under "Asking
 <owner>", no executor takes it, by default or by path, unless the owner
-says in its chat to build it now (his word goes in "Decided" first), and
+says to the assistant to build it now (his word goes in "Decided" first), and
 the tool hook refuses a Building line on it. The planner writes "Decided"
 only once every decision is answered, which lets the plan go at once, and
 sends it to the executor. Talking does not restart the window; another
@@ -687,8 +706,8 @@ any that went unchecked; a different word from him is a follow-up plan.
 Never decided this way: a merge, a push to the default or a production
 branch, a forced push, the reversal of a rule with a person's name, a
 change outside the plan; each is a "Needs a decision" item for the
-assistant. The planner and the assistant still ask him, since they hold
-no build. (decisions.md#executor-never-waits)
+assistant. The assistant still asks him, for itself and for a planner,
+since neither holds a build. (decisions.md#executor-never-waits)
 
 **The group's message.** A change to another person's part (a rule whose
 tier carries their name, or a thing **People** gives them) is built as

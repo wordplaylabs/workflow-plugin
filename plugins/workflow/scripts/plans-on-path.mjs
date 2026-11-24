@@ -8,6 +8,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync }
 import { basename, delimiter, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { ownerReads } from "./project.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -127,13 +128,19 @@ function main() {
     // behavior without the hook.
     return;
   }
+  let input = {};
+  try {
+    input = JSON.parse(readFileSync(0, "utf8"));
+  } catch {
+    // No input is the owner's own chat.
+  }
   let text = null;
   if (result === "foreign") text = FOREIGN_LINE;
   // A line said once can land in a chat nobody reads, so the PATH line is said
-  // at each start while PATH lacks the directory, and only in the owner's own
-  // chats: one the queue started (marked WORKFLOW_STARTED by launch()) is read
-  // by nobody.
-  else if (!process.env.WORKFLOW_STARTED && !onPath(dir)) text = PATH_LINE;
+  // at each start while PATH lacks the directory, and only in a chat the owner
+  // reads: a planner's, an executor's or the reviewer's is read by nobody
+  // (decisions.md#one-chat).
+  else if (ownerReads(input) && !onPath(dir)) text = PATH_LINE;
   if (!text) return;
   // The owner sees the line; the agent gets the line and what to do with it.
   process.stdout.write(

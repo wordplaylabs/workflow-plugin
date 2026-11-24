@@ -132,11 +132,6 @@ export function checkDeny(
 export function sessionEnv(
   env?: Record<string, string | undefined>,
 ): Record<string, string | undefined>;
-/** A chat the queue launches is marked with its kind. */
-export function launchEnv(
-  kind: string,
-  env?: Record<string, string | undefined>,
-): Record<string, string | undefined>;
 /** The line a plain chat that opened before its agent's setting says, for `assistant` or `maker`. */
 export function agentLine(kind: string): string;
 export type AppLacks = {
@@ -358,9 +353,11 @@ export function stopRetiredPlanners(
   },
 ): void;
 export function plannerPrompt(path: string): string;
-/** The first prompt of an assistant chat the queue starts on a built plan's follow-ups. */
+/** What the assistant chat is told of a built plan: `Built: <path>.` */
 export function assistantPrompt(path: string): string;
-/** The executor's `Follow-ups ready` message, which a start beside an open assistant chat prints. */
+/** The fresh assistant chat's prompt, on the hand-over file. */
+export function takeOverPrompt(name: string): string;
+/** An executor's start prompt: `Build <path>.`, or the resume of a handed plan. */
 export function startPrompt(path: string, plans: { state: string; path: string }[]): string;
 /** A plan's wait (plans/parallel-executors.md, part 3). */
 export type WaitsOn = { path: string; why: string } | null;

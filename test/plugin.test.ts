@@ -28,7 +28,6 @@ import {
   sessionName,
   pathsIn,
   sessionEnv,
-  launchEnv,
 } from "../plugins/workflow/scripts/plan-queue.mjs";
 import { FILES, missing, steps } from "../plugins/workflow/scripts/install-check.mjs";
 import { install, onPath, source, WRAPPER } from "../plugins/workflow/scripts/plans-on-path.mjs";
@@ -497,16 +496,19 @@ describe("the plugin's queue in any project", () => {
     const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
     const text = (path: string) => readFileSync(join(plugin, path), "utf8").replace(/\s+/g, " ");
     const planner = text("agents/planner.md");
-    expect(planner).toContain("follow-up plan you write yourself");
+    // plans/one-assistant-chat.md, part 3: his words here are passed on.
+    expect(planner).toContain("From ${user_config.owner}: said in <this chat's name>");
     expect(planner).toContain("A message that comes in");
     expect(planner).not.toContain("For the assistant's chat in Remote Control");
     const assistant = text("agents/assistant.md");
     expect(assistant).toContain("What crosses chats");
     expect(assistant).toContain("Change from ${user_config.owner}: plans/<x>.md.");
     expect(assistant).not.toContain("Change from Javi");
-    expect(text("agents/executor.md")).toContain("idle first, else busy");
+    expect(text("agents/executor.md")).toContain(
+      "`<Project> Assistant` on this machine by `ListAgents`",
+    );
     const doc = text("docs/workflow.md");
-    expect(doc).toContain("The chat he said it in writes it");
+    expect(doc).toContain("What he writes in a worker's chat is passed on");
     expect(doc).toContain("Handed to the assistant");
     const files = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
@@ -590,34 +592,34 @@ describe("the plugin's queue in any project", () => {
         machine: options.machine || "",
       });
     }
-    for (const name of ["Assistant", "Assistant (Anton merge)", "Executor", "Docs Assistant"])
-      expect(parseName(name)).toBeNull();
-    // plans/project-follow-ups-reach-the-project.md, part 6: the third kind.
-    expect(parseName("Docs Assistant 4 (lab)")).toEqual({
-      project: "Docs",
-      kind: "assistant",
-      n: 4,
-      machine: "lab",
-    });
-    expect(sessionName("assistant", 4, { project: "Docs", machine: "lab" })).toBe(
+    for (const name of [
+      "Assistant",
+      "Assistant (Anton merge)",
+      "Executor",
       "Docs Assistant 4 (lab)",
-    );
+    ])
+      expect(parseName(name)).toBeNull();
+    // plans/one-assistant-chat.md, part 1: one assistant, with no number.
+    expect(sessionName("assistant", 4, { project: "Docs", machine: "lab" })).toBe("Docs Assistant");
   });
 
-  // plans/project-follow-ups-reach-the-project.md, part 6.
-  it("starts an assistant chat only with none open, counted per project and machine, under the shared bounds", () => {
+  // plans/one-assistant-chat.md, part 1.
+  it("opens the one assistant chat only with none open, under the shared bounds", () => {
     const log = [
-      { at: 0, name: "Docs Assistant 2 (lab)" },
+      { at: 0, name: "Docs Assistant" },
       { at: 0, name: "Docs Executor 9 (lab)" },
-      { at: 0, name: "Other Assistant 7 (lab)" },
+      { at: 0, name: "Other Assistant" },
     ];
     const base = { kind: "assistant", log, name: "Docs", machine: "lab", brief: "plans/a.md" };
-    expect(canStart(base)).toMatchObject({ start: true, name: "Docs Assistant 3 (lab)" });
-    for (const open of [["Docs Assistant"], ["Docs Assistant 2 (lab)"]])
-      expect(canStart({ ...base, open })).toEqual({
-        refuse: true,
-        why: `${open[0]} is open: send it the message instead. Follow-ups ready: plans/a.md.`,
-      });
+    expect(canStart(base)).toMatchObject({ start: true, name: "Docs Assistant" });
+    expect(canStart({ ...base, open: ["Docs Assistant"] })).toEqual({
+      refuse: true,
+      why: "Docs Assistant is open: send it the message. Built: plans/a.md.",
+    });
+    expect(canStart({ ...base, brief: "", open: ["Docs Assistant"] })).toEqual({
+      refuse: true,
+      why: "Docs Assistant is open: send it the message.",
+    });
     expect(canStart({ ...base, paused: "today" })).toMatchObject({ refuse: true });
     const now = Date.UTC(2026, 9, 31, 12);
     const usage = {
@@ -625,17 +627,16 @@ describe("the plugin's queue in any project", () => {
       five_hour: { used_percentage: 90, resets_at: now / 1000 + 3600 },
     };
     expect(canStart({ ...base, usage, now })).toMatchObject({ defer: true });
-    const busy = Array.from({ length: 24 }, (_, i) => ({
-      at: now - i * 60_000 - 20 * 60_000,
-      name: `Docs Assistant ${i + 1} (lab)`,
-    }));
-    // A day of assistants that each wrote something is no loop; five with
-    // nothing written is (plans/loop-guard-counts-failures.md, part 1).
-    expect(canStart({ ...base, log: busy, now, progressAt: now })).toMatchObject({ start: true });
-    expect(canStart({ ...base, log: busy.slice(0, 5), now, progressAt: 0 })).toMatchObject({
+    // A quick death with nothing written refuses; another project's start does not count.
+    expect(
+      canStart({ ...base, log: [{ at: now - 60_000, name: "Docs Assistant" }], now }),
+    ).toMatchObject({
       refuse: true,
-      why: expect.stringContaining("The last five assistants ended with nothing written"),
+      why: expect.stringContaining("The last assistant (Docs Assistant) ended within ten minutes"),
     });
+    expect(
+      canStart({ ...base, log: [{ at: now - 60_000, name: "Other Assistant" }], now }),
+    ).toMatchObject({ start: true });
     // A live executor of the project does not hold an assistant back.
     expect(
       canStart({
@@ -775,7 +776,6 @@ describe("the plugin's queue in any project", () => {
         CLAUDE_SESSION_ID: "s",
         CLAUDE_PLUGIN_ROOT: "/r",
         CLAUDE_PLUGIN_DATA: "/d",
-        WORKFLOW_STARTED: "assistant",
         PATH: "/bin",
         HOME: "/h",
       }),
@@ -789,27 +789,6 @@ describe("the plugin's queue in any project", () => {
     expect(sessionEnv({ PATH: path(old, "/usr/bin", now, "/bin") }).PATH).toBe(
       path("/usr/bin", "/bin"),
     );
-  });
-
-  // plans/plans-on-the-terminal-path-follow-up.md: every chat the queue starts is marked with its kind.
-  it("marks a chat it starts with its kind, without what sessionEnv drops", () => {
-    const bin = "/home/u/.claude/plugins/cache/workflow/workflow/73aa1d388dcc/bin";
-    const inherited = {
-      WORKFLOW_ROOT: "/a",
-      CLAUDE_PROJECT_DIR: "/b",
-      CLAUDE_SESSION_ID: "s",
-      CLAUDE_PLUGIN_ROOT: "/r",
-      CLAUDE_PLUGIN_DATA: "/d",
-      WORKFLOW_STARTED: "assistant",
-      PATH: [bin, "/bin"].join(delimiter),
-      HOME: "/h",
-    };
-    for (const kind of ["executor", "planner", "assistant"])
-      expect(launchEnv(kind, inherited)).toEqual({
-        PATH: "/bin",
-        HOME: "/h",
-        WORKFLOW_STARTED: kind,
-      });
   });
 
   it("finds any path of two segments with an extension, and no address or plan", () => {
@@ -901,18 +880,13 @@ describe("the status line's copy", () => {
 describe("the terminal's plans", () => {
   const record = "/fake/installed_plugins.json";
   // The owner's chat unless `started` names the kind the queue marked it with.
-  const hook = (target: string, PATH = process.env.PATH, started?: string) => {
-    const { WORKFLOW_STARTED: _started, ...env } = process.env;
-    return execFileSync("node", [join(scripts, "plans-on-path.mjs")], {
+  // The owner's chat unless `agent` names the agent the chat runs as.
+  const hook = (target: string, PATH = process.env.PATH, agent?: string) =>
+    execFileSync("node", [join(scripts, "plans-on-path.mjs")], {
       encoding: "utf8",
-      env: {
-        ...env,
-        WORKFLOW_BIN: target,
-        PATH,
-        ...(started ? { WORKFLOW_STARTED: started } : {}),
-      },
+      input: JSON.stringify({ session_id: "s", ...(agent ? { agent_type: agent } : {}) }),
+      env: { ...process.env, WORKFLOW_BIN: target, PATH },
     });
-  };
   const pathLine =
     '`plans` is a command at ~/.local/bin/plans, but ~/.local/bin is not on PATH in the terminal this chat was started from. To run it from a terminal, add `export PATH="$HOME/.local/bin:$PATH"` to your shell\'s startup file (~/.zshrc or ~/.bashrc), then open a new terminal.';
   const foreignLine =
@@ -1029,15 +1003,20 @@ describe("the terminal's plans", () => {
         additionalContext: `${pathLine}\n\n${agent}`,
       });
     }
-    // A chat the queue started is read by nobody: the file is written, nothing said.
-    for (const kind of ["executor", "planner", "assistant"]) {
-      const marked = dir("bin-");
-      expect(hook(marked, process.env.PATH, kind)).toBe("");
-      expect(readFileSync(join(marked, "plans"), "utf8")).toContain("bin/plans");
+    // plans/one-assistant-chat.md, part 7: a worker's chat is read by nobody,
+    // the file written and nothing said; the assistant's and the maker's are his.
+    for (const kind of ["executor", "planner", "reviewer"]) {
+      const worker = dir("bin-");
+      expect(hook(worker, process.env.PATH, `workflow:${kind}`)).toBe("");
+      expect(readFileSync(join(worker, "plans"), "utf8")).toContain("bin/plans");
     }
+    for (const kind of ["assistant", "maker"])
+      expect(
+        JSON.parse(hook(dir("bin-"), process.env.PATH, `workflow:${kind}`)).systemMessage,
+      ).toBe(pathLine);
     const onIt = dir("bin-");
     expect(hook(onIt, `${onIt}/${delimiter}${process.env.PATH}`)).toBe("");
-    expect(hook(onIt, `${onIt}/${delimiter}${process.env.PATH}`, "executor")).toBe("");
+    expect(hook(onIt, `${onIt}/${delimiter}${process.env.PATH}`, "workflow:executor")).toBe("");
     expect(onPath(onIt, `/usr/bin${delimiter}${onIt}/`)).toBe(true);
     expect(onPath("/home/me/.local/bin", "~/.local/bin")).toBe(false);
   });
@@ -1184,7 +1163,7 @@ describe("the handbook holds every rule the plugin cites", () => {
     "The audit's checks",
     "The catalogue is the record",
     "The checkout is for reading",
-    "The chat he said it in writes it",
+    "What he writes in a worker's chat is passed on",
     "The group's message",
     "The plans account for the queue's commits",
     "The tier says who may change a rule",
@@ -1350,12 +1329,13 @@ describe("a brief or a plan is a prompt", () => {
     expect(assistant).toMatch(/## The final message [^#]*When <what he does>, then <what he sees>/);
     const planner = flat(agent("planner"));
     expect(planner).toMatch(/4\. \*\*Done when\*\*[^*]*When <what they do>, then <what they see>/);
-    expect(planner).toMatch(/Lead in plain words.{0,220}When <what he does>, then <what he sees>/);
+    // plans/one-assistant-chat.md, parts 3 and 4: what was for him goes in the message to the assistant.
+    expect(planner).toMatch(/Planned: plans\/<x>\.md\..{0,120}a behavior as When … then …/);
     const executor = flat(agent("executor"));
     expect(executor).toContain(
       'Give each When … then … line of "Done when" the test it names, one per scenario',
     );
-    expect(executor).toMatch(/\*\*The final message\*\*.{0,120}as When … then …/);
+    expect(executor).toMatch(/Built: plans\/<x>\.md\..{0,120}as When … then …/);
     // The reviewer checks the scenarios rather than writing them: its check 2, to check 3.
     const check = flat(
       /2\. \*\*Every line of its "Done when"[^]*?(?=\n3\. )/.exec(agent("reviewer"))![0],
@@ -1451,8 +1431,8 @@ describe("a message for another person only when the owner asks", () => {
     expect(shape).toContain("`Touches <name>'s part (<what>).`");
     const flat = read("agents/planner.md");
     expect(flat).not.toContain("For the group");
-    expect(flat).toContain("**A message for another person only when asked.**");
-    expect(flat).toContain('in this chat or in the brief\'s "Decided"');
+    // plans/one-assistant-chat.md, part 6: one he asked for in the brief goes in the Planned: message.
+    expect(flat).toContain('a message he asked for in the brief\'s "Decided", ready to paste');
   });
 
   it("has the docs and the assistant draft a person's message only when the owner asks", () => {
@@ -2223,11 +2203,11 @@ describe("a plan still asking, whoever names it", () => {
   const agent = (name: string) =>
     readFileSync(new URL(`../plugins/workflow/agents/${name}.md`, import.meta.url), "utf8");
 
-  it("has the executor run plans before a plan named by a path, and wait on one asking", () => {
+  it("has the executor run plans before a plan named in a message, and wait on one asking", () => {
     const sources = /## The plans you build\n\n[\s\S]*?\n\n/
       .exec(agent("executor"))![0]
       .replace(/\s+/g, " ");
-    expect(sources).toContain("Run `plans` before building a plan named by a path");
+    expect(sources).toContain("Run `plans` before building a plan named in a message");
     expect(sources).toContain('"Asking ${user_config.owner}" waits until the time it prints');
   });
 
@@ -2542,24 +2522,30 @@ describe("the reuse ceiling and the reviewer", () => {
       writeFileSync(join(root, ".claude", "workflow.md"), `---\nname: R\n${front}---\n`);
       return project(root).reuse;
     };
-    const defaults = { executor: 200_000, planner: 160_000 };
+    // plans/one-assistant-chat.md, part 2: the assistant's, 150k, where its chat is handed on.
+    const defaults = { executor: 200_000, planner: 160_000, assistant: 150_000 };
     expect(at("")).toEqual(defaults);
     expect(at("reuse: nothing\n")).toEqual(defaults);
     // A number holds both agents to it.
-    expect(at("reuse: 120000\n")).toEqual({ executor: 120_000, planner: 120_000 });
+    expect(at("reuse: 120000\n")).toEqual({
+      executor: 120_000,
+      planner: 120_000,
+      assistant: 150_000,
+    });
     // The map sets each; a missing one is the default.
-    expect(at("reuse:\n  executor: 150000\n  planner: 100000\n")).toEqual({
+    expect(at("reuse:\n  executor: 150000\n  planner: 100000\n  assistant: 90000\n")).toEqual({
+      assistant: 90_000,
       executor: 150_000,
       planner: 100_000,
     });
-    expect(at("reuse:\n  executor: 150000\n")).toEqual({ executor: 150_000, planner: 160_000 });
+    expect(at("reuse:\n  executor: 150000\n")).toEqual({ ...defaults, executor: 150_000 });
     // The related keys are retired: read as nothing.
     expect(at("reuse:\n  planner-related: 100000\n  executor-related: 10\n")).toEqual(defaults);
     const fresh = dir("reuse-init-");
     init(fresh);
     const text = readFileSync(join(fresh, ".claude", "workflow.md"), "utf8");
     expect(text).toContain(
-      "# reuse: 200000 # the context above which a finished session retires while this project has under five sessions of the agent: one number, or a map of executor and planner; with history the queue works the ceiling out from this project's transcripts",
+      "# reuse: 200000 # the context above which a finished session retires while this project has under five sessions of the agent: one number, or a map of executor and planner; with history the queue works the ceiling out from this project's transcripts; a map's assistant (150000) is where the assistant chat is handed on",
     );
     expect(text).not.toContain("planner-related");
   });
@@ -2760,11 +2746,13 @@ describe("the hooks manifest", () => {
     );
     expect(entry.timeout).toBe(30);
   });
-  it("runs the queue's tool hook on the question tool, for the window's time", () => {
+  // plans/one-assistant-chat.md, part 3: the planner's question is a message.
+  it("runs the queue's tool hook on a message, for the window's time", () => {
     const tool = manifest.hooks.PreToolUse.find((entry: { hooks: { command: string }[] }) =>
       entry.hooks.some((h) => h.command.endsWith('plan-queue.mjs" tool')),
     );
-    expect(tool.matcher.split("|")).toContain("AskUserQuestion");
+    expect(tool.matcher.split("|")).toContain("SendMessage");
+    expect(tool.matcher.split("|")).not.toContain("AskUserQuestion");
   });
   // plans/shared-count-fixes.md, part 1: a Read is counted by a bare node start, not the queue.
   it("counts a Read with seen.mjs alone, and the other tools' calls in the queue's wrote mode", () => {
@@ -3133,7 +3121,9 @@ describe("a plan put first", () => {
     for (const agent of ["executor", "assistant", "planner"]) {
       const text = readFileSync(join(plugin, "agents", `${agent}.md`), "utf8");
       expect(text.replace(/\n[ \t]*/g, " "), agent).toContain(message);
-      expect(text, agent).toContain("plans first");
+      // plans/one-assistant-chat.md, part 6: putting a plan first is the assistant's, on his word.
+      if (agent === "assistant") expect(text, agent).toContain("plans first");
+      else expect(text, agent).not.toContain("plans first");
     }
     const handbook = readFileSync(join(plugin, "docs", "workflow.md"), "utf8");
     expect(handbook).toContain("**A plan put first is built next.**");
@@ -3235,6 +3225,34 @@ describe("an executor never waits on the owner", () => {
     expect(text).not.toContain("is asked");
     expect(text.split("question tool").length - 1).toBe(1);
     expect(text).toContain("You have no question tool");
+  });
+
+  // plans/one-assistant-chat.md, parts 3 to 6: the owner talks to one chat.
+  it("has only the assistant ask and tell the owner, by the four first lines", () => {
+    const front = (agent: string) => /^---\n([\s\S]*?)\n---/.exec(read(`agents/${agent}.md`))![1];
+    const body = (agent: string) =>
+      flat(read(`agents/${agent}.md`).replace(/^---\n[\s\S]*?\n---/, ""));
+    const disallowed = (agent: string) =>
+      /^disallowedTools: (.*)$/m.exec(front(agent))![1].split(/,\s*/);
+    expect(disallowed("planner")).toContain("AskUserQuestion");
+    // The tool is taken away in the frontmatter; no instruction names it.
+    for (const agent of ["planner", "executor"]) {
+      expect(disallowed(agent), agent).toEqual(
+        expect.arrayContaining(["PushNotification", "SendUserFile", "TaskCreate"]),
+      );
+      expect(body(agent), agent).not.toContain("PushNotification");
+      expect(body(agent), agent).not.toMatch(/SendUserFile|task list|TaskCreate|in this chat/);
+    }
+    // Each first line in the file that sends it and the file that reads it.
+    const lines: [string, string[], string[]][] = [
+      ["Question for ${user_config.owner}: plans/<x>.md.", ["planner"], ["assistant"]],
+      ["Answered: plans/<x>.md.", ["assistant"], ["planner"]],
+      ["Planned: plans/<x>.md.", ["planner"], ["assistant"]],
+      ["Built: plans/<x>.md.", ["executor"], ["assistant"]],
+      ["From ${user_config.owner}: said in <", ["planner", "executor"], ["assistant"]],
+    ];
+    for (const [line, senders, readers] of lines)
+      for (const agent of [...senders, ...readers]) expect(body(agent), agent).toContain(line);
   });
 
   it("the planner and the assistant answer a check at once", () => {
@@ -3355,12 +3373,7 @@ describe("the agent a project's chats open as", () => {
     return file;
   };
   const hookIn = (root: string, input: object, env: Record<string, string> = {}) => {
-    const {
-      WORKFLOW_ROOT: _r,
-      WORKFLOW_STARTED: _s,
-      CLAUDE_PROJECT_DIR: _p,
-      ...rest
-    } = process.env;
+    const { WORKFLOW_ROOT: _r, CLAUDE_PROJECT_DIR: _p, ...rest } = process.env;
     const home = dir("agent-home-");
     return execFileSync("node", [join(scripts, "plan-queue.mjs"), "session"], {
       cwd: root,
@@ -3514,9 +3527,6 @@ describe("the agent a project's chats open as", () => {
     });
     expect(JSON.parse(readLocal(owners)).agent).toBe("workflow:assistant");
     expect(hookIn(owners, { session_id: "s2" })).toBe("");
-    const queues = project();
-    expect(hookIn(queues, { session_id: "s3" }, { WORKFLOW_STARTED: "planner" })).toBe("");
-    expect(JSON.parse(readLocal(queues)).agent).toBe("workflow:assistant");
     const opened = project();
     expect(hookIn(opened, { session_id: "s4", agent_type: "workflow:assistant" })).toBe("");
     const planner = project();
@@ -3554,12 +3564,12 @@ describe("the agent a project's chats open as", () => {
         join(root, ".claude", "webhook.json"),
         JSON.stringify({ pid: process.pid, port: 1, at: Date.now(), lastAt: 0, lacks }),
       );
-    const start = (id: string, env: Record<string, string> = {}) =>
+    const start = (id: string, agent = "") =>
       // No secret, from the environment or a secrets file, so no listener is armed here.
       hookIn(
         root,
-        { session_id: id },
-        { WORKFLOW_WEBHOOK_SECRET: "", WORKFLOW_SECRETS_FILE: "", ...env },
+        { session_id: id, ...(agent ? { agent_type: agent } : {}) },
+        { WORKFLOW_WEBHOOK_SECRET: "", WORKFLOW_SECRETS_FILE: "" },
       );
     record(app);
     const said = JSON.parse(start("a1"));
@@ -3570,8 +3580,10 @@ describe("the agent a project's chats open as", () => {
     });
     expect(start("a2")).toBe("");
     record(accept);
-    expect(start("a3", { WORKFLOW_STARTED: "planner" })).toBe("");
-    expect(JSON.parse(start("a4")).systemMessage).toBe(appLine(accept));
+    // plans/one-assistant-chat.md, part 7: a worker's chat is read by nobody; the assistant's is his.
+    expect(start("a3", "workflow:planner")).toBe("");
+    expect(start("a3b", "workflow:executor")).toBe("");
+    expect(JSON.parse(start("a4", "workflow:assistant")).systemMessage).toBe(appLine(accept));
     expect(start("a5")).toBe("");
     record();
     expect(start("a6")).toBe("");

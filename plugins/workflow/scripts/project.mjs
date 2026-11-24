@@ -170,6 +170,16 @@ export function kindOf(input, plugin = PLUGIN) {
 }
 
 /**
+ * **Whether the owner reads the chat a hook's input is for**
+ * (decisions.md#one-chat): not a planner's, an executor's or the reviewer's,
+ * which work behind the assistant; any other chat, with no agent or with
+ * another, is one he reads.
+ */
+export function ownerReads(input) {
+  return !["planner", "executor", "reviewer"].includes(kindOf(input));
+}
+
+/**
  * Whether a pattern compiles alone. One that does has its parentheses
  * balanced outside escapes and classes, so wrapped in `^(?:...)$` it cannot
  * close the group early and match more than whole names (`mcp__a)|(.*`).
@@ -482,12 +492,18 @@ export function executorsOf(value) {
  * and r the cache read a million tokens (Fable 5.1 $20 and $0.25, Opus 5.5 $8
  * and $0.20, read), never over 480k. The defaults are the owner's.
  */
-export const REUSE_DEFAULT = Object.freeze({ executor: 200_000, planner: 160_000 });
+export const REUSE_DEFAULT = Object.freeze({
+  executor: 200_000,
+  planner: 160_000,
+  assistant: 150_000,
+});
 
 /**
- * The `reuse` key as `{ executor, planner }`: one number sets both; a map
- * sets `executor` and `planner`, each missing one the default. A value that
- * is no number above zero is the default.
+ * The `reuse` key as `{ executor, planner, assistant }`: one number sets the
+ * executor's and the planner's; a map sets each it names, each missing one
+ * the default. A value that is no number above zero is the default. The
+ * assistant's is the context above which its chat is handed on to a fresh one
+ * (decisions.md#one-chat).
  */
 function reuseOf(value) {
   const number = (one) => {
@@ -495,11 +511,12 @@ function reuseOf(value) {
     return n > 0 ? n : 0;
   };
   const one = typeof value === "string" ? number(value) : 0;
-  if (one) return { executor: one, planner: one };
+  if (one) return { executor: one, planner: one, assistant: REUSE_DEFAULT.assistant };
   const map = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
     executor: number(map.executor) || REUSE_DEFAULT.executor,
     planner: number(map.planner) || REUSE_DEFAULT.planner,
+    assistant: number(map.assistant) || REUSE_DEFAULT.assistant,
   };
 }
 
@@ -524,7 +541,7 @@ branch: ${defaultBranch(root, { checkedOut: true })}
 #     - "mcp__server__write_.*"
 # form: compact          one chat decides and builds; omit for the full queue
 # executors: 2  # how many executors build at once, each in its own worktree; omit for one
-# reuse: 200000 # the context above which a finished session retires while this project has under five sessions of the agent: one number, or a map of executor and planner; with history the queue works the ceiling out from this project's transcripts
+# reuse: 200000 # the context above which a finished session retires while this project has under five sessions of the agent: one number, or a map of executor and planner; with history the queue works the ceiling out from this project's transcripts; a map's assistant (150000) is where the assistant chat is handed on
 # reviews:               the reviews before a push: plan, code-review, codex, or a plugin skill; omit for all three
 #   - code-review
 ---

@@ -98,23 +98,58 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   pull-request`, since issues need pull requests.
   plans/ask-before-briefing.md,
   plans/related-plans-share-a-pull-request-follow-up-6.md.
+- `one-chat` **The owner talks to one assistant chat; planners and
+  executors work behind it, never ask him and never report to him, and
+  stay openable.** (Javi, 24 November) He had to know which chat did
+  what, and a planner with everything read sent him to open another
+  chat, which he could not. Roo Code's orchestrator hands work to its
+  other modes and takes back their summaries, VS Code's plan agent
+  hands off to the implementing one, and Aider's editor model is never
+  addressed: the roles are machinery behind one conversation, and the
+  separate contexts stay (`plan-then-build`). Openable, so a stuck chat
+  can be looked at; the assistant speaks up for a question, a failure, a
+  decision taken and each plan built. One chat that takes everything
+  fills within a day, and he chose to keep it where it is; a scheduled
+  `/compact` reaches a background chat as a plain message (tried 24
+  November), so one past its ceiling writes a hand-over file and a fresh
+  chat of the same name takes over once it is quiet. While work runs it
+  is kept warm: a turn that reads the cache renews its hour for about a
+  fortieth of what the first turn of a cold chat costs (`context-cost`).
+  The workers keep nothing that was for him (a task list, files sent, a
+  message written to be read): what one makes for him to see is kept
+  beside its plan and the assistant brings it up.
+  plans/one-assistant-chat.md.
 - `new-topic-to-assistant` **Every new topic starts in the assistant's
-  chat.** (Javi, 30 October) A planner's chat holds the plans it wrote
-  until an executor takes them; a new topic there would mix two plans in
-  one context. plans/agents-pass-messages-directly.md.
-- `chat-that-heard-it` **The chat he said it in writes it, and the agents
-  pass the rest.** (Javi, 30 October) What he wanted gone was the
-  copying between chats, and a pause until he has looked is fine; a
-  peer's message is never the user's consent (Claude Code's own rule), so
-  a relayed word is confirmed in the receiving chat.
-  plans/agents-pass-messages-directly.md.
-- `handed-to-the-assistant` **An executor's and a planner's follow-ups go
-  to this project's assistant chat on this machine, started when there is
-  none.** (Javi, 31 October) Four follow-ups and several decisions went
-  into a final message nobody acted on once the to-do page was gone. A
-  plan with a decision taken for the owner goes too, as one with items,
-  so the assistant logs it. plans/agents-pass-messages-directly.md,
-  plans/executor-never-waits.md.
+  chat, and what he writes in a worker's chat is passed there.** (Javi, 24 November, `one-chat`) A planner's chat holds the plans
+  it wrote until an executor takes them; a new topic there would mix two
+  plans in one context. plans/agents-pass-messages-directly.md,
+  plans/one-assistant-chat.md.
+  - ~~A planner sends a new topic to the assistant as `New topic from
+    <owner>`.~~ (Javi, 24 November) Every word of his in a worker's chat
+    goes as `From <owner>:` (`one-chat`).
+- `chat-that-heard-it` **The assistant writes what he asks, and the
+  agents pass the rest.** (Javi, 24 November, `one-chat`)
+  What he wanted gone was the copying between chats; a peer's message is
+  never the user's consent (Claude Code's own rule), so his words passed
+  on from a worker's chat are put to him once in the assistant's. A
+  change he asks the assistant for, to a plan a planner holds, is his
+  word in the one chat he speaks in, and the planner writes it with no
+  second question. plans/agents-pass-messages-directly.md,
+  plans/one-assistant-chat.md.
+  - ~~The chat he said it in writes it, and a change relayed to a planner
+    is confirmed in the planner's chat.~~ (Javi, 24 November) He speaks
+    in one chat (`one-chat`).
+- `handed-to-the-assistant` **Every worker's message for the owner goes
+  to this project's assistant chat on this machine, opened when there is
+  none: a planner's question and plan, every built plan, his words
+  passed on.** (Javi, 24 November, `one-chat`) Four
+  follow-ups and several decisions went into a final message nobody
+  acted on once the to-do page was gone; now no worker's final message
+  is written for him. plans/agents-pass-messages-directly.md,
+  plans/executor-never-waits.md, plans/one-assistant-chat.md.
+  - ~~Only a plan with items or a decision taken goes, as `Follow-ups
+    ready: <path>.`~~ (Javi, 24 November) Every built plan goes, as
+    `Built: <path>.`, since the assistant tells him each (`one-chat`).
 - `asked-in-plain-words` **A question to the owner is written for a
   reader on a phone with none of the chat in front of him.** (Javi, 28
   October) Apple's alerts (a title that says what it is about, buttons
@@ -541,9 +576,11 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   - ~~A tripwire at twenty-four starts of a kind a day.~~ (Javi, 27
     October)
 - `session-names` **Every session the queue starts is a Remote Control
-  chat named after the project and the machine.** (Javi, 27 October) The
-  owner finds each chat on his phone by its name, and no two sessions on
-  any machine share one. plans/session-names-across-machines.md.
+  chat named after the project and the machine; the assistant's is one
+  name, `<Project> Assistant`.** (Javi, 24 November, `one-chat`) The owner finds each chat on his phone by its name, and no
+  two sessions on any machine share one; the assistant is his one chat,
+  so it has no number. plans/session-names-across-machines.md,
+  plans/one-assistant-chat.md.
 - `chat-ends-after-an-hour` **A finished chat ends an hour after it goes
   quiet.** (Javi, 27 October) The cache lives an hour; Claude Code's own
   supervisor stops a done background session on its own clock, about an
@@ -632,14 +669,15 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   at its stop whether to take the next brief or pass it on, and what
   matters is that no brief is ignored.
   plans/briefs-reach-a-free-planner.md, plans/brief-lease-per-brief.md.
-- `asked-once` **A decision a plan leaves to the owner is asked by its
-  planner, once, and the plan is the planner's for thirty minutes.**
-  (Javi, 28 October) Wait thirty minutes, then decide for him; a plan
-  asked in two rounds keeps its hold until the last. A question the plan
-  did not foresee is decided by the executor, not asked in its session
-  (`executor-never-waits`). plans/owner-questions-plain-and-once.md,
-  plans/asking-window-ends.md, plans/asking-plan-held-by-path.md,
-  plans/asking-plan-guarded.md, plans/executor-never-waits.md.
+- `asked-once` **A decision a plan leaves to the owner is asked for its
+  planner by the assistant, once, and the plan is the planner's for
+  thirty minutes from the planner's `Question for` message.** (Javi, 24 November, `one-chat`) Wait thirty minutes, then decide for
+  him; a plan asked in two rounds keeps its hold until the last. A
+  question the plan did not foresee is decided by the executor, not
+  asked in its session (`executor-never-waits`).
+  plans/owner-questions-plain-and-once.md, plans/asking-window-ends.md,
+  plans/asking-plan-held-by-path.md, plans/asking-plan-guarded.md,
+  plans/executor-never-waits.md, plans/one-assistant-chat.md.
 - `executor-never-waits` **An executor never asks the owner and never
   waits on him: what it would ask it decides by the recommended option,
   checked with the plan's planner or the assistant, and logged for

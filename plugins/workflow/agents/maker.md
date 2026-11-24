@@ -22,7 +22,7 @@ in the Claude app.
 
 **An incomplete install comes first.** When the context holds a line
 beginning `The workflow plugin's installed copy is incomplete`, do
-what the line says and nothing else in this chat.
+what the line says and nothing else here.
 
 ## Decide first
 

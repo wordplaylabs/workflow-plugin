@@ -71,6 +71,7 @@ import {
   decidePlannerStop,
   plannerPrompt,
   assistantPrompt,
+  takeOverPrompt,
   startPrompt,
   freePlans,
   takerFor,
@@ -2541,12 +2542,13 @@ describe("the planner queue", () => {
     return () => (before === null ? rmSync(lock, { force: true }) : writeFileSync(lock, before));
   };
 
-  // plans/project-follow-ups-reach-the-project.md, part 6.
-  it("starts an assistant chat on a built plan's follow-ups, refuses beside an open one, and lists it", () => {
+  // plans/one-assistant-chat.md, parts 1 and 2.
+  it("opens the one assistant chat on a built plan or on nothing, sends it the message when open, lists it, and hands it on past its ceiling", () => {
     const live = (rows: object[]) => JSON.stringify(rows);
     const env = (rows: object[] = []) => ({
       ...process.env,
       CLAUDE_PROJECT_DIR: repo,
+      CLAUDE_CODE_SESSION_ID: "",
       WORKFLOW_STARTS_LOG: join(repo, ".claude", "starts-assistant.log"),
       WORKFLOW_USAGE_FILE: join(repo, ".claude", "usage-assistant.json"),
       WORKFLOW_LIVE: live(rows),
@@ -2554,7 +2556,14 @@ describe("the planner queue", () => {
     const start = (path: string, rows: object[] = []) =>
       execFileSync(
         "node",
-        [join(here, "plan-queue.mjs"), "start", "--agent", "assistant", "--dry", path],
+        [
+          join(here, "plan-queue.mjs"),
+          "start",
+          "--agent",
+          "assistant",
+          "--dry",
+          ...(path ? [path] : []),
+        ],
         { encoding: "utf8", env: env(rows) },
       ).trim();
     put(
@@ -2563,27 +2572,40 @@ describe("the planner queue", () => {
     );
     put("q-ready-a.md", "# Ready\n\nPlan only, 31 October 2026, for Javi.\n");
     put("q-brief-a.md", brief("31 October 2026"));
+    // When none is listed: a chat named Test Assistant, with no number, on Built:.
     const out = start("plans/q-built.md");
     expect(out).toContain(
-      'Would run: claude "--bg" "--remote-control" "Test Assistant 1 (lab)" "--name" "Test Assistant 1 (lab)" "--agent" "workflow:assistant" "--effort" "medium" "Follow-ups ready: plans/q-built.md',
+      'Would run: claude "--bg" "--remote-control" "Test Assistant" "--name" "Test Assistant" "--agent" "workflow:assistant" "--effort" "medium" "Built: plans/q-built.md."',
     );
     expect(out).toContain(JSON.stringify(assistantPrompt("plans/q-built.md")));
+    // With no path: the opened prompt.
+    expect(start("")).toContain(
+      `"--name" "Test Assistant" "--agent" "workflow:assistant" "--effort" "medium" "Opened for Javi by a terminal: nothing is handed over. Say in a line that you are open, and wait for him."`,
+    );
     for (const path of ["plans/q-ready-a.md", "plans/q-brief-a.md"])
-      expect(start(path)).toBe(
-        `${path} is not a built plan with follow-ups; plans shows the built plans.`,
-      );
-    // Beside the owner's assistant chat or the queue's, idle or busy: the message instead.
-    for (const name of ["Test Assistant", "Test Assistant 2 (lab)"])
-      expect(
-        start("plans/q-built.md", [
-          { sessionId: "a1", name, status: "busy", kind: "interactive", cwd: repo },
-        ]),
-      ).toBe(
-        `${name} is open: send it the message instead. ${assistantPrompt("plans/q-built.md")}`,
-      );
-    // Not beside another project's, nor another machine's chat.
+      expect(start(path)).toBe(`${path} is not a built plan; plans shows the built plans.`);
+    // With one listed, idle or busy: the line naming it and the message to send.
+    const open = {
+      sessionId: "a1",
+      name: "Test Assistant",
+      status: "busy",
+      kind: "interactive",
+      cwd: repo,
+    };
+    expect(start("plans/q-built.md", [open])).toBe(
+      "Test Assistant is open: send it the message. Built: plans/q-built.md.",
+    );
+    expect(start("", [open])).toBe("Test Assistant is open: send it the message.");
+    // Not beside another project's, a numbered one, nor another machine's chat.
     for (const row of [
       { sessionId: "a2", name: "Other Assistant", status: "idle", kind: "interactive", cwd: repo },
+      {
+        sessionId: "a4",
+        name: "Test Assistant 2 (lab)",
+        status: "idle",
+        kind: "background",
+        cwd: repo,
+      },
       {
         sessionId: "a3",
         name: "Test Assistant",
@@ -2593,43 +2615,97 @@ describe("the planner queue", () => {
       },
     ])
       expect(start("plans/q-built.md", [row])).toContain("Would run: claude");
-    // The line, only while a chat the queue started is alive.
-    const started = {
+    // The line, while the one chat is open.
+    const chat = {
       sessionId: "44444444-aaaa-0000-0000-000000000000",
-      name: "Test Assistant 3 (lab)",
+      name: "Test Assistant",
       status: "idle",
       kind: "background",
       cwd: repo,
     };
-    expect(listWith([started])).toMatch(
-      /\nThe assistant: Test Assistant 3 \(lab\) \[44444444\], idle\.\n/,
-    );
-    expect(listWith([{ ...started, name: "Test Assistant" }])).not.toContain("The assistant:");
+    expect(listWith([chat])).toMatch(/\nThe assistant: Test Assistant \[44444444\], idle\.\n/);
     expect(listWith([])).not.toContain("The assistant:");
-    // Its stop arms the end timer; the owner's own assistant chat arms none.
+    // A quiet stop arms no end timer; past the ceiling the stop is held once,
+    // and a later stop with the hand-over written arms it ten minutes on.
     const log = process.env.WORKFLOW_STOP_LOG!;
     rmSync(log, { force: true });
     const releaseHeld = executorHeld();
-    // The queue's launch marks its chat; the owner's chat has no mark and reads nothing.
-    const stop = (rows: object[], id: string, marked = true) =>
-      execFileSync("node", [join(here, "plan-queue.mjs"), "stop"], {
-        input: JSON.stringify({ session_id: id, agent_type: "workflow:assistant" }),
+    const transcript = join(repo, ".claude", "assistant-transcript.jsonl");
+    const context = (tokens: number) =>
+      writeFileSync(
+        transcript,
+        `${JSON.stringify({ type: "assistant", timestamp: new Date().toISOString(), message: { model: "claude-opus-5-5", usage: { input_tokens: tokens } } })}\n`,
+      );
+    const hook = (mode: string, extra: object = {}) =>
+      execFileSync("node", [join(here, "plan-queue.mjs"), mode], {
+        input: JSON.stringify({
+          session_id: chat.sessionId,
+          agent_type: "workflow:assistant",
+          transcript_path: transcript,
+          ...extra,
+        }),
         encoding: "utf8",
-        env: { ...env(rows), ...(marked ? { WORKFLOW_STARTED: "assistant" } : {}) },
+        env: env([chat]),
       });
-    stop([started], started.sessionId);
-    stop([started], `${started.sessionId.slice(0, -1)}9`, false);
-    const owner = {
-      ...started,
-      sessionId: "55555555-aaaa-0000-0000-000000000000",
-      name: "Test Assistant",
-    };
-    stop([owner], owner.sessionId);
-    releaseHeld();
-    const ends = existsSync(log) ? readFileSync(log, "utf8") : "";
-    expect(ends).toContain(`end ${started.sessionId} at `);
-    expect(ends).not.toContain(owner.sessionId);
-    for (const id of [started.sessionId, owner.sessionId]) rmSync(stateFile(id), { force: true });
+    const handover = join(plansDir(), "assistant-handover.md");
+    rmSync(handover, { force: true });
+    try {
+      context(40_000);
+      expect(hook("stop")).toBe("");
+      context(160_000);
+      expect(JSON.parse(hook("stop"))).toEqual({
+        decision: "block",
+        reason:
+          'This chat is over its ceiling (160k of 150k): write plans/assistant-handover.md by "Handing the chat on", then stop; a fresh chat takes over once this one is quiet.',
+      });
+      // Held once: the stop the hold continued into, with nothing written, passes.
+      expect(hook("stop", { stop_hook_active: true })).toBe("");
+      expect(existsSync(log) ? readFileSync(log, "utf8") : "").not.toContain(chat.sessionId);
+      writeFileSync(handover, "# Handing the assistant chat on\n\nOpen: nothing.\n");
+      utimesSync(handover, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+      expect(hook("stop")).toBe("");
+      const ends = readFileSync(log, "utf8");
+      const at = Number(new RegExp(`end ${chat.sessionId} at (\\d+)`).exec(ends)?.[1]);
+      expect(at).toBeGreaterThan(Date.now() + 9 * 60_000);
+      expect(at).toBeLessThan(Date.now() + 11 * 60_000);
+      expect(JSON.parse(readFileSync(stateFile(chat.sessionId), "utf8")).end.at).toBe(at);
+      // A heartbeat leaves the timer; his message clears it.
+      hook("prompt", { prompt: "Heartbeat." });
+      expect(JSON.parse(readFileSync(stateFile(chat.sessionId), "utf8")).end).toBeDefined();
+      hook("prompt", { prompt: "Anything new?" });
+      expect(JSON.parse(readFileSync(stateFile(chat.sessionId), "utf8")).end).toBeUndefined();
+      // The fresh chat's start, on the hand-over file, beside the one it replaces.
+      expect(takeOverPrompt("Test Assistant")).toBe(
+        "Taking over as Test Assistant: plans/assistant-handover.md.",
+      );
+      expect(start("plans/assistant-handover.md")).toContain(
+        '"Taking over as Test Assistant: plans/assistant-handover.md."',
+      );
+      // The hand-over file is no plan of the queue's.
+      expect(listWith([])).not.toContain("assistant-handover");
+      // When the timer fires and no fresh chat would start (paused), the old one stays.
+      writeFileSync(
+        stateFile(chat.sessionId),
+        JSON.stringify({ handing: { at: Date.now() - 20 * 60_000 } }),
+      );
+      const pause = join(repo, ".claude", "executor.pause");
+      writeFileSync(pause, JSON.stringify({ at: "15:00" }));
+      try {
+        execFileSync(
+          "node",
+          [join(here, "plan-queue.mjs"), "end", "--timer", String(Date.now()), chat.sessionId],
+          { encoding: "utf8", env: env([chat]) },
+        );
+      } finally {
+        rmSync(pause, { force: true });
+      }
+      expect(readFileSync(log, "utf8").split("\n")).not.toContain(chat.sessionId);
+    } finally {
+      releaseHeld();
+      rmSync(handover, { force: true });
+      rmSync(transcript, { force: true });
+      rmSync(stateFile(chat.sessionId), { force: true });
+    }
     for (const name of ["q-built.md", "q-ready-a.md", "q-brief-a.md"])
       rmSync(join(plansDir(), name), { force: true });
   });
@@ -2647,7 +2723,7 @@ describe("the planner queue", () => {
       expect(startPrompt("plans/x.md", [{ state: "handed", path: "plans/x.md" }])).toBe(
         'Resume plans/x.md from its "Handing over" section.',
       );
-      expect(assistantPrompt("plans/x.md")).toBe("Follow-ups ready: plans/x.md.");
+      expect(assistantPrompt("plans/x.md")).toBe("Built: plans/x.md.");
       expect(githubPrompt("plans/github/4.md")).toBe("GitHub: plans/github/4.md.");
     });
 
@@ -2657,7 +2733,7 @@ describe("the planner queue", () => {
     });
   });
 
-  it("has the executor send, by hand, the follow-ups message the queue prints", () => {
+  it("has the executor send the Built: message the queue opens the assistant on", () => {
     const executor = readFileSync(join(here, "..", "agents", "executor.md"), "utf8");
     expect(executor.replace(/\s+/g, " ")).toContain(`\`${assistantPrompt("plans/<x>.md")}\``);
   });
@@ -4244,27 +4320,74 @@ describe("the queue's faults, closed", () => {
       join(dir, "plans", "refresh-after-41.md"),
       "# The queue's open pull requests carry test after #41\n\nShort plan, 15 November 2026, by the assistant with Javi; the executor builds it.\n\nLands: refresh.\n\n## Built, 15 November 2026\n\nRefreshed: #43 at 1a2b3c4d; left: #38, another person's.\n\n## What was asked\n",
     );
-    const env = { CLAUDE_PLUGIN_OPTION_OWNER: "Javi", WORKFLOW_STARTED: "" };
-    const prompt = (extra: Record<string, string> = {}) =>
+    const prompt = (text = "How are the pull requests?") =>
       runIn(
         dir,
         ["prompt"],
-        { ...env, ...extra },
-        {
-          session_id: `refreshes-${process.pid}`,
-          agent_type: "assistant",
-          prompt: "How are the pull requests?",
-        },
+        { CLAUDE_PLUGIN_OPTION_OWNER: "Javi" },
+        { session_id: `refreshes-${process.pid}`, agent_type: "assistant", prompt: text },
       );
     const told = join(dir, ".claude", "refreshes.told.json");
-    // A chat the queue started is told nothing, and nothing is marked.
-    expect(prompt({ WORKFLOW_STARTED: "assistant" })).toBe("");
+    // A heartbeat is not his message: nothing is told, and nothing is marked.
+    expect(prompt("Heartbeat.")).not.toContain("Refreshed since");
     expect(existsSync(told)).toBe(false);
     const first = prompt();
     expect(JSON.parse(first).hookSpecificOutput.additionalContext).toBe(
       'Refreshed since Javi last wrote here: plans/refresh-after-41.md. Say to him first, in a line, which pull requests were brought up to date and which were left, from each plan\'s "Built".',
     );
     expect(prompt()).toBe("");
+  });
+
+  // plans/one-assistant-chat.md, part 2: when the assistant's prompt is
+  // Heartbeat., then the prompt hook adds one line and not the queue's listing.
+  it("answers the assistant's heartbeat with one line of the work under way, and the ceiling's", () => {
+    const dir = fixture("Heartbeat");
+    const transcript = join(dir, "transcript.jsonl");
+    const context = (tokens: number) =>
+      writeFileSync(
+        transcript,
+        `${JSON.stringify({ type: "assistant", timestamp: new Date().toISOString(), message: { model: "claude-opus-5-5", usage: { input_tokens: tokens } } })}\n`,
+      );
+    // The building plan's executor is listed with no process: not running.
+    const gone = "99999999-0000-0000-0000-000000000000";
+    const rows = JSON.stringify([
+      { sessionId: gone, name: "Heartbeat Executor 1", kind: "background", cwd: dir },
+    ]);
+    const said = (prompt = "Heartbeat.") => {
+      const out = runIn(
+        dir,
+        ["prompt"],
+        { CLAUDE_PLUGIN_OPTION_OWNER: "Javi", WORKFLOW_LIVE: rows },
+        {
+          session_id: `heartbeat-${process.pid}`,
+          agent_type: "workflow:assistant",
+          prompt,
+          transcript_path: transcript,
+        },
+      );
+      return out ? JSON.parse(out).hookSpecificOutput.additionalContext : "";
+    };
+    context(40_000);
+    expect(said()).toBe("Nothing is under way.");
+    writeFileSync(
+      join(dir, "plans", "ready.md"),
+      "# Ready\n\nPlan only, 24 November 2026, for Javi; the executor builds it.\n",
+    );
+    writeFileSync(
+      join(dir, "plans", "building.md"),
+      `# Building\n\nPlan only, 24 November 2026, for Javi; the executor builds it.\n\n## Building, 24 November 2026, session ${gone}\n`,
+    );
+    // A fault, in a clause.
+    expect(said()).toBe(
+      "Work under way: 1 building, 1 waiting, 0 asking; plans/building.md's executor is not running.",
+    );
+    expect(said()).not.toContain("Plans in the queue");
+    context(160_000);
+    expect(said()).toBe(
+      "Work under way: 1 building, 1 waiting, 0 asking; plans/building.md's executor is not running.\nThis chat is over its ceiling (160k of 150k).",
+    );
+    // His own message gets the ceiling's line alone.
+    expect(said("What is building?")).toBe("This chat is over its ceiling (160k of 150k).");
   });
 
   it("reads the run a fix pushed straight sets off after the pull requests' checks, in the pull request mode", () => {
@@ -7850,7 +7973,11 @@ describe("asked once", () => {
       rmSync(deferredFile(), { force: true });
       return written;
     };
-    const question = (state: object) => {
+    // plans/one-assistant-chat.md, part 3: the question is a message to the assistant chat.
+    const question = (
+      state: { brief?: string; asked?: object },
+      message = `Question for Javi: ${state.brief || "plans/asks.md"}.\nThe header; the question.`,
+    ) => {
       writeFileSync(
         stateFile(ids.planner),
         JSON.stringify({ agent: "planner", plans: [], ...state }),
@@ -7859,13 +7986,13 @@ describe("asked once", () => {
       const out = queue(["tool"], {
         session_id: ids.planner,
         agent_type: "workflow:planner",
-        tool_name: "AskUserQuestion",
-        tool_input: { questions: [] },
+        tool_name: "SendMessage",
+        tool_input: { to: "Test Assistant", message },
       });
       return { out, before, state: JSON.parse(readFileSync(stateFile(ids.planner), "utf8")) };
     };
 
-    it("the planner's question records its time and defers a start of the plan it asks about", () => {
+    it("the planner's Question for message records its time and defers a start of the plan it asks about", () => {
       rmSync(deferredFile(), { force: true });
       // A usage limit's deferral stands apart: the question neither moves nor merges it.
       const usageDeferral = join(dir, ".claude", "executor.deferred");
@@ -7875,6 +8002,13 @@ describe("asked once", () => {
       expect(out).toBe("");
       const at = state.asked["plans/asks.md"];
       expect(at).toBeGreaterThanOrEqual(before);
+      // Then plans lists it under Asking Javi until thirty minutes on, and no executor takes it.
+      expect(queue(["list"])).toMatch(
+        new RegExp(
+          `Asking Javi, oldest first\\n {2}plans/asks\\.md .*decides at ${hhmm(at + 30 * MIN)}`,
+        ),
+      );
+      expect(start("plans/asks.md")).not.toContain("Would run");
       const written = takeDeferral();
       expect(written.paths).toEqual(["plans/asks.md"]);
       expect(written.why).toBe("Javi has thirty minutes to answer");
@@ -7886,9 +8020,17 @@ describe("asked once", () => {
       // A question about a plan that asks nothing, or before any plan: nothing held.
       const plain = question({ brief: "plans/plain.md" });
       expect(plain.out).toBe("");
-      expect(plain.state.asked).toEqual({});
+      expect(plain.state.asked).toBeUndefined();
       expect(existsSync(deferredFile())).toBe(false);
-      expect(question({ brief: "" }).state.asked).toEqual({});
+      expect(question({ brief: "" }).state.asked).toBeUndefined();
+      expect(existsSync(deferredFile())).toBe(false);
+      // Another message, or one naming a plan the planner does not hold: nothing held.
+      expect(
+        question({ brief: "plans/asks.md" }, "Planned: plans/asks.md.").state.asked,
+      ).toBeUndefined();
+      expect(
+        question({ brief: "plans/plain.md" }, "Question for Javi: plans/asks.md.").state.asked,
+      ).toBeUndefined();
       expect(existsSync(deferredFile())).toBe(false);
       // A plan whose window ran out is not held again by a later question.
       const late = question({
@@ -7904,7 +8046,7 @@ describe("asked once", () => {
       });
       expect(second.state.asked["plans/asks.md"]).toBeGreaterThanOrEqual(second.before);
       takeDeferral();
-      // The executor's question is never refused by the lock.
+      // The executor's message is never refused by the lock.
       writeFileSync(
         join(dir, ".claude", "executor.1.lock"),
         JSON.stringify({ sessionId: ids.other, pid: process.pid, released: false }),
@@ -7914,8 +8056,8 @@ describe("asked once", () => {
           queue(["tool"], {
             session_id: ids.exec,
             agent_type: "workflow:executor",
-            tool_name: "AskUserQuestion",
-            tool_input: { questions: [] },
+            tool_name: "SendMessage",
+            tool_input: { to: "Test Assistant", message: "Built: plans/x.md." },
           }),
         ).toBe("");
       } finally {
@@ -8227,7 +8369,7 @@ describe("asked once", () => {
       utimesSync(file, long, long);
       try {
         const { state } = question({ brief: "plans/asks.md" });
-        expect(state.asked).toEqual({});
+        expect(state.asked).toBeUndefined();
         expect(existsSync(deferredFile())).toBe(false);
       } finally {
         const fresh = Date.now() / 1000;
@@ -8322,7 +8464,7 @@ describe("asked once", () => {
       const denied = (out: string) =>
         out ? JSON.parse(out).hookSpecificOutput?.permissionDecisionReason || "" : "";
       const words = (at: number) =>
-        `plans/asks.md is still asking Javi (its planner's until ${hhmm(at + 30 * MIN)}): build the other plans first, and come back to it after ${hhmm(at + 30 * MIN)}, or when Javi says in this chat to build it now. Once he has, write his word in its "Decided" section first: that lets the plan go.`;
+        `plans/asks.md is still asking Javi (its planner's until ${hhmm(at + 30 * MIN)}): build the other plans first, and come back to it after ${hhmm(at + 30 * MIN)}, or once its "Decided" says Javi wants it built now.`;
       afterAll(() => {
         writeFileSync(file(), asks);
         rmSync(stateFile(ids.exec), { force: true });
@@ -9863,7 +10005,7 @@ else say([]);
           keep("w1", "workflow_run", recorded);
           const said = plans("github", "--inbox").stdout;
           expect(said).toMatch(/^GitHub: #40 Checks run failed, noted; assistant started\. /);
-          expect(said).toContain("Runs Assistant 1 (lab) was started on: plans/github/40.md.");
+          expect(said).toContain("Runs Assistant was started on: plans/github/40.md.");
           const note = readFileSync(join(dir, "plans", "github", "40.md"), "utf8");
           expect(note).toMatch(
             /^# GitHub #40: Series keep their order\n\nfailed, 14 November 2026 \d\d:04, Checks run 19283746501 on 4f1c2b9a: https:\/\/github\.com\/o\/r\/actions\/runs\/19283746501\n\n$/,
@@ -10497,7 +10639,7 @@ else say([]);
           );
           await until(() => JSON.parse(readFileSync(join(stub, "rows.json"), "utf8")).length > 0);
           expect(JSON.parse(readFileSync(join(stub, "rows.json"), "utf8"))[0].name).toBe(
-            "Runs Assistant 1 (lab)",
+            "Runs Assistant",
           );
           // The app gains them: lacks and the told file go, and nothing more is asked or read.
           writeFileSync(told, JSON.stringify({ told: "installation: x", at: 1 }));
@@ -11664,7 +11806,7 @@ describe("a plan put first, in a project", () => {
     const denied = (out: string) =>
       out ? JSON.parse(out).hookSpecificOutput?.permissionDecisionReason || "" : "";
     const words = (path: string, since: string) =>
-      `plans/b.md is first (since ${since}): build it before ${path}. Only Javi's word in this chat changes the order: plans first ${path}.`;
+      `plans/b.md is first (since ${since}): build it before ${path}. Only Javi's word, through the assistant chat, changes the order.`;
     const putFirst = () =>
       writeFileSync(
         file("b.md"),

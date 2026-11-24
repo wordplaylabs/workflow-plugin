@@ -199,10 +199,10 @@ alt text), and set it without
 opened one anyway (`gh pr view <name> --json number,url`) gets its body
 replaced, never a second; a refused `gh pr edit` that set part of the
 body is read back (`gh pr view <n> --json body`) and set again. The
-line: `Screenshots: sent in the executor's chat; attaching them needs gh
-2.99 or newer in this container, signed in with a token that can upload
-(the plugin's docs, "Installing").` "Built" and the final message say
-the same.
+line: `Screenshots: kept in plans/<topic>/; the assistant chat sends
+them. Attaching them here needs gh 2.99 or newer in this container,
+signed in with a token that can upload (the plugin's docs,
+"Installing").` "Built" and the `Built:` message say the same.
 
 **The checks are not waited on** ("A push is not waited on"): after
 the push and the pull request's create or edit, start the next plan;
@@ -217,7 +217,7 @@ next plan. The project's `run` is read only for a fix pushed straight.
 origin/<branch>`; keep the local branches, the hook's match for pull
 requests.
 
-**The final message leads with** each pull request opened or joined, its
+**The `Built:` message to the assistant leads with** each pull request opened or joined, its
 link and what it was marked related to, and, for a draft: `Pull request
 #<n> (<link>) is a draft and waits on you: read its description and
 screenshots, then mark it ready for review on GitHub (the Ready for

@@ -3,6 +3,7 @@ name: Workflow
 branch: test
 run: checks.yml
 catalogue: plugins/workflow/docs/decisions.md
+executors: 2
 ui:
   - "plugins/workflow/**"
   - "INSTALL.md"

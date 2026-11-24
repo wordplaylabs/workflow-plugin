@@ -13,6 +13,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   statSync,
   rmSync,
   utimesSync,
@@ -22,7 +23,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { QUEUE_IGNORES, checkoutOf } from "../plugins/workflow/scripts/project.mjs";
+import { QUEUE_IGNORES, checkoutOf, executorsOf } from "../plugins/workflow/scripts/project.mjs";
 import {
   listToJudge,
   recordTool,
@@ -72,6 +73,8 @@ import {
   assistantPrompt,
   followUpsMessage,
   startPrompt,
+  freePlans,
+  takerFor,
   githubPrompt,
   PLANNER_PROMPT,
   sessionsOf,
@@ -1069,10 +1072,10 @@ describe("plan-queue", () => {
     });
 
     // plans/simpler-agents.md, part 3: the state and the facts, no landing steps.
-    it("names the waiting plans and no landing steps to an executor taking more", () => {
+    it("names the waiting plan and no landing steps to an executor taking more", () => {
       const waiting = [plan("plans/a.md")];
       expect(decideStop({ waiting })!.reason).toBe(
-        "Plans are waiting and this session can take them: plans/a.md (no context known). Build them as a new batch.",
+        "A plan is waiting and this session can take it: plans/a.md (no context known). Build it next.",
       );
     });
 
@@ -1135,8 +1138,9 @@ describe("plan-queue", () => {
       });
     });
 
+    // plans/parallel-executors.md, part 2: the stop names one plan, the first free.
     it(
-      "hands Executor 54's eight plans to a fresh executor at its stop, end to end",
+      "hands Executor 54's first plan to a fresh executor at its stop, end to end",
       { timeout: 30_000 },
       () => {
         const dir = mkdtempSync(join(tmpdir(), "queue-declined-"));
@@ -1196,13 +1200,15 @@ describe("plan-queue", () => {
           const context = JSON.parse(said).hookSpecificOutput.additionalContext;
           // The checkout's sync speaks between the two, as at any retirement.
           expect(context).toMatch(
-            /^Retired: the plans named at the last stop are still waiting, untaken\. /,
+            /^Retired: the plan named at the last stop is still waiting, untaken\. /,
           );
-          expect(context).toContain(`Words Executor 1 (lab) was started on: ${paths.join(", ")}.`);
+          expect(context).toContain(
+            `Words Executor 1 (lab) was started on: ${paths[0]}, in executor-1.`,
+          );
           const line = JSON.parse(readFileSync(starts, "utf8").trim());
-          expect(line).toMatchObject({ name: "Words Executor 1 (lab)", paths });
+          expect(line).toMatchObject({ name: "Words Executor 1 (lab)", paths: [paths[0]] });
           expect(line.why).toContain(
-            "was retired: the plans named at the last stop are still waiting, untaken.",
+            "was retired: the plan named at the last stop is still waiting, untaken.",
           );
           expect(JSON.parse(readFileSync(stateFile, "utf8")).retired).toBe(true);
         } finally {
@@ -1974,7 +1980,7 @@ describe("plan-queue", () => {
     });
   });
 
-  it("lists a live executor in a worktree as busy, its plan as building, and the worktree in use", () => {
+  it("lists a live executor in a worktree as busy, its plan as building, and a worktree no executor's as left over", () => {
     execFileSync(
       "git",
       ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base"],
@@ -1982,13 +1988,13 @@ describe("plan-queue", () => {
         cwd: repo,
       },
     );
-    const tree = join(repo, ".claude", "worktrees", "executor");
+    const tree = join(repo, ".claude", "worktrees", "executor-1");
     execFileSync("git", ["worktree", "add", "-q", "-b", "nine-work", tree, "HEAD"], { cwd: repo });
     const leftover = join(repo, ".claude", "worktrees", "leftover");
     execFileSync("git", ["worktree", "add", "-q", "--detach", leftover, "HEAD"], { cwd: repo });
     const session = "11111111-2222-3333-4444-555555555555";
     writeFileSync(
-      join(repo, ".claude", "executor.lock"),
+      join(repo, ".claude", "executor.1.lock"),
       JSON.stringify({ sessionId: session, name: "Executor 9", pid: process.pid }),
     );
     writeFileSync(
@@ -2001,19 +2007,16 @@ describe("plan-queue", () => {
     try {
       const out = listWith(live);
       expect(out).toMatch(
-        /The executor: Executor 9 \[11111111\], busy, in executor on nine-work, holds the lock, building plans\/busy\.md\./,
+        /The executor: Executor 9 \[11111111\], busy, in executor-1 on nine-work, building plans\/busy\.md\./,
       );
       expect(out).toMatch(/\nBuilding\n  plans\/busy\.md +Executor 9, since 26 October 2026/);
       expect(out).not.toMatch(/busy\.md[^\n]*gone/);
-      expect(out).toMatch(
-        /Worktrees under \.claude\/worktrees: .*executor on nine-work \(Executor 9\)/,
-      );
-      expect(out).toMatch(/leftover \(free\)/);
+      expect(out).toContain("Worktrees under .claude/worktrees: left over: leftover.");
     } finally {
       execFileSync("git", ["worktree", "remove", "--force", tree], { cwd: repo });
       execFileSync("git", ["worktree", "remove", "--force", leftover], { cwd: repo });
       execFileSync("git", ["branch", "-D", "-q", "nine-work"], { cwd: repo });
-      rmSync(join(repo, ".claude", "executor.lock"), { force: true });
+      rmSync(join(repo, ".claude", "executor.1.lock"), { force: true });
       rmSync(join(repo, "plans", "busy.md"), { force: true });
     }
   });
@@ -2055,12 +2058,12 @@ describe("plan-queue", () => {
     const stateFile = (id: string) => join(tmpdir(), `workflow-queue-${id}.json`);
     afterAll(() => {
       for (const id of Object.values(ids)) rmSync(stateFile(id), { force: true });
-      rmSync(join(repo, ".claude", "executor.lock"), { force: true });
+      rmSync(join(repo, ".claude", "executor.1.lock"), { force: true });
     });
 
     it("lists an executor in the checkout with a released lock, and nothing more", () => {
       writeFileSync(
-        join(repo, ".claude", "executor.lock"),
+        join(repo, ".claude", "executor.1.lock"),
         JSON.stringify({ sessionId: ids.four, name: "Executor 4", released: 1 }),
       );
       const out = listWith([
@@ -2123,7 +2126,7 @@ describe("plan-queue", () => {
         { sessionId: ids.five, name: "Executor 5", status: "busy", cwd: repo },
       ];
       const states: Record<string, { retired?: boolean }> = { [ids.five]: { retired: true } };
-      const all = sessionsOf("executor", live, null, {
+      const all = sessionsOf("executor", live, [], {
         trees: [{ path: repo, branch: "" }],
         stateFor: (id) => states[id] || null,
       });
@@ -2460,7 +2463,7 @@ describe("the planner queue", () => {
   // assistant's stop in this checkout of ready plans starts none
   // (plans/executor-takes-next-ready-plan.md, part 2); the release puts it back.
   const executorHeld = () => {
-    const lock = join(repo, ".claude", "executor.lock");
+    const lock = join(repo, ".claude", "executor.1.lock");
     const before = existsSync(lock) ? readFileSync(lock, "utf8") : null;
     writeFileSync(lock, JSON.stringify({ sessionId: "held", pid: process.pid, released: false }));
     return () => (before === null ? rmSync(lock, { force: true }) : writeFileSync(lock, before));
@@ -2568,11 +2571,9 @@ describe("the planner queue", () => {
         { state: "ready", path: "plans/a.md" },
         { state: "ready", path: "plans/b.md" },
       ];
-      expect(startPrompt(["plans/a.md", "plans/b.md"], plans)).toBe(
-        "Build plans/a.md, then plans/b.md.",
-      );
-      expect(startPrompt(["plans/a.md"], plans)).toBe("Build plans/a.md.");
-      expect(startPrompt(["plans/x.md"], [{ state: "handed", path: "plans/x.md" }])).toBe(
+      // plans/parallel-executors.md, part 2: one plan a start.
+      expect(startPrompt("plans/a.md", plans)).toBe("Build plans/a.md.");
+      expect(startPrompt("plans/x.md", [{ state: "handed", path: "plans/x.md" }])).toBe(
         'Resume plans/x.md from its "Handing over" section.',
       );
       expect(assistantPrompt("plans/x.md")).toBe("Follow-ups ready: plans/x.md.");
@@ -4469,7 +4470,7 @@ describe("the queue's faults, closed", () => {
       "gives one of two prompt hooks racing for %s the lock, and blocks the other",
       async (_, old) => {
         const dir = fixture("Race");
-        if (old) writeFileSync(join(dir, ".claude", "executor.lock"), JSON.stringify(old));
+        if (old) writeFileSync(join(dir, ".claude", "executor.1.lock"), JSON.stringify(old));
         const ids = [`race-a-${process.pid}`, `race-b-${process.pid}`];
         const live = JSON.stringify(
           ids.map((sessionId, i) => ({ sessionId, name: `Race Executor ${i + 1}`, cwd: dir })),
@@ -4496,13 +4497,13 @@ describe("the queue's faults, closed", () => {
         const answered = outs.filter((out) => out.includes("Plans in the queue"));
         expect(blocked).toHaveLength(1);
         expect(answered).toHaveLength(1);
-        const lock = JSON.parse(readFileSync(join(dir, ".claude", "executor.lock"), "utf8"));
+        const lock = JSON.parse(readFileSync(join(dir, ".claude", "executor.1.lock"), "utf8"));
         expect(lock.sessionId).toBe(ids[outs.indexOf(answered[0])]);
         for (const id of ids) rmSync(join(tmpdir(), `workflow-queue-${id}.json`), { force: true });
       },
     );
     it("takes a released lock and a dead holder's, and not a live one's", () => {
-      const path = join(fixture("Lock"), ".claude", "executor.lock");
+      const path = join(fixture("Lock"), ".claude", "executor.1.lock");
       writeFileSync(path, JSON.stringify({ sessionId: "old", released: 1 }));
       expect(takeLock("new", [], { path, alive: () => true })).toBe(true);
       expect(JSON.parse(readFileSync(path, "utf8")).sessionId).toBe("new");
@@ -4550,7 +4551,7 @@ describe("the queue's faults, closed", () => {
         `${JSON.stringify({ at: Date.now() - 3_600_000, name: "A Executor 1" })}\n`,
       );
       writeFileSync(
-        join(a, ".claude", "executor.lock"),
+        join(a, ".claude", "executor.1.lock"),
         JSON.stringify({ sessionId: "a-exec", pid: process.pid, released: false }),
       );
       const live = JSON.stringify([
@@ -4581,7 +4582,7 @@ describe("the queue's faults, closed", () => {
     it("counts no session with no working directory, unless its own files name it", () => {
       expect(inThisRepo(undefined, ["/w/a"])).toBe(false);
       const rows = [{ sessionId: "lock-holder", name: "A Executor 1" }];
-      expect(ownRows(rows, { paths: ["/w/a"], lockId: "lock-holder" })).toEqual(rows);
+      expect(ownRows(rows, { paths: ["/w/a"], lockIds: ["lock-holder"] })).toEqual(rows);
       expect(ownRows(rows, { paths: ["/w/b"] })).toEqual([]);
       expect(ownRows(rows, { paths: ["/w/b"], named: ["lock-holder"] })).toEqual(rows);
     });
@@ -4654,7 +4655,7 @@ if (args[0] === "agents") {
       const dir = fixture("Seen");
       const { script, rows } = stub();
       const said = startIn(dir, { WORKFLOW_CLAUDE: script, STUB_ROWS: rows });
-      expect(said).toContain("Seen Executor 1 (lab) was started on: plans/x.md.");
+      expect(said).toContain("Seen Executor 1 (lab) was started on: plans/x.md, in executor-1.");
       expect(readFileSync(join(dir, ".claude", "starts.log"), "utf8")).toContain(
         '"name":"Seen Executor 1 (lab)"',
       );
@@ -4703,7 +4704,7 @@ if (args[0] === "agents") {
           "plans/x.md",
         ]);
         const sentence = `Javi said to start it ("${words}"), past: ${looping}`;
-        expect(said).toContain("Said Executor 6 (lab) was started on: plans/x.md.");
+        expect(said).toContain("Said Executor 6 (lab) was started on: plans/x.md, in executor-1.");
         expect(said).toContain(sentence);
         const last = JSON.parse(
           readFileSync(join(dir, ".claude", "starts.log"), "utf8")
@@ -4773,7 +4774,7 @@ if (args[0] === "agents") {
               words,
               "plans/x.md",
             ]),
-          ).toContain("Later Executor 6 (lab) was started on: plans/x.md.");
+          ).toContain("Later Executor 6 (lab) was started on: plans/x.md, in executor-1.");
           const left = JSON.parse(readFileSync(file, "utf8"));
           pids.push(left.pid);
           expect(left.paths).toEqual(["plans/y.md"]);
@@ -5339,7 +5340,7 @@ describe("the cache-aware queue", () => {
       kept: { paths: ["plans/b.md"] },
     });
     expect((kept as { reason: string }).reason).toContain(
-      "can take them: plans/b.md (its context is 200k tokens, under the ceiling of 224k worked out here (fresh start 49k, 79 turns, 100k shared, Opus 5.5 prices)).",
+      "can take it: plans/b.md (its context is 200k tokens, under the ceiling of 224k worked out here (fresh start 49k, 79 turns, 100k shared, Opus 5.5 prices)).",
     );
     // At the next stop, b built, a goes to a fresh executor.
     expect(
@@ -5756,7 +5757,7 @@ describe("the cache-aware queue", () => {
                 name: "Reuse Executor 1",
                 status: "idle",
                 kind: "background",
-                cwd: repo,
+                cwd: join(repo, ".claude", "worktrees", "executor-1"),
               },
             ]),
             WORKFLOW_STARTS_LOG: join(repo, ".claude", "starts.log"),
@@ -5983,7 +5984,7 @@ describe("a brief reaches a free planner", () => {
               status: "idle",
             },
           ],
-          null,
+          [],
           {
             trees: [],
             plans: [],
@@ -6415,7 +6416,7 @@ describe("the tool hook counts what the chat holds of each file", () => {
         });
       };
       const held = stop([{ "test/hooks.test.ts": 5_000 }, { "test/hooks.test.ts": 8_000 }]);
-      expect(held).toContain("can take them: plans/p.md");
+      expect(held).toContain("can take it: plans/p.md");
       expect(held).toContain("13k shared");
       expect(held).not.toContain("83k shared");
       expect(stop()).toContain("0k shared");
@@ -6901,7 +6902,7 @@ describe("a finished chat ends", () => {
     };
     const base = { name: "Ends Planner 1", kind: "background", cwd: "/x" };
     const read = (row: object, at = now - MIN, context = 300_000) =>
-      sessionsOf("planner", [{ sessionId: "b1000000-0000", ...base, ...row }], null, {
+      sessionsOf("planner", [{ sessionId: "b1000000-0000", ...base, ...row }], [], {
         trees: [{ path: "/x", branch: "" }],
         stateFor: () => ({ agent: "planner", plans: [] }),
         usageFor: () => ({ context, at }),
@@ -6975,7 +6976,7 @@ describe("a finished chat ends", () => {
     const [goneExecutor] = sessionsOf(
       "executor",
       [{ sessionId: goneId, name: "Ends Executor 1", kind: "background", cwd: "/x" }],
-      lock,
+      [lock],
       {
         trees: [{ path: "/x", branch: "" }],
         plans: [{ path: "plans/a.md", state: "building", session: goneId }],
@@ -6986,7 +6987,6 @@ describe("a finished chat ends", () => {
     expect(goneExecutor).toMatchObject({
       status: "not running",
       on: "plans/a.md",
-      holdsLock: true,
     });
     const takeOver = canStart({
       now,
@@ -7043,7 +7043,7 @@ describe("a finished chat ends", () => {
     const [planner] = sessionsOf(
       "planner",
       [{ sessionId: "p1000000-0000", name: "Ends Planner 1", kind: "background", status: "idle" }],
-      null,
+      [],
       {
         trees: [],
         plans,
@@ -7063,7 +7063,7 @@ describe("a finished chat ends", () => {
     const [asking] = sessionsOf(
       "planner",
       [{ sessionId: "p1000000-0000", name: "Ends Planner 1", kind: "background", status: "idle" }],
-      null,
+      [],
       {
         trees: [],
         plans,
@@ -7234,7 +7234,7 @@ describe("a finished chat ends", () => {
       );
     });
 
-    it("arms it on the retire too", () => {
+    it("arms it on the retire too", { timeout: 30_000 }, () => {
       rmSync(log, { force: true });
       const tired = "e3000000-0000-0000-0000-000000000000";
       writeFileSync(stateFile(tired), JSON.stringify({ agent: "executor" }));
@@ -7338,59 +7338,70 @@ describe("a finished chat ends", () => {
     });
 
     // plans/end-a-stuck-chat.md
-    it("plans end --now ends a named chat whatever it is doing, its plan handed over first", () => {
-      rmSync(log, { force: true });
-      expect(queue(["end", "--now"])).toBe(
-        "Not ended: name the chat to end now (plans end <id> --now); plans lists them.\n",
-      );
-      expect(logged()).toEqual([]);
-      // Blocked: refused without --now, ended with it, and its subagents' tmux server too.
-      expect(queue(["end", "bg-a"])).toBe(
-        "Not ended: Ends Planner 1 [p4000000], its state is blocked.\n",
-      );
-      expect(queue(["end", "bg-a", "--now"])).toBe("Ended Ends Planner 1 [p4000000]: blocked.\n");
-      expect(logged()).toEqual(["bg-a", "tmux claude-swarm-4242"]);
-      // A plan under way is refused without --now, and handed over with it.
-      rmSync(log, { force: true });
-      const taken = join(dir, "plans", "taken.md");
-      writeFileSync(
-        taken,
-        `# Taken\n\n## Building, 28 October 2026, session ${exec}\n\nPlan only, 28 October 2026, for Javi.\n\n## The change\n`,
-      );
-      expect(queue(["end", "bg-e"])).toBe(
-        "Not ended: Ends Executor 1 [e2000000], it has plans/taken.md under way.\n",
-      );
-      // The queue resumes it now: a fresh executor started in its place (WORKFLOW_CLAUDE stands in).
-      const ended = execFileSync("node", [join(here, "plan-queue.mjs"), "end", "--now", "bg-e"], {
-        encoding: "utf8",
-        env: { ...process.env, ...env(), WORKFLOW_CLAUDE: "/bin/true" },
-      });
-      expect(ended).toMatch(
-        /^Ended Ends Executor 1 \[e2000000\]: done\. plans\/taken\.md is handed over\.\n/,
-      );
-      // start's own answer follows: here the owner's interactive executor refuses it.
-      expect(ended).toContain("An executor is alive: Ends Executor 2 [e6000000]");
-      expect(logged()).toEqual(["bg-e"]);
-      const text = readFileSync(taken, "utf8");
-      expect(text).not.toContain("## Building");
-      expect(text).toMatch(/^## Handing over, [^,\n]+, ended by [^\n]+\n\nStep in hand: unknown/m);
-      expect(stateOf(text)).toMatchObject({ state: "handed" });
-      // A failed stop leaves the plan as it was.
-      const before = `# Taken\n\n## Building, 28 October 2026, session ${exec}\n\nPlan only, 28 October 2026, for Javi.\n`;
-      writeFileSync(taken, before);
-      const failed = execFileSync("node", [join(here, "plan-queue.mjs"), "end", "bg-e", "--now"], {
-        encoding: "utf8",
-        env: { ...process.env, ...env(), WORKFLOW_STOP_LOG: "", WORKFLOW_CLAUDE: "/bin/false" },
-      });
-      expect(failed).toBe("Not ended: Ends Executor 1 [e2000000], claude stop failed.\n");
-      expect(readFileSync(taken, "utf8")).toBe(before);
-    });
+    it(
+      "plans end --now ends a named chat whatever it is doing, its plan handed over first",
+      { timeout: 30_000 },
+      () => {
+        rmSync(log, { force: true });
+        expect(queue(["end", "--now"])).toBe(
+          "Not ended: name the chat to end now (plans end <id> --now); plans lists them.\n",
+        );
+        expect(logged()).toEqual([]);
+        // Blocked: refused without --now, ended with it, and its subagents' tmux server too.
+        expect(queue(["end", "bg-a"])).toBe(
+          "Not ended: Ends Planner 1 [p4000000], its state is blocked.\n",
+        );
+        expect(queue(["end", "bg-a", "--now"])).toBe("Ended Ends Planner 1 [p4000000]: blocked.\n");
+        expect(logged()).toEqual(["bg-a", "tmux claude-swarm-4242"]);
+        // A plan under way is refused without --now, and handed over with it.
+        rmSync(log, { force: true });
+        const taken = join(dir, "plans", "taken.md");
+        writeFileSync(
+          taken,
+          `# Taken\n\n## Building, 28 October 2026, session ${exec}\n\nPlan only, 28 October 2026, for Javi.\n\n## The change\n`,
+        );
+        expect(queue(["end", "bg-e"])).toBe(
+          "Not ended: Ends Executor 1 [e2000000], it has plans/taken.md under way.\n",
+        );
+        // The queue resumes it now: a fresh executor started in its place (WORKFLOW_CLAUDE stands in).
+        const ended = execFileSync("node", [join(here, "plan-queue.mjs"), "end", "--now", "bg-e"], {
+          encoding: "utf8",
+          env: { ...process.env, ...env(), WORKFLOW_CLAUDE: "/bin/true" },
+        });
+        expect(ended).toMatch(
+          /^Ended Ends Executor 1 \[e2000000\]: done\. plans\/taken\.md is handed over\.\n/,
+        );
+        // start's own answer follows: the owner's chat in the checkout is no
+        // executor's number (plans/parallel-executors.md), so a fresh one is started.
+        expect(ended).toContain("Ends Executor 3 (lab) was started");
+        expect(logged()).toEqual(["bg-e"]);
+        const text = readFileSync(taken, "utf8");
+        expect(text).not.toContain("## Building");
+        expect(text).toMatch(
+          /^## Handing over, [^,\n]+, ended by [^\n]+\n\nStep in hand: unknown/m,
+        );
+        expect(stateOf(text)).toMatchObject({ state: "handed" });
+        // A failed stop leaves the plan as it was.
+        const before = `# Taken\n\n## Building, 28 October 2026, session ${exec}\n\nPlan only, 28 October 2026, for Javi.\n`;
+        writeFileSync(taken, before);
+        const failed = execFileSync(
+          "node",
+          [join(here, "plan-queue.mjs"), "end", "bg-e", "--now"],
+          {
+            encoding: "utf8",
+            env: { ...process.env, ...env(), WORKFLOW_STOP_LOG: "", WORKFLOW_CLAUDE: "/bin/false" },
+          },
+        );
+        expect(failed).toBe("Not ended: Ends Executor 1 [e2000000], claude stop failed.\n");
+        expect(readFileSync(taken, "utf8")).toBe(before);
+      },
+    );
 
     // plans/put-first-review-fixes.md, part 6.
     it("plans start hands a plan over from an executor with no process, and starts a fresh one on it", () => {
       const gone = "e7000000-0000-0000-0000-000000000000";
       const plan = join(dir, "plans", "gone.md");
-      const lockFile = join(dir, ".claude", "executor.lock");
+      const lockFile = join(dir, ".claude", "executor.1.lock");
       const building = `# Gone\n\n## Building, 13 November 2026, session ${gone}\n\nPlan only, 13 November 2026, for Javi.\n\n## The change\n`;
       writeFileSync(plan, building);
       writeFileSync(stateFile(gone), JSON.stringify({ agent: "executor" }));
@@ -7399,7 +7410,14 @@ describe("a finished chat ends", () => {
         JSON.stringify({ sessionId: gone, pid: 999_999, name: "Ends Executor 7", at: Date.now() }),
       );
       const goneRows = [
-        { sessionId: gone, id: "bg-g", name: "Ends Executor 7", kind: "background", cwd: dir },
+        // In its worktree, executor-1, whose lock it holds (plans/parallel-executors.md).
+        {
+          sessionId: gone,
+          id: "bg-g",
+          name: "Ends Executor 7",
+          kind: "background",
+          cwd: join(dir, ".claude", "worktrees", "executor-1"),
+        },
         // A planner with no process is still started beside, not touched.
         {
           sessionId: lone,
@@ -7478,7 +7496,7 @@ else if (args.includes("--bg")) {
         const text = readFileSync(plan, "utf8");
         expect(text).not.toContain("## Building");
         expect(text).toMatch(
-          /^Plan only, 13 November 2026, for Javi\.\n\n## Handing over, [^,\n]+, by the queue\n\nStep in hand: unknown, session e7000000-0000-0000-0000-000000000000's process was not running when a start looked, on branch `[^`]+`\. Read the branch's commits for what it did\.\n/m,
+          /^Plan only, 13 November 2026, for Javi\.\n\n## Handing over, [^,\n]+, by the queue\n\nStep in hand: unknown, session e7000000-0000-0000-0000-000000000000's process was not running when a start looked, on branch `[^`]+` in worktree `executor-1`\. Read the branch's commits for what it did\.\n/m,
         );
         expect(stateOf(text)).toMatchObject({ state: "handed" });
         expect(JSON.parse(readFileSync(lockFile, "utf8")).released).toBeTruthy();
@@ -7830,7 +7848,7 @@ describe("asked once", () => {
       takeDeferral();
       // The executor's question is never refused by the lock.
       writeFileSync(
-        join(dir, ".claude", "executor.lock"),
+        join(dir, ".claude", "executor.1.lock"),
         JSON.stringify({ sessionId: ids.other, pid: process.pid, released: false }),
       );
       try {
@@ -7843,7 +7861,7 @@ describe("asked once", () => {
           }),
         ).toBe("");
       } finally {
-        rmSync(join(dir, ".claude", "executor.lock"), { force: true });
+        rmSync(join(dir, ".claude", "executor.1.lock"), { force: true });
       }
     });
 
@@ -8095,7 +8113,15 @@ describe("asked once", () => {
               WORKFLOW_PROJECTS: projects,
               WORKFLOW_STARTS_LOG: join(dir, ".claude", "starts.log"),
               WORKFLOW_USAGE_FILE: join(dir, ".claude", "usage.json"),
-              WORKFLOW_LIVE: JSON.stringify(live.map((one) => ({ ...one, cwd: dir }))),
+              // The executor in its worktree, executor-1 (plans/parallel-executors.md).
+              WORKFLOW_LIVE: JSON.stringify(
+                live.map((one) => ({
+                  ...one,
+                  cwd: /Executor/.test(one.name)
+                    ? join(dir, ".claude", "worktrees", "executor-1")
+                    : dir,
+                })),
+              ),
             },
           },
         );
@@ -8418,18 +8444,27 @@ describe("asked once", () => {
       const within = reason();
       expect(within).toContain("plans/plain.md");
       expect(within).not.toContain("plans/asks.md");
-      asked(40);
-      rmSync(stateFile(ids.exec), { force: true });
-      expect(reason()).toContain(
-        'plans/asks.md (decisions unanswered: the recommended options, "Asked once")',
-      );
-      // The planner's chat gone: the plan is the executor's at once.
-      asked(5);
-      rmSync(stateFile(ids.exec), { force: true });
-      const gone = JSON.parse(
-        queue(["stop"], { session_id: ids.exec, agent_type: "executor" }, [live[1]]),
-      ).reason;
-      expect(gone).toContain("plans/asks.md (decisions unanswered");
+      // One plan a stop (plans/parallel-executors.md, part 2): plain.md set
+      // aside, the held plan is the first free once it may be named.
+      const plain = join(dir, "plans", "plain.md");
+      const aside = join(dir, "plans", "plain.txt");
+      renameSync(plain, aside);
+      try {
+        asked(40);
+        rmSync(stateFile(ids.exec), { force: true });
+        expect(reason()).toContain(
+          'plans/asks.md (decisions unanswered: the recommended options, "Asked once")',
+        );
+        // The planner's chat gone: the plan is the executor's at once.
+        asked(5);
+        rmSync(stateFile(ids.exec), { force: true });
+        const gone = JSON.parse(
+          queue(["stop"], { session_id: ids.exec, agent_type: "executor" }, [live[1]]),
+        ).reason;
+        expect(gone).toContain("plans/asks.md (decisions unanswered");
+      } finally {
+        renameSync(aside, plain);
+      }
     });
   });
 });
@@ -10976,12 +11011,12 @@ else if (args.includes("--bg")) {
     try {
       const said = net.queue(["stop"], { session_id: id, agent_type: "planner" });
       expect(JSON.parse(said).hookSpecificOutput.additionalContext).toContain(
-        "Plain Executor 1 (lab) was started on: plans/a.md, plans/b.md.",
+        "Plain Executor 1 (lab) was started on: plans/a.md, in executor-1.",
       );
       expect(net.started()).toEqual([
         expect.objectContaining({
           name: "Plain Executor 1 (lab)",
-          paths: ["plans/a.md", "plans/b.md"],
+          paths: ["plans/a.md"],
           why,
         }),
       ]);
@@ -10995,7 +11030,7 @@ else if (args.includes("--bg")) {
     const net = project("Owner");
     const said = net.queue(["stop"], ownerStop);
     expect(JSON.parse(said).hookSpecificOutput.additionalContext).toContain(
-      "Owner Executor 1 (lab) was started on: plans/a.md, plans/b.md.",
+      "Owner Executor 1 (lab) was started on: plans/a.md, in executor-1.",
     );
     expect(net.started()).toEqual([expect.objectContaining({ why })]);
   });
@@ -11021,7 +11056,7 @@ else if (args.includes("--bg")) {
         ]),
       );
       writeFileSync(
-        join(net.dir, ".claude", "executor.lock"),
+        join(net.dir, ".claude", "executor.1.lock"),
         JSON.stringify({ sessionId: exec, pid: process.pid, released: false }),
       );
       try {
@@ -11029,7 +11064,7 @@ else if (args.includes("--bg")) {
         expect(net.started()).toEqual([
           expect.objectContaining({
             name: "Timer Executor 2 (lab)",
-            paths: ["plans/a.md", "plans/b.md"],
+            paths: ["plans/a.md"],
             why,
           }),
         ]);
@@ -11054,7 +11089,7 @@ else if (args.includes("--bg")) {
 
       const pidless = project("Pidless");
       writeFileSync(
-        join(pidless.dir, ".claude", "executor.lock"),
+        join(pidless.dir, ".claude", "executor.1.lock"),
         JSON.stringify({ sessionId: "gone", pid: null, released: false }),
       );
       expect(pidless.queue(["stop"], ownerStop)).toContain(
@@ -11067,7 +11102,7 @@ else if (args.includes("--bg")) {
         `# A\n\n## Building, 6 November 2026, session ${id}\n\nPlan only, 6 November 2026, for Javi.\n`;
       writeFileSync(join(dead.dir, "plans", "a.md"), building("d0000000-dead"));
       expect(dead.queue(["stop"], ownerStop)).toContain(
-        "Dead Executor 1 (lab) was started on: plans/a.md.",
+        "Dead Executor 1 (lab) was started on: plans/a.md, in executor-1.",
       );
 
       // The Building line's session alive, with the lock released: nothing waits, nothing is said.
@@ -11093,7 +11128,7 @@ else if (args.includes("--bg")) {
 
   it("starts nothing and reads no sessions beside a live lock, paused, while another hook starts one, deferred or asking", () => {
     const net = project("Held");
-    const lock = join(net.dir, ".claude", "executor.lock");
+    const lock = join(net.dir, ".claude", "executor.1.lock");
     writeFileSync(lock, JSON.stringify({ sessionId: "live", pid: process.pid, released: false }));
     expect(net.queue(["stop"], ownerStop)).toBe("");
     rmSync(lock);
@@ -11888,7 +11923,8 @@ describe("a plan put first, in a project", () => {
     it("a fresh executor's prompt names the first plan first", () => {
       reset();
       putFirst();
-      expect(queue(["start", "--dry"])).toContain("Build plans/b.md, then plans/a.md.");
+      // One plan a start (plans/parallel-executors.md, part 2): the first.
+      expect(queue(["start", "--dry"])).toContain("Build plans/b.md.");
       // A timer's start, its paths in the queue's order as it is then.
       const timer = execFileSync(
         "node",
@@ -11900,11 +11936,9 @@ describe("a plan put first, in a project", () => {
         ],
         { encoding: "utf8", env: env([]) },
       );
-      expect(timer).toContain("Build plans/b.md, then plans/a.md.");
+      expect(timer).toContain("Build plans/b.md.");
       // Paths given on the command line keep the order given.
-      expect(queue(["start", "--dry", "plans/a.md", "plans/b.md"])).toContain(
-        "Build plans/a.md, then plans/b.md.",
-      );
+      expect(queue(["start", "--dry", "plans/a.md", "plans/b.md"])).toContain("Build plans/a.md.");
     });
 
     it("the Stop hook names the first plan first", () => {
@@ -11914,9 +11948,8 @@ describe("a plan put first, in a project", () => {
       const reason = JSON.parse(
         queue(["stop"], { session_id: ids.exec, agent_type: "executor" }, [execRow]),
       ).reason;
-      expect(reason).toContain(
-        "can take them: plans/b.md (first since 13 November 15:42), plans/a.md (",
-      );
+      expect(reason).toContain("can take it: plans/b.md (first since 13 November 15:42");
+      expect(reason).not.toContain("plans/a.md");
     });
   });
 });
@@ -12145,4 +12178,417 @@ else if (args.includes("--bg")) {
       expect(said).toContain("in executor-1 on topic");
     },
   );
+});
+
+// plans/parallel-executors.md
+describe("several executors build at once", () => {
+  const made: string[] = [];
+  afterAll(() => {
+    for (const dir of made) rmSync(dir, { recursive: true, force: true });
+  });
+  const temp = (prefix: string) => {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    made.push(dir);
+    return dir;
+  };
+  const g = (cwd: string, ...args: string[]) =>
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  const plan = (title: string, body = "", head = "") =>
+    `# ${title}\n\nPlan only, 24 November 2026, for Javi.${head}\n\n## The change, part by part\n\n${body}\n`;
+  /** A checkout with `executors: 3`, origin/test, the plans given, and a `claude` whose started chats are busy. */
+  const pool = (name: string, plans: Record<string, string>, front = "executors: 3\n") => {
+    const dir = temp(`pool-${name.toLowerCase()}-`);
+    g(dir, "init", "-q");
+    mkdirSync(join(dir, ".claude"));
+    writeFileSync(
+      join(dir, ".claude", "workflow.md"),
+      `---\nname: ${name}\nbranch: test\n${front}---\n`,
+    );
+    writeFileSync(join(dir, ".gitignore"), "plans/\n.claude/worktrees/\n");
+    g(dir, "add", ".");
+    g(dir, "commit", "-q", "-m", "one");
+    g(dir, "update-ref", "refs/remotes/origin/test", "HEAD");
+    mkdirSync(join(dir, "plans"));
+    Object.entries(plans).forEach(([file, text], i) => {
+      writeFileSync(join(dir, "plans", file), text);
+      const at = new Date(Date.now() - (10 - i) * 60_000);
+      utimesSync(join(dir, "plans", file), at, at);
+    });
+    const rows = join(dir, ".claude", "rows.json");
+    writeFileSync(rows, "[]");
+    const script = join(temp("pool-claude-"), "claude");
+    writeFileSync(
+      script,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "agents") process.stdout.write(fs.readFileSync(${JSON.stringify(rows)}, "utf8"));
+else if (args.includes("--bg")) {
+  const name = args[args.indexOf("--name") + 1];
+  const all = JSON.parse(fs.readFileSync(${JSON.stringify(rows)}, "utf8"));
+  all.push({ sessionId: "pool-" + all.length + "-" + Date.now(), name, kind: "background", status: "busy", cwd: process.cwd() });
+  fs.writeFileSync(${JSON.stringify(rows)}, JSON.stringify(all));
+}
+`,
+    );
+    chmodSync(script, 0o755);
+    const { WORKFLOW_LIVE: _, ...rest } = process.env;
+    const env = {
+      ...rest,
+      CLAUDE_PROJECT_DIR: dir,
+      WORKFLOW_ROOT: dir,
+      WORKFLOW_CLAUDE: script,
+      WORKFLOW_STARTS_LOG: join(dir, ".claude", "starts.log"),
+      WORKFLOW_USAGE_FILE: join(dir, ".claude", "usage.json"),
+      WORKFLOW_STOP_LOG: join(dir, ".claude", "stops.log"),
+    };
+    const queue = (args: string[], input: object = {}, extra: Record<string, string> = {}) =>
+      execFileSync("node", [join(here, "plan-queue.mjs"), ...args], {
+        input: JSON.stringify(input),
+        encoding: "utf8",
+        env: { ...env, ...extra },
+      });
+    const read = () => JSON.parse(readFileSync(rows, "utf8"));
+    const write = (all: object[]) => writeFileSync(rows, JSON.stringify(all));
+    const tree = (n: number) => join(dir, ".claude", "worktrees", `executor-${n}`);
+    const building = (file: string, id: string) =>
+      writeFileSync(
+        join(dir, "plans", file),
+        readFileSync(join(dir, "plans", file), "utf8").replace(
+          "\n\nPlan only",
+          `\n\n## Building, 24 November 2026, session ${id}\n\nPlan only`,
+        ),
+      );
+    return { dir, queue, read, write, tree, building, env };
+  };
+
+  it(
+    "starts two executors on two plans with no file in common, each in its own worktree on its own branch",
+    { timeout: 60_000 },
+    () => {
+      const one = pool("Two", {
+        "a.md": plan("A", "Change src/a.js."),
+        "b.md": plan("B", "Change src/b.js."),
+      });
+      expect(one.queue(["start"])).toContain(
+        "Two Executor 1 (lab) was started on: plans/a.md, in executor-1.",
+      );
+      expect(one.queue(["start"])).toContain(
+        "Two Executor 2 (lab) was started on: plans/b.md, in executor-2.",
+      );
+      const [first, second] = one.read();
+      one.building("a.md", first.sessionId);
+      one.building("b.md", second.sessionId);
+      g(one.tree(1), "switch", "-q", "-c", "topic-a");
+      g(one.tree(2), "switch", "-q", "-c", "topic-b");
+      const listed = one.queue(["list"]);
+      expect(listed).toContain("The executors, 2 of 3 at work:");
+      expect(listed).toMatch(
+        /\n  1  Two Executor 1 \(lab\) \[pool-0-\d*\], busy, [^\n]*in executor-1 on topic-a, building plans\/a\.md/,
+      );
+      expect(listed).toMatch(
+        /\n  2  Two Executor 2 \(lab\) \[pool-1-\d*\], busy, [^\n]*in executor-2 on topic-b, building plans\/b\.md/,
+      );
+      expect(listed).toContain("\n  3  free");
+    },
+  );
+
+  it(
+    "holds a plan that changes a file the one in hand changes, says why, refuses its Building line, and names it once the first is built",
+    { timeout: 60_000 },
+    () => {
+      const one = pool("Waits", {
+        "a.md": plan("A", "Change src/x.js."),
+        "b.md": plan("B", "Change src/x.js and src/y.js."),
+      });
+      expect(one.queue(["start"])).toContain("was started on: plans/a.md, in executor-1.");
+      const [first] = one.read();
+      one.building("a.md", first.sessionId);
+      expect(one.queue(["start", "plans/b.md"]).trim()).toContain(
+        "plans/b.md waits on plans/a.md (both change src/x.js): it is taken once that one is built.",
+      );
+      expect(one.queue(["start"]).trim()).toContain("plans/b.md waits on plans/a.md");
+      expect(one.read()).toHaveLength(1);
+      expect(one.queue(["list"])).toMatch(
+        /plans\/b\.md +Plan only, 24 November, waits on plans\/a\.md \(both change src\/x\.js\)/,
+      );
+      // Another executor's Building line on it is refused.
+      const other = "pool-other-0000";
+      one.write([
+        ...one.read(),
+        {
+          sessionId: other,
+          name: "Waits Executor 9",
+          kind: "background",
+          status: "idle",
+          cwd: one.tree(2),
+        },
+      ]);
+      const file = join(one.dir, "plans", "b.md");
+      const edit = JSON.parse(
+        one.queue(["tool"], {
+          session_id: other,
+          agent_type: "workflow:executor",
+          cwd: one.tree(2),
+          tool_name: "Edit",
+          tool_input: {
+            file_path: file,
+            old_string: "\n\nPlan only",
+            new_string: `\n\n## Building, 24 November 2026, session ${other}\n\nPlan only`,
+          },
+        }),
+      );
+      expect(edit.hookSpecificOutput.permissionDecisionReason).toBe(
+        "plans/b.md waits on plans/a.md (both change src/x.js): leave it, and build what the queue names.",
+      );
+      // Once a is built, b is named at the next stop.
+      writeFileSync(
+        join(one.dir, "plans", "a.md"),
+        `${plan("A", "Change src/x.js.")}\n## Built, 24 November 2026\n\nCommit \`0123abcd\` on test.\n`,
+      );
+      const stateFile = join(tmpdir(), `workflow-queue-${first.sessionId}.json`);
+      writeFileSync(stateFile, JSON.stringify({ agent: "executor" }));
+      try {
+        const stopped = JSON.parse(
+          one.queue(["stop"], {
+            session_id: first.sessionId,
+            agent_type: "executor",
+            cwd: one.tree(1),
+          }),
+        );
+        expect(stopped.reason).toContain(
+          "A plan is waiting and this session can take it: plans/b.md",
+        );
+      } finally {
+        rmSync(stateFile, { force: true });
+        rmSync(join(tmpdir(), `workflow-queue-${other}.json`), { force: true });
+      }
+    },
+  );
+
+  it("holds a plan on the plan its header names, and one landing on the topic in hand", () => {
+    const at = (path: string, text: string, state = "ready") => ({ path, text, state });
+    const a = at(
+      "plans/a.md",
+      plan("A", "Change src/a.js.", "\n\nLands: topic queue, waiting."),
+      "building",
+    );
+    const b = at("plans/b.md", plan("B", "Change src/b.js.", "\n\nLands: topic queue, waiting."));
+    expect(freePlans([a, b])[0].waitsOn).toEqual({
+      path: "plans/a.md",
+      why: "the same topic, queue",
+    });
+    const c = at("plans/c.md", plan("C", "Change src/c.js.", " It rests on plans/d.md."));
+    const d = at("plans/d.md", plan("D", "Change src/d.js."));
+    const free = freePlans([c, d]);
+    expect(free[0].waitsOn).toEqual({ path: "plans/d.md", why: "it rests on it" });
+    expect(free[1].waitsOn).toBeNull();
+    // Two that name each other hold neither.
+    const e = at("plans/e.md", plan("E", "", " With plans/f.md."));
+    const f = at("plans/f.md", plan("F", "", " With plans/e.md."));
+    expect(freePlans([e, f]).map((p) => p.waitsOn)).toEqual([null, null]);
+    // Two of the day's fixes.
+    const x = at("plans/x.md", plan("X", "Change src/x.js.", "\n\nLands: fix."), "building");
+    const y = at("plans/y.md", plan("Y", "Change src/y.js.", "\n\nLands: fix."));
+    expect(freePlans([x, y])[0].waitsOn).toEqual({ path: "plans/x.md", why: "the day's fixes" });
+    // A file at the repository's root, and a plan resting on a brief (Codex C9, C10).
+    const r = at("plans/r.md", plan("R", "Change `package.json`."), "building");
+    const q = at("plans/q.md", plan("Q", "Change `package.json` too."));
+    expect(freePlans([r, q])[0].waitsOn).toEqual({
+      path: "plans/r.md",
+      why: "both change package.json",
+    });
+    const brief = at("plans/d.md", "# D\n\nBrief for the planner, 24 November 2026.\n", "brief");
+    expect(freePlans([c, brief])[0].waitsOn).toEqual({ path: "plans/d.md", why: "it rests on it" });
+  });
+
+  it("starts number 1 and no other with three free and one plan", () => {
+    const one = pool("One", { "a.md": plan("A", "Change src/a.js.") });
+    const dry = one.queue(["start", "--dry"]);
+    expect(dry).toContain("Would run it in .claude/worktrees/executor-1.");
+    expect(dry).not.toContain("executor-2");
+    expect(
+      takerFor({ path: "plans/a.md", state: "ready" }, { executors: 3, sessions: [] }),
+    ).toEqual({ number: 1, session: null });
+  });
+
+  it(
+    "names one plan to one of two executors stopping at one moment",
+    { timeout: 60_000 },
+    async () => {
+      const one = pool("Race", { "a.md": plan("A", "Change src/a.js.") });
+      const ids = ["race-exec-1", "race-exec-2"];
+      one.write(
+        ids.map((sessionId, i) => ({
+          sessionId,
+          name: `Race Executor ${i + 1} (lab)`,
+          kind: "background",
+          status: "idle",
+          cwd: one.tree(i + 1),
+        })),
+      );
+      for (const id of ids)
+        writeFileSync(
+          join(tmpdir(), `workflow-queue-${id}.json`),
+          JSON.stringify({ agent: "executor" }),
+        );
+      const stop = (id: string, n: number) =>
+        new Promise<string>((done, fail) => {
+          const child = spawn("node", [join(here, "plan-queue.mjs"), "stop"], { env: one.env });
+          let out = "";
+          child.stdout.on("data", (chunk) => (out += chunk));
+          child.on("error", fail);
+          child.on("close", () => done(out));
+          child.stdin.end(
+            JSON.stringify({ session_id: id, agent_type: "executor", cwd: one.tree(n) }),
+          );
+        });
+      try {
+        const outs = await Promise.all(ids.map((id, i) => stop(id, i + 1)));
+        expect(outs.filter((out) => out.includes("can take it: plans/a.md"))).toHaveLength(1);
+        const claims = JSON.parse(
+          readFileSync(join(one.dir, ".claude", "executor.claims.json"), "utf8"),
+        );
+        expect(Object.keys(claims)).toEqual(["plans/a.md"]);
+      } finally {
+        for (const id of ids) rmSync(join(tmpdir(), `workflow-queue-${id}.json`), { force: true });
+      }
+    },
+  );
+
+  it(
+    "hands over a plan whose executor has no process, names its worktree, and resumes it there",
+    { timeout: 60_000 },
+    () => {
+      const one = pool("Gone", {
+        "a.md": plan("A", "Change src/a.js."),
+        "b.md": plan("B", "Change src/b.js."),
+      });
+      one.queue(["start"]);
+      one.queue(["start"]);
+      const [, second] = one.read();
+      one.building("b.md", second.sessionId);
+      one.write(
+        one
+          .read()
+          .map((row: { sessionId: string }) =>
+            row.sessionId === second.sessionId ? { ...row, status: undefined, pid: 0 } : row,
+          ),
+      );
+      // The fresh executor is prompted to resume it.
+      expect(one.queue(["start", "--dry"])).toContain(
+        'Resume plans/b.md from its \\"Handing over\\" section.',
+      );
+      const said = one.queue(["start"]);
+      const text = readFileSync(join(one.dir, "plans", "b.md"), "utf8");
+      expect(text).toMatch(
+        /## Handing over, [^\n]+, by the queue\n\nStep in hand: unknown, [^\n]* in worktree `executor-2`\./,
+      );
+      expect(said).toContain("was started on: plans/b.md, in executor-2.");
+      const started = readFileSync(join(one.dir, ".claude", "starts.log"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .at(-1);
+      expect(started.paths).toEqual(["plans/b.md"]);
+      // Ended with plans end --now, a fresh executor starts in the ended one's number.
+      const [first] = one.read();
+      one.building("a.md", first.sessionId);
+      const ended = one.queue(["end", first.sessionId, "--now"]);
+      expect(ended).toContain("plans/a.md is handed over.");
+      expect(ended).toContain("was started on: plans/a.md, in executor-1.");
+      expect(readFileSync(join(one.dir, "plans", "a.md"), "utf8")).toContain(
+        "in worktree `executor-1` in the middle of its work",
+      );
+      // A handed plan whose own worktree's executor is at work waits for it.
+      const busy = [{ sessionId: "s2", number: 2, status: "busy", on: "plans/c.md" }];
+      expect(
+        takerFor(
+          { path: "plans/b.md", state: "handed", tree: "executor-2" },
+          { executors: 3, sessions: busy },
+        ),
+      ).toBeNull();
+      expect(
+        endedEdit(
+          `# P\n\n## Building, 24 November 2026, session s1\n\nPlan only, 24 November 2026.\n`,
+          { sessionId: "s1", by: "Javi", branch: "x", tree: "executor-2" },
+        ),
+      ).toContain("on branch `x` in worktree `executor-2` in the middle of its work");
+    },
+  );
+
+  it("refuses a Building line on a built plan and lists it once, under Built", () => {
+    const one = pool("Built", {
+      "a.md": `${plan("A", "Change src/a.js.")}\n## Built, 24 November 2026\n\nCommit \`0123abcd\` on test.\n`,
+    });
+    const id = "built-exec-0000";
+    one.write([
+      {
+        sessionId: id,
+        name: "Built Executor 1 (lab)",
+        kind: "background",
+        status: "busy",
+        cwd: one.tree(1),
+      },
+    ]);
+    const file = join(one.dir, "plans", "a.md");
+    const out = JSON.parse(
+      one.queue(["tool"], {
+        session_id: id,
+        agent_type: "workflow:executor",
+        cwd: one.tree(1),
+        tool_name: "Edit",
+        tool_input: {
+          file_path: file,
+          old_string: "\n\nPlan only",
+          new_string: `\n\n## Building, 24 November 2026, session ${id}\n\nPlan only`,
+        },
+      }),
+    );
+    expect(out.hookSpecificOutput.permissionDecisionReason).toBe(
+      'plans/a.md is built already: its "Built" section stands.',
+    );
+    const listed = one.queue(["list"]);
+    expect(listed.match(/plans\/a\.md/g)).toHaveLength(1);
+    expect(listed).toMatch(/Built today\n  plans\/a\.md/);
+    rmSync(join(tmpdir(), `workflow-queue-${id}.json`), { force: true });
+  });
+
+  it("starts none while every executor is at work, and says the first to finish takes it", () => {
+    const one = pool("Full", { "x.md": plan("X", "Change src/x.js.") });
+    one.write(
+      [1, 2, 3].map((n) => ({
+        sessionId: `full-${n}`,
+        name: `Full Executor ${n} (lab)`,
+        kind: "background",
+        status: "busy",
+        cwd: one.tree(n),
+      })),
+    );
+    expect(one.queue(["start", "plans/x.md"])).toContain(
+      "All 3 executors are at work (Full Executor 1 (lab), Full Executor 2 (lab), Full Executor 3 (lab)): the first to finish takes plans/x.md.",
+    );
+  });
+
+  it("reads one executor, number 1, with no executors line, and says a value that is no whole number", () => {
+    expect(executorsOf(undefined)).toBe(1);
+    expect(executorsOf(3)).toBe(3);
+    const one = pool("Plain", { "a.md": plan("A", "Change src/a.js.") }, "");
+    expect(one.queue(["start", "--dry"])).toContain(
+      "Would run it in .claude/worktrees/executor-1.",
+    );
+    expect(one.queue(["list"])).toContain("The executor: none alive; 1 plan ready");
+    const bad = pool("Bad", {}, "executors: 0\n");
+    let said = "";
+    try {
+      bad.queue(["check"]);
+    } catch (error) {
+      said = String((error as { stdout?: string }).stdout || "");
+    }
+    expect(said).toContain("executors: 0 is no whole number of 1 or more.");
+  });
 });

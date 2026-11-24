@@ -471,9 +471,15 @@ on the machine that planned them.
   line.** (Javi, 30 October) GitHub links a `#<n>` and writes a backlink
   on the other pull request, so its people see it where they read.
   plans/land-by-pull-request.md.
-- `one-executor` **One checkout has one executor, and its Stop hook holds
+- `executor-pool` **A queue has as many executors as its project
+  file says, one by default; each builds one plan at a time, the
+  lowest-numbered free one takes the next, and its Stop hook holds
   the stop on a red run or pull request, then reuses or retires the
-  session.** (Javi, 27 October) Every turn re-reads the whole context at
+  session.** (Javi, 24 November) The executors were the bottleneck:
+  every ready plan waited behind the one in hand. A number of the
+  queue, not a third form beside the maker and the queue. As a
+  Jenkins node has a number of executors, each listed by its number.
+  plans/parallel-executors.md. 27 October: every turn re-reads the whole context at
   the cache-read price and a fresh session's first turn is 50k tokens,
   so a session is reused only while it is cheaper than a fresh one.
   plans/cache-aware-queue.md, plans/base-at-building-line.md.
@@ -496,6 +502,21 @@ on the machine that planned them.
   (plans-reach-an-executor). plans/executor-takes-next-ready-plan.md.
   14 November: the hold is on a project's `run`, and on a pull request's
   failed checks only where no webhook brings them (`push-not-waited-on`).
+  24 November: with more than one executor, a Stop hook holds only on
+  the pull requests of the plans its session took.
+  plans/parallel-executors.md.
+  - ~~One checkout has one executor, and its Stop hook holds the stop
+    on a red run or pull request, then reuses or retires the
+    session.~~ (Javi, 27 October; one checkout held one build)
+- `plan-waits-on` **A plan waits on the plan it rests on, and on one
+  being built that lands where it lands or changes a file it
+  changes; a plan is claimed before it is taken.** (as Trunk's merge
+  queue does, 24 November) Its parallel mode runs pull requests with
+  no impacted target in common side by side and queues the rest
+  behind one another; Claude Code's agent teams give each teammate
+  its own files, hand out no blocked task and claim under a file
+  lock; git refuses one branch in two worktrees. Waiting too often
+  costs time, never a conflict. plans/parallel-executors.md.
 - `push-not-waited-on` **The executor runs the checks once, before the
   push, and waits on no pull request's run of them; a failed run
   reaches the assistant by the webhook.** (Javi, 14 November) The pull
@@ -558,6 +579,9 @@ on the machine that planned them.
   14 November: a plan handed over too often goes to the assistant, and
   the owner is not asked by the executor (executor-never-waits).
   plans/executor-never-waits.md.
+  24 November: a free plan never waits while an executor is free;
+  `plans start` gives it to the lowest-numbered free executor, an idle
+  chat with room by the message it prints. plans/parallel-executors.md.
 - `starts-bounded` **Starts are bounded, as every loop over model calls
   is.** (Javi, 27 October) A queue that starts sessions on its own must
   not spend the subscription's window or loop on a session that dies.
@@ -573,6 +597,9 @@ on the machine that planned them.
   limit refuses. An assistant's progress counts a note from GitHub it
   handled, since answering a comment writes no plan.
   plans/loop-guard-counts-failures.md.
+  24 November: at most `executors` at a time; the loop guard and the
+  quick death count no executor at work in another number.
+  plans/parallel-executors.md.
   - ~~A tripwire at twenty-four starts of a kind a day.~~ (Javi, 27
     October)
 - `session-names` **Every session the queue starts is a Remote Control
@@ -586,7 +613,9 @@ on the machine that planned them.
   lingered. plans/idle-chats-end.md.
 - `end-now` **`plans end <id> --now` ends a named chat whatever it is
   doing.** (Javi, 31 October) A stuck turn or a question no one will
-  answer otherwise holds the lock for good. plans/end-a-stuck-chat.md.
+  answer otherwise holds its executor's lock for good. plans/end-a-stuck-chat.md.
+  24 November: the fresh executor starts in the ended one's number,
+  and the hand-over names its worktree. plans/parallel-executors.md.
 - `archiving` **Archiving a chat in the Claude app does not stop it.**
   (observed in Claude Code 2.1.113, 27 October) The app is a window into
   the session; the process's exit is what archives the chat.
@@ -684,7 +713,7 @@ on the machine that planned them.
 - `executor-never-waits` **An executor never asks the owner and never
   waits on him: what it would ask it decides by the recommended option,
   checked with the plan's planner or the assistant, and logged for
-  him.** (Javi, 14 November) One checkout has one executor, so one open
+  him.** (Javi, 14 November) One checkout had one executor then, so one open
   question held every plan behind it, and a night's executors waited on
   him for hours. Anthropic's prompting guidance has an agent take local,
   reversible actions on its own and not the hard to reverse or shared

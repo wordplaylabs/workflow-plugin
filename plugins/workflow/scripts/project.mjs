@@ -423,7 +423,10 @@ export function project(root) {
         : {},
     // The key as written beside the map above, and the lines the parser could
     // not read, for `plans check`: the file is parsed once.
-    written: { deny: front.deny, unread },
+    written: { deny: front.deny, executors: front.executors, unread },
+    // How many executors build at once, each in its own worktree
+    // (plans/parallel-executors.md, part 1): a whole number, 1 by default.
+    executors: executorsOf(front.executors),
     form: front.form === "compact" ? "compact" : "full",
     // The context, in tokens, above which a finished session retires, by
     // agent and by whether the work waiting is related to its own.
@@ -443,6 +446,13 @@ export function project(root) {
     ).trim(),
     found: Boolean(text),
   };
+}
+
+/** The `executors` key as a whole number of 1 or more; 1 when absent or no such number. */
+export function executorsOf(value) {
+  const n =
+    typeof value === "number" ? value : /^\d+$/.test(String(value ?? "")) ? Number(value) : 0;
+  return Number.isInteger(n) && n >= 1 ? n : 1;
 }
 
 /**
@@ -503,6 +513,7 @@ branch: ${defaultBranch(root, { checkedOut: true })}
 #   assistant:
 #     - "mcp__server__write_.*"
 # form: compact          one chat decides and builds; omit for the full queue
+# executors: 2  # how many executors build at once, each in its own worktree; omit for one
 # reuse: 200000 # the context above which a finished session retires while this project has under five sessions of the agent: one number, or a map of executor and planner; with history the queue works the ceiling out from this project's transcripts
 # reviews:               the reviews before a push: plan, code-review, codex, or a plugin skill; omit for all three
 #   - code-review
@@ -541,7 +552,7 @@ Which tools read code and docs here, if the project has a rule.
 /**
  * **The queue's kinds of file**, its deferrals: `<kind>.deferred` in a
  * project's `.claude/` for each (`plan-queue.mjs` reads, pauses and re-arms
- * every one), with `executor.lock`, `executor.pause` and the agents'
+ * every one), with `executor.<n>.lock`, `executor.pause` and the agents'
  * `executor.started` and `planner.started` under the same names. A kind
  * here is a deferral; `QUEUE_IGNORES` keeps all of their files out of git.
  */

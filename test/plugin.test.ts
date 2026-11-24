@@ -128,7 +128,7 @@ catalogue: docs/patterns
     const root = dir("defaults-");
     const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
     git("init", "-q", "-b", "work");
-    // At run time the branch checked out is a batch's: never the project's.
+    // At run time the branch checked out is a plan's: never the project's.
     expect(project(root)).toMatchObject({ branch: "main", run: "", ui: [], found: false });
     expect(project(root).name).toMatch(/^defaults-/);
     const origin = dir("origin-");
@@ -2321,7 +2321,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     // app, so the plans' naming, never a Related line's, tells the queue's own.
     const own =
       "The queue's own pull requests are the open ones a plan in this checkout's `plans/` names as its own, by its \"Built\" or its `Lands` topic; a `Related` line names another's";
-    const start = mode.slice(mode.indexOf("**At a batch's start**"));
+    const start = mode.slice(mode.indexOf("**At a plan's start**"));
     const refresh = mode.slice(mode.indexOf("**Then a conflicting pull request is refreshed**"));
     expect(start.slice(0, start.indexOf("**Then a conflicting"))).toContain(own);
     expect(refresh).toContain("each of the queue's own that GitHub reports as conflicting");
@@ -3213,9 +3213,10 @@ describe("an executor never waits on the owner", () => {
     expect(rule).toContain("`plans/decisions-taken.md`");
     const asked = /\*\*Asked once\.\*\*.*?\(decisions\.md#asked-once\)/.exec(handbook)![0];
     expect(asked).not.toContain("is asked in the executor's session");
-    const one = /\*\*One checkout has one executor\*\*.*?\(decisions\.md#one-executor/.exec(
-      handbook,
-    )![0];
+    const one =
+      /\*\*A queue has as many executors as its project file's `executors` says\*\*.*?\(decisions\.md#executor-pool/.exec(
+        handbook,
+      )![0];
     expect(one).not.toContain("the owner is asked");
     expect(one).toContain("handed to the assistant");
     expect(read("docs/decisions.md")).toContain(

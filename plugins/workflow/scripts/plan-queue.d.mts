@@ -112,7 +112,7 @@ export function inThisRepo(cwd: string | undefined, paths: string[]): boolean;
 /** The rows a project counts as its own: in its checkout or worktrees, or named by its lock or plans. */
 export function ownRows<R extends { sessionId?: string; cwd?: string }>(
   rows: R[],
-  options?: { paths?: string[]; lockId?: string; named?: string[] },
+  options?: { paths?: string[]; lockIds?: string[]; named?: string[] },
 ): R[];
 export function liveSessions(options?: { fresh?: boolean; timeout?: number }): LiveRow[] | null;
 export function data(env?: Record<string, string | undefined>, scriptDir?: string): string;
@@ -205,7 +205,8 @@ export type Session = {
   status: string;
   where: string;
   branch: string;
-  holdsLock: boolean;
+  /** Its executor number, from its `executor-<n>` worktree; 0 for a chat in no such worktree. */
+  number: number;
   retired: boolean;
   /** The plan an executor's Building line, or the brief a planner's Planning line, names. */
   on: string;
@@ -244,12 +245,12 @@ export function isSession(
   kind: "executor" | "planner" | "assistant",
   row: LiveRow,
   state: { agent?: string } | null | undefined,
-  lock: Lock | null,
+  locks?: Lock[],
 ): boolean;
 export function sessionsOf(
   kind: "executor" | "planner" | "assistant",
   live: LiveRow[] | null,
-  lock: Lock | null,
+  locks?: Lock[],
   options?: {
     trees?: Tree[];
     plans?: { state: string; session?: string; path: string }[];
@@ -377,7 +378,40 @@ export function plannerPrompt(path: string): string;
 export function assistantPrompt(path: string): string;
 /** The executor's `Follow-ups ready` message, which a start beside an open assistant chat prints. */
 export function followUpsMessage(path: string): string;
-export function startPrompt(paths: string[], plans: { state: string; path: string }[]): string;
+export function startPrompt(path: string, plans: { state: string; path: string }[]): string;
+/** A plan's wait (plans/parallel-executors.md, part 3). */
+export type WaitsOn = { path: string; why: string } | null;
+export function freePlans<P extends { path: string; state: string; text?: string }>(
+  plans: P[],
+  options?: { claims?: Record<string, Claim> },
+): (P & { waitsOn: WaitsOn })[];
+export function changedFiles(text?: string): string[];
+export function waitsWords(plan: { path: string; waitsOn: NonNullable<WaitsOn> }): string;
+/** A plan named to an executor and not yet taken. */
+export type Claim = { holder: string; name?: string; at: number; until: number };
+export function readClaims(
+  plans?: { path: string; state: string }[],
+  live?: LiveRow[] | null,
+  now?: number,
+): Record<string, Claim>;
+export function claimedWords(path: string, one: Partial<Claim>): string;
+export function takerFor(
+  plan: { path: string; state: string; tree?: string } | null,
+  options: {
+    executors?: number;
+    sessions?: {
+      number: number;
+      status?: string;
+      on?: string;
+      retired?: boolean;
+      sessionId: string;
+    }[];
+    claims?: Record<string, Claim>;
+    trees?: number[] | null;
+    from?: number;
+  },
+): { number: number; session: object | null } | null;
+export function numberOf(cwd?: string): number;
 export function githubPrompt(path: string): string;
 export const PLANNER_PROMPT: RegExp;
 export function fromOf(text?: string): { project: string; path: string } | null;
@@ -399,7 +433,7 @@ export function firstAhead<
 >(
   path: string,
   plans: P[],
-  options?: { live?: object[] | null; timeOf?: (plan: P) => number },
+  options?: { live?: object[] | null; timeOf?: (plan: P) => number; sessionId?: string },
 ): P[];
 export function outOfTurnWords(path: string, ahead: { path: string; first?: First | null }): string;
 export function carriesOf(text?: string): { project: string; file: string }[];
@@ -586,12 +620,17 @@ export function freeBriefs<P extends { path: string; state: string }>(
 ): P[];
 export function cutoffEdit(
   text: string,
-  options: { sessionId: string; branch: string; day?: string },
+  options: { sessionId: string; branch: string; tree?: string; day?: string },
+): string;
+/** `plans end <id> --now`'s hand-over of the plan the ended session had under way. */
+export function endedEdit(
+  text: string,
+  options: { sessionId: string; by: string; branch?: string; tree?: string; day?: string },
 ): string;
 /** A start's hand-over of the plan of an executor it found with no process. */
 export function goneEdit(
   text: string,
-  options: { sessionId: string; branch?: string; day?: string },
+  options: { sessionId: string; branch?: string; tree?: string; day?: string },
 ): string;
 export function readPlans(
   dir?: string,

@@ -1,6 +1,6 @@
 # Landing by pull request
 
-The executor reads this at a batch's start in a project with `land:
+The executor reads this at a plan's start in a project with `land:
 pull-request`, where "push" in its agent file means the landing below (decisions.md#topic-landing). The merge is the people's:
 run no `gh pr merge` and no `gh pr ready`; push the
 branch itself only for a `Lands: fix, now.` plan, as a fast-forward. In a
@@ -38,6 +38,10 @@ name that is the branch, `main` or `fixes-` followed by anything is no
 topic's: build the plan as `topic <the plan's file name without .md>`,
 its "Built" saying why.
 
+**A branch another worktree has checked out is that executor's** (git
+refuses the switch and names the worktree): at a plan's start and in a
+refresh it is left and named, `left: #<k>, executor-<n> is building on it`.
+
 - **A plan that rests on an open pull request** (it uses what an earlier
   plan adds, and that plan's pull request is open) is settled first, by
   `gh pr view <n> --json isDraft,headRefName`
@@ -69,7 +73,7 @@ its "Built" saying why.
   rev-parse HEAD` once the branch is taken and merged; the plan's squash
   goes back to it and no further.
 
-**At a batch's start**, `git fetch --prune`. The queue's own pull
+**At a plan's start**, `git fetch --prune`. The queue's own pull
 requests are the open ones a plan in this checkout's `plans/` names as
 its own, by its "Built" or its `Lands` topic; a `Related` line names
 another's (decisions.md#refresh-only-your-own). Each whose base's pull
@@ -98,11 +102,11 @@ is left and named.
 
 **A refresh**, `Lands: refresh.`, is the assistant's plan after a
 merge (decisions.md#merge-refreshes-the-rest): no branch, commit,
-review or pull request of its own. After "At a batch's start", each
+review or pull request of its own. After "At a plan's start", each
 pull request the plan names that is still open and behind its base
 (`git rev-list --count origin/<head>..origin/<base>` over 0), or
 conflicting, is refreshed by "A pull request is refreshed"; one it
-names as stacked on the merged one was retargeted at the batch's
+names as stacked on the merged one was retargeted at the plan's
 start. A plan that names none takes every one of the queue's own but
 another person's (`gh pr view <n> --json author`, neither a bot nor the
 token's own login), which is left and named.
@@ -169,7 +173,7 @@ date as `30 October 2026`. With the day's pull
 request merged or closed, the fix **waits for tomorrow**: built the same
 way on `fixes-<the next day's yyyy-mm-dd>`, pushed, no pull request;
 "Built" opens with `On topic fixes-<the next day's yyyy-mm-dd>, commit
-<sha>, branch pushed; its pull request waits.` At a batch's start, a
+<sha>, branch pushed; its pull request waits.` At a plan's start, a
 `fixes-` branch whose day has come and that has no pull request gets one
 by the same command, each of its plans' "Built" getting
 `Pull request #<n> (<url>) opened <date> with plans/<x>.md.` A local `fixes-` branch with commits the remote lacks is taken as is. Pushes are plain, retried as a merge's. The squash goes back to the
@@ -213,7 +217,7 @@ the webhook does not bring (any with no webhook, another service's
 with one), fixed and pushed before the
 next plan. The project's `run` is read only for a fix pushed straight.
 
-**After the batch's last plan**, `git checkout --detach
+**After the plan's push**, `git checkout --detach
 origin/<branch>`; keep the local branches, the hook's match for pull
 requests.
 

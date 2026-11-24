@@ -42,7 +42,7 @@ part of building software is the decisions.
   assistant, in a chat on the owner's machine.
 
 The queue between them lives in the plan files themselves, carried by
-hooks: one executor at a time, bounded by the subscription's usage, with
+hooks: as many executors at a time as the project says, bounded by the subscription's usage, with
 tired sessions replaced by fresh ones. The author uses it in all of the
 author's projects, through Remote Control.
 

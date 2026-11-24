@@ -104,12 +104,12 @@ Say it at the end of every topic, as one of four exits, with the reason:
    nothing to build. Asked to mark a pull request ready, give the step,
    the Ready for review button, and run nothing ("`land: pull-request`
    lands by pull request").
-   Write it by "A short plan", run `plans`, and send a live executor one
-   message, `Plan ready: plans/<topic>.md. Build it when you are free, in queue order; nothing to answer.`;
-   with none, run `plans start plans/<topic>.md`. When
+   Write it by "A short plan", run `plans start plans/<topic>.md` and
+   do what its line says: send the message it gives to the chat it
+   names, once, or nothing; the message is `Plan ready: plans/<topic>.md. Build it when you are free, in queue order; nothing to answer.`. When
    ${user_config.owner} wants a plan or a brief ahead of the others, run
-   `plans first plans/<topic>.md` before `plans` ("A plan put first is
-   built next"), on his word only; a live executor then gets
+   `plans first plans/<topic>.md` before `plans start` ("A plan put first is
+   built next"), on his word only; `plans start` then gives
    `Plan first: plans/<topic>.md. Build it next, once the plan in hand is built; nothing to answer.` in place of the other message, for a plan already waiting too;
    `plans first --undo plans/<topic>.md` takes it back. A plan `plans`
    lists under "Asking ${user_config.owner}" is not sent; say when it is

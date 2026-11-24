@@ -29,7 +29,7 @@
 //                            --timer, the end timer each stop arms an hour on
 //   plan-queue.mjs pause | resume | sync | init
 //
-// **Bounded, as every loop over model calls is**: one executor at a time
+// **Bounded, as every loop over model calls is**: as many executors at a time as the project says
 // (the lock); no start without usage headroom, deferred to the window's
 // reset instead; no start after one that died within ten minutes for
 // another reason; no start once the last five of a kind ended with nothing
@@ -54,6 +54,7 @@ import {
   readlinkSync,
   realpathSync,
   renameSync,
+  rmSync,
   statSync,
   symlinkSync,
   unlinkSync,
@@ -86,6 +87,7 @@ import {
   connectorAlone,
   couldNameMcp,
   everyTool,
+  executorsOf,
   ignoreQueueFiles,
   init,
   kindOf,
@@ -165,7 +167,11 @@ const MAX_HANDOVERS = 6;
 const AFTER_RESET = 120;
 
 const files = {
-  lock: () => join(root, ".claude", "executor.lock"),
+  // One lock per executor number (plans/parallel-executors.md, part 1),
+  // held by the session in that number's worktree.
+  lock: (n = 1) => join(root, ".claude", `executor.${n}.lock`),
+  // The plans named to an executor and not yet taken (part 4).
+  claims: () => join(root, ".claude", "executor.claims.json"),
   pause: () => join(root, ".claude", "executor.pause"),
   // A hook starting an executor on ready plans (\`startOnReady\`), so two at one moment start one.
   starting: () => join(root, ".claude", "executor.starting"),
@@ -704,6 +710,10 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
     const named = /branch `([^`\n]+)`|branch ([\w./-]+?)(?=[.,;:]?(?:\s|$))/m.exec(section);
     const branch = named ? [named[1] || named[2]] : null;
     const step = /^Step in hand: ([^\n]+)/m.exec(section);
+    // The worktree it was built in; with none named, the one with its branch checked out.
+    const tree =
+      /in worktree `(executor-\d+)`/.exec(section)?.[1] ||
+      (branch ? basename(worktrees().find((one) => one.branch === branch[0])?.path || "") : "");
     return {
       ...plan,
       state: "handed",
@@ -713,6 +723,7 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
       stuck,
       branch: branch ? branch[0] : "",
       step: step ? step[1].trim() : "",
+      tree: /^executor-\d+$/.test(tree) ? tree : "",
     };
   }
   // A date that does not parse (NaN) is no date on or after the queue's start.
@@ -833,11 +844,11 @@ export function unreadPlans(dir = join(root, "plans")) {
  * worktrees, or one its own files name, the lock's holder or a `Building` or
  * `Planning` line's session, wherever it works.
  */
-export function ownRows(rows, { paths = [], lockId = "", named = [] } = {}) {
+export function ownRows(rows, { paths = [], lockIds = [], named = [] } = {}) {
   return rows.filter(
     (row) =>
       inThisRepo(row.cwd, paths) ||
-      Boolean(row.sessionId && (row.sessionId === lockId || named.includes(row.sessionId))),
+      Boolean(row.sessionId && (lockIds.includes(row.sessionId) || named.includes(row.sessionId))),
   );
 }
 
@@ -906,7 +917,7 @@ export function liveSessions({ fresh = false, timeout = 8000 } = {}) {
     rows &&
     ownRows(rows, {
       paths: worktreePaths(),
-      lockId: readJson(files.lock())?.sessionId || "",
+      lockIds: readLocks().map((lock) => lock.sessionId),
       named: namedSessions(),
     });
   return liveRead;
@@ -974,6 +985,12 @@ function branchOf(cwd = root) {
   }
 }
 
+/** An executor's worktree's name, `executor-<n>`, for a working directory in one; else "". */
+function treeNameOf(cwd) {
+  const n = numberOf(cwd);
+  return n ? `executor-${n}` : "";
+}
+
 /** The worktree a working directory is in: the deepest whose path is it or holds it. */
 function treeOf(cwd, trees) {
   if (!cwd) return null;
@@ -993,7 +1010,7 @@ function treeOf(cwd, trees) {
  * `Planner n`, or one whose state says `agent: "planner"`; the owner's own
  * planner chats are his, not the queue's.
  */
-export function isSession(kind, row, state, lock) {
+export function isSession(kind, row, state, locks = []) {
   const named = parseName(row.name || "")?.kind === kind;
   // **An assistant chat is the queue's by its numbered name alone**
   // (plans/project-follow-ups-reach-the-project.md, part 6): the owner's own
@@ -1003,7 +1020,7 @@ export function isSession(kind, row, state, lock) {
   return (
     named ||
     state?.agent === "executor" ||
-    Boolean(lock && !lock.released && lock.sessionId === row.sessionId)
+    locks.some((lock) => !lock.released && lock.sessionId === row.sessionId)
   );
 }
 
@@ -1056,7 +1073,7 @@ export function statusOf(row) {
 export function sessionsOf(
   kind,
   live,
-  lock,
+  locks = [],
   {
     trees = worktrees(),
     plans = [],
@@ -1072,7 +1089,7 @@ export function sessionsOf(
   const working = { planner: "planning", executor: "building" }[kind] || "";
   return live
     .map((row) => ({ row, state: stateFor(row.sessionId) }))
-    .filter(({ row, state }) => isSession(kind, row, state, lock))
+    .filter(({ row, state }) => isSession(kind, row, state, locks))
     .map(({ row, state }) => {
       const tree = treeOf(row.cwd, trees);
       return {
@@ -1088,9 +1105,8 @@ export function sessionsOf(
         inputs,
         where: !tree || tree.path === root ? "checkout" : basename(tree.path),
         branch: tree?.branch || "",
-        holdsLock:
-          kind === "executor" &&
-          Boolean(lock && !lock.released && lock.sessionId === row.sessionId),
+        // Its executor number, from its worktree (plans/parallel-executors.md, part 1).
+        number: kind === "executor" ? numberOf(row.cwd) : 0,
         retired: Boolean(state?.retired),
         on:
           (working &&
@@ -1279,7 +1295,6 @@ export function describeSession(one) {
     one.where === "checkout"
       ? "in the checkout"
       : `in ${one.where}${one.branch ? ` on ${one.branch}` : ""}`,
-    one.holdsLock ? "holds the lock" : "",
     one.on ? `building ${one.on}` : "",
     keptWords(one),
     one.retired ? "retired" : "",
@@ -1493,7 +1508,7 @@ export function withPlans(state) {
 
 function blockReason(lock) {
   const since = lock.taken ? new Date(lock.taken).toTimeString().slice(0, 5) : "earlier";
-  return `Another executor is building in this checkout: ${lock.name || "an executor"} [${String(lock.sessionId).slice(0, 8)}], since ${since}. One checkout holds one executor (the plugin's docs/workflow.md, "The queue"). Do not build; say so, and stop.`;
+  return `Another executor is building in this worktree: ${lock.name || "an executor"} [${String(lock.sessionId).slice(0, 8)}], since ${since}. Each worktree holds one executor (the plugin's docs/workflow.md, "The queue"). Do not build; say so, and stop.`;
 }
 
 function annotate(plan) {
@@ -2023,18 +2038,32 @@ export function stillAskingWords(path, { until }) {
  * `live` at `timeOf(plan)`, the time the calling hook judges that plan's own
  * Building line by, so a plan refused as still asking never holds the rest.
  */
-export function firstAhead(path, plans, { live = null, timeOf = (plan) => plan.mtime } = {}) {
+export function firstAhead(
+  path,
+  plans,
+  { live = null, timeOf = (plan) => plan.mtime, sessionId = "" } = {},
+) {
   const own = plans.find((p) => p.path === path);
   // **A handed-over plan is finished first** (Codex C1): resumed, it is the
   // build in the middle, never out of turn.
   if (own && /^## (?:Handing over\b|Resumed, )/m.test(withoutFences(own.text || ""))) return [];
   const mine = own ? firstOf(own.text || "") : null;
+  // A plan put first that waits on another, or that another executor has
+  // claimed, is no plan this one is out of turn against (Codex C4).
+  const claims = readClaims(plans, live);
+  const waiting = new Set(
+    freePlans(plans, { claims })
+      .filter((p) => p.waitsOn)
+      .map((p) => p.path),
+  );
   return plans.filter(
     (p) =>
       p.path !== path &&
       p.state === "ready" &&
       p.first &&
       (!mine || p.first.at > mine.at) &&
+      !waiting.has(p.path) &&
+      !(claims[p.path] && claims[p.path].holder !== sessionId) &&
       !heldFromBuilding(p.path, p.text || "", live, { mtime: timeOf(p) }),
   );
 }
@@ -2269,7 +2298,7 @@ export function decideStop({
     refuse: true,
     told: paths,
     kept: { paths, why },
-    reason: `Plans are waiting and this session can take them: ${taken.map(({ plan }) => annotate(plan)).join(", ")} (${why}). Build them as a new batch.`,
+    reason: `A plan is waiting and this session can take it: ${taken.map(({ plan }) => annotate(plan)).join(", ")} (${why}). Build it next.`,
   };
 }
 
@@ -2361,6 +2390,7 @@ export function canStart({
   unwatched = false,
   open = [],
   said = "",
+  elsewhere = [],
 }) {
   // **Session names carry the project and the machine** (`Docs Executor 2
   // (lab)`), and the count is per project and per machine (the log is this
@@ -2549,12 +2579,13 @@ export function canStart({
   const agentFlag = kind === "executor" ? "" : `--agent ${kind} `;
   const decides = `${owner()} decides: a yes starts one more, by plans start ${agentFlag}--owner-said "<the words>".`;
   const findings = [];
-  const last = log.at(-1);
+  // Nor an executor at work in another number (plans/parallel-executors.md, part 5).
+  const going = new Set([...beside.map((one) => one.name), ...elsewhere]);
+  const last = log.filter((line) => !going.has(line.name)).at(-1);
   if (last && now - last.at < QUICK_DEATH && progressAt <= last.at)
     findings.push(
       `The last ${kind} (${last.name}) ended within ten minutes with nothing ${done}, and usage was not the cause; starting another would repeat it.`,
     );
-  const going = new Set(beside.map((one) => one.name));
   const since = log.filter(
     (line) => now - line.at < 24 * 60 * MINUTE && progressAt <= line.at && !going.has(line.name),
   );
@@ -2587,10 +2618,10 @@ export function canStart({
  * the executor's does (plans/handed-plan-stays-in-queue.md), wherever the
  * Building line was; with no header found, in the Building line's place.
  */
-export function cutoffEdit(text, { sessionId, branch, day = today() }) {
+export function cutoffEdit(text, { sessionId, branch, tree = "", day = today() }) {
   return handOverEdit(
     text,
-    `## Handing over, ${day}, by the hook\n\nStep in hand: unknown, the usage limit cut session ${sessionId} off on branch \`${branch}\`. Read the branch's commits and the task list's state in the final messages above.\n`,
+    `## Handing over, ${day}, by the hook\n\nStep in hand: unknown, the usage limit cut session ${sessionId} off on branch \`${branch}\`${treeWords(tree)}. Read the branch's commits and the task list's state in the final messages above.\n`,
   );
 }
 
@@ -2602,14 +2633,14 @@ export function cutoffEdit(text, { sessionId, branch, day = today() }) {
  * a Handing over line would read as an executor's taking (`planTaken`).
  * Text with no such line of the session's is returned as it is.
  */
-export function endedEdit(text, { sessionId, by, branch = "", day = today() }) {
+export function endedEdit(text, { sessionId, by, branch = "", tree = "", day = today() }) {
   const planning = new RegExp(
     `^## Planning, [^\\n]*session ${sessionId}[^\\n]*(?:\\n[ \\t]*(?=\\n))?\\n?`,
     "m",
   );
   if (planning.test(text)) return text.replace(planning, "");
   if (!new RegExp(`^## Building, [^\\n]*session ${sessionId}`, "m").test(text)) return text;
-  const where = branch ? ` on branch \`${branch}\`` : "";
+  const where = branch ? ` on branch \`${branch}\`${treeWords(tree)}` : "";
   return handOverEdit(
     text,
     `## Handing over, ${day}, ended by ${by}\n\nStep in hand: unknown, ${by} ended session ${sessionId} with \`plans end --now\`${where} in the middle of its work. Read the branch's commits for what it did.\n`,
@@ -2622,12 +2653,17 @@ export function endedEdit(text, { sessionId, by, branch = "", day = today() }) {
  * a Handing over section in place of the Building line, as `plans end --now`
  * writes one.
  */
-export function goneEdit(text, { sessionId, branch = "", day = today() }) {
-  const where = branch ? `, on branch \`${branch}\`` : "";
+export function goneEdit(text, { sessionId, branch = "", tree = "", day = today() }) {
+  const where = branch ? `, on branch \`${branch}\`${treeWords(tree)}` : "";
   return handOverEdit(
     text,
     `## Handing over, ${day}, by the queue\n\nStep in hand: unknown, session ${sessionId}'s process was not running when a start looked${where}. Read the branch's commits for what it did.\n`,
   );
+}
+
+/** **A hand-over names its worktree** (plans/parallel-executors.md, part 7), after the branch. */
+function treeWords(tree) {
+  return tree ? ` in worktree \`${tree}\`` : "";
 }
 
 /**
@@ -2841,10 +2877,15 @@ export function sweepTemp({ dir = tmpdir(), live = [], now = Date.now(), age = D
 }
 
 /** An executor's first prompt: the plans, or the handed plan to resume (plans/simpler-agents.md, part 3). */
-export function startPrompt(paths, plans) {
-  const handed = plans.find((plan) => plan.state === "handed" && paths.includes(plan.path));
+export function startPrompt(path, plans) {
+  const handed = plans.find((plan) => plan.state === "handed" && plan.path === path);
   if (handed) return `Resume ${handed.path} from its "Handing over" section.`;
-  return `Build ${paths.join(", then ")}.`;
+  return `Build ${path}.`;
+}
+
+/** The words for a plan another executor has claimed. */
+export function claimedWords(path, one) {
+  return `${path} is ${one.name || "an executor"}'s [${String(one.holder).slice(0, 8)}], taken at ${hhmm(one.at)}: leave it.`;
 }
 
 /**
@@ -3129,7 +3170,7 @@ export function endSession(
   // process winds down.
   if (
     parseName(row.name || "")?.kind === "executor" ||
-    readJson(files.lock())?.sessionId === sessionId
+    readLocks().some((lock) => lock.sessionId === sessionId)
   ) {
     release(sessionId);
     writeJson(files.state(sessionId), { ...readState(sessionId), retired: true });
@@ -3146,7 +3187,15 @@ export function endSession(
     // Gone: nothing to hand over.
     return { ended: true, line };
   }
-  writeFileSync(plan.file, endedEdit(text, { sessionId, by: owner(), branch: branchOf(row.cwd) }));
+  writeFileSync(
+    plan.file,
+    endedEdit(text, {
+      sessionId,
+      by: owner(),
+      branch: branchOf(row.cwd),
+      tree: treeNameOf(row.cwd),
+    }),
+  );
   const agent = plan.state === "planning" ? "planner" : "executor";
   const started = start([plan.path], { replace: sessionId, agent });
   return {
@@ -3168,10 +3217,10 @@ export function endCommand(ids = [], { immediate = false } = {}) {
     return "Not ended: name the chat to end now (plans end <id> --now); plans lists them.";
   const live = liveSessions({ fresh: true });
   if (!live) return "claude agents could not be read, so nothing is ended.";
-  const lock = readJson(files.lock());
+  const locks = readLocks();
   const plans = readPlans(join(root, "plans"), liveIds(live));
   const ours = ["executor", "planner", "assistant"].flatMap((kind) =>
-    sessionsOf(kind, live, lock, { plans, usageFor: () => null }),
+    sessionsOf(kind, live, locks, { plans, usageFor: () => null }),
   );
   const lines = [];
   let targets = ours.map((one) => one.sessionId);
@@ -3447,6 +3496,202 @@ export function start(paths, options = {}) {
 /** How long a hook's \`executor.starting\` marker holds off another: a launch takes ten seconds. */
 export const STARTING_SPAN = 2 * MINUTE;
 
+/**
+ * **A plan's header paragraph** (plans/parallel-executors.md, part 3): from
+ * its `Plan only` or `Short plan` line to the next blank line.
+ */
+function headerParagraph(text = "") {
+  const lines = text.split("\n");
+  const at = lines.findIndex((line) => PLAN_HEADER.test(line));
+  if (at < 0) return "";
+  const end = lines.findIndex((line, i) => i > at && !line.trim());
+  return lines.slice(at, end < 0 ? undefined : end).join("\n");
+}
+
+/** The plans a plan's header paragraph names, itself left out. */
+function restsOn(plan) {
+  const named = headerParagraph(plan.text).match(/plans\/[\w.-]+\.md/g) || [];
+  return [...new Set(named)].filter((path) => path !== plan.path);
+}
+
+/** Where a plan lands, for its wait: its topic's name, the file's with no Lands line, or "fix". */
+function topicOf(plan) {
+  const lands = landsOf(plan.text);
+  if (lands?.kind === "fix") return "fix";
+  if (lands?.kind === "refresh") return "refresh";
+  return lands?.name || basename(plan.path, ".md");
+}
+
+/** The files a plan changes: those named under "The change, part by part" and "Building it", else in its text but a `## For ` section. */
+export function changedFiles(text = "") {
+  const parts = [/^## The change, part by part/m, /^## Building it/m]
+    .map((heading) => sectionAfter(text, heading))
+    .join("\n");
+  const text2 = parts.trim() ? parts : text.replace(/^## For [\s\S]*?(?=^## |(?![\s\S]))/gm, "");
+  // A file at the repository's root, named in backticks (`package.json`; Codex C9).
+  const root = [...text2.matchAll(/`([\w-][\w.-]*\.\w+)`/g)].map((m) => m[1]);
+  return [...new Set([...pathsIn(text2), ...root])];
+}
+
+/**
+ * **A plan waits on another** (plans/parallel-executors.md, part 3;
+ * decisions.md#plan-waits-on): each ready or handed plan not asking, in the
+ * queue's order, with `waitsOn: { path, why }` or `null`. It waits on a plan
+ * its header paragraph names that is not built (ready, asking, planned,
+ * handed or building), two that name each other holding neither; and on a
+ * plan in progress (building by a live session, handed over, or claimed) that
+ * lands on its topic, or is one of the day's fixes as it is, or changes a
+ * file it changes. A plan held is passed over, never reordered.
+ */
+export function freePlans(plans, { claims = {} } = {}) {
+  const byPath = new Map(plans.map((plan) => [plan.path, plan]));
+  // A brief or a plan still being planned is not built either (Codex C10).
+  const unbuilt = ["ready", "planned", "handed", "building", "brief", "planning"];
+  const inProgress = plans.filter(
+    (plan) => plan.state === "building" || plan.state === "handed" || claims[plan.path],
+  );
+  return readyForExecutor(plans).map((plan) => {
+    for (const path of restsOn(plan)) {
+      const other = byPath.get(path);
+      if (!other || !unbuilt.includes(other.state)) continue;
+      if (restsOn(other).includes(plan.path)) continue;
+      return { ...plan, waitsOn: { path, why: "it rests on it" } };
+    }
+    const topic = topicOf(plan);
+    const files = changedFiles(plan.text);
+    for (const other of inProgress) {
+      if (other.path === plan.path) continue;
+      if (topicOf(other) === topic)
+        return {
+          ...plan,
+          waitsOn: {
+            path: other.path,
+            why: topic === "fix" ? "the day's fixes" : `the same topic, ${topic}`,
+          },
+        };
+      const common = changedFiles(other.text).filter((path) => files.includes(path));
+      if (common.length)
+        return {
+          ...plan,
+          waitsOn: {
+            path: other.path,
+            why: `both change ${common[0]}${common.length > 1 ? ` and ${common.length - 1} more` : ""}`,
+          },
+        };
+    }
+    return { ...plan, waitsOn: null };
+  });
+}
+
+/** The words for a plan that waits, as `plans start <path>` says them. */
+export function waitsWords(plan) {
+  return `${plan.path} waits on ${plan.waitsOn.path} (${plan.waitsOn.why}): it is taken once that one is built.`;
+}
+
+/**
+ * **A plan is claimed before it is taken** (plans/parallel-executors.md, part
+ * 4): `.claude/executor.claims.json`, a path to `{ holder, name, at, until }`.
+ * A claim ends with its plan's Building line, its holder gone from `claude
+ * agents` (when they could be read), or `until`. The live claims.
+ */
+export function readClaims(plans = [], live = null, now = Date.now()) {
+  const table = readJson(files.claims()) || {};
+  return Object.fromEntries(
+    Object.entries(table).filter(([path, one]) => {
+      if (!one || !(one.until > now)) return false;
+      if (live && !holderRuns(one, live, now)) return false;
+      const plan = plans.find((p) => p.path === path);
+      return !plan || (plan.state !== "building" && plan.state !== "built");
+    }),
+  );
+}
+
+/** Whether a claim's holder is a session with its process running. */
+function holderRuns(one, live, now = Date.now()) {
+  const holder = one?.holder || "";
+  const start = /^start:(\d+)$/.exec(holder);
+  if (start) return pidAlive(Number(start[1]));
+  const named = /^name:(.+)$/.exec(holder);
+  if (named)
+    return now - (one.at || 0) < STARTING_SPAN || live.some((row) => row.name === named[1]);
+  return live.some((row) => row.sessionId === holder && statusOf(row) !== "not running");
+}
+
+/** Ends a session's claim on a plan, under the guard. */
+function unclaim(path, holder) {
+  const guard = `${files.claims()}.guard`;
+  const guarded = takeGuard(guard);
+  try {
+    const table = readJson(files.claims()) || {};
+    if (table[path]?.holder !== holder) return;
+    delete table[path];
+    writeJson(files.claims(), table);
+  } finally {
+    if (guarded)
+      try {
+        unlinkSync(guard);
+      } catch {
+        // Gone already.
+      }
+  }
+}
+
+/** Claims a plan for a session under the guard; false when another holds it. */
+function claim(path, { holder, name, now = Date.now(), live = null }) {
+  const guard = `${files.claims()}.guard`;
+  if (!takeGuard(guard)) return false;
+  try {
+    const table = readJson(files.claims()) || {};
+    const held = table[path];
+    // A claim whose holder is gone from the sessions read ends, as `readClaims` reads it.
+    const gone = live && held && !holderRuns(held, live, now);
+    if (held && held.holder !== holder && held.until > now && !gone) return false;
+    table[path] = { holder, name, at: now, until: now + ANSWER_WINDOW };
+    writeJson(files.claims(), table);
+    return true;
+  } finally {
+    try {
+      unlinkSync(guard);
+    } catch {
+      // Gone already.
+    }
+  }
+}
+
+/** A handed plan's own worktree's number, while it is within `executors` and there; else 0. */
+function ownTree(plan, executors, trees = null) {
+  const n = plan?.state === "handed" ? Number(/^executor-(\d+)$/.exec(plan.tree || "")?.[1]) : 0;
+  return n && n <= executors && (!trees || trees.includes(n)) ? n : 0;
+}
+
+/**
+ * **Who takes a plan** (plans/parallel-executors.md, part 5): `{ number,
+ * session }`, `session` the live unretired executor there or null; a handed
+ * plan its own worktree's number while that number is within `executors` and
+ * its worktree is there, else the lowest number that is free, one with no
+ * live unretired executor or with one that is idle, has no plan building and
+ * holds no claim; null when none is.
+ */
+export function takerFor(
+  plan,
+  { executors = 1, sessions = [], claims = {}, trees = null, from = 1 },
+) {
+  const held = new Set(Object.values(claims).map((one) => one.holder));
+  const at = (n) => sessions.filter((one) => one.number === n && !one.retired);
+  const free = (n) =>
+    !claims[`slot:${n}`] &&
+    at(n).every(
+      (one) =>
+        one.status === "not running" ||
+        (/^idle\b/.test(one.status || "") && !one.on && !held.has(one.sessionId)),
+    );
+  const taker = (n) => ({ number: n, session: at(n)[0] || null });
+  const own = ownTree(plan, executors, trees);
+  if (own) return free(own) ? taker(own) : null;
+  for (let n = from; n <= executors; n++) if (free(n)) return taker(n);
+  return null;
+}
+
 /** The plans an executor's default pick takes: ready or handed, not asking. */
 function readyForExecutor(plans) {
   return plans.filter((p) => (p.state === "ready" || p.state === "handed") && !p.askingIn);
@@ -3479,8 +3724,13 @@ export function startOnReady({ now = Date.now(), alive = pidAlive } = {}) {
     !plans.some((p) => ["ready", "handed", "building"].includes(p.state) && !held.includes(p.path))
   )
     return "";
-  const lock = readJson(files.lock());
-  if (lockHeldByOther(lock, "", (pid) => Boolean(pid) && alive(pid))) return "";
+  // One executor holding its lock is not free; with several, an idle one
+  // holding its lock may be, so `start` reads the sessions.
+  if (
+    proj().executors === 1 &&
+    lockHeldByOther(readJson(files.lock(1)), "", (pid) => Boolean(pid) && alive(pid))
+  )
+    return "";
   const marker = files.starting();
   const token = `${now} ${process.pid}`;
   const create = () => {
@@ -3531,7 +3781,8 @@ export function startOnReady({ now = Date.now(), alive = pidAlive } = {}) {
     }
   }
   try {
-    const said = start([], { why: "plans were ready and no executor was alive" });
+    // The net messages nobody: an idle chat in the taker's number is retired for a fresh one.
+    const said = start([], { why: "plans were ready and no executor was alive", net: true });
     // Only a start is said at a stop: nothing waiting after all, a refusal or
     // a deferral would repeat at every turn, and \`plans\` says on its first
     // line why none starts (part 3).
@@ -3553,14 +3804,17 @@ export function startOnReady({ now = Date.now(), alive = pidAlive } = {}) {
  * that the next hook or timer starts one, or why none does, from \`canStart\`
  * run dry.
  */
-function noneAliveWords(plans, live) {
-  const ready = readyForExecutor(plans);
-  if (!ready.length) return "The executor: none alive.";
-  const count = `${ready.length} ${ready.length === 1 ? "plan" : "plans"} ready`;
-  const lock = readJson(files.lock());
+function noneAliveWords(plans, live, { many = false } = {}) {
+  const claimed = readClaims(plans, live);
+  const free = freePlans(plans, { claims: claimed }).filter((p) => !p.waitsOn && !claimed[p.path]);
+  if (!free.length) return many ? "" : "The executor: none alive.";
+  const count = many
+    ? `${free.length} ${free.length === 1 ? "plan" : "plans"} free`
+    : `The executor: none alive; ${free.length} ${free.length === 1 ? "plan" : "plans"} ready`;
+  const lock = readJson(files.lock(1));
   const decision = canStart({
     kind: "executor",
-    lock,
+    lock: many ? null : lock,
     alive: () => holderAlive(lock, live),
     log: readLog(),
     progressAt: progressAt(plans),
@@ -3573,11 +3827,46 @@ function noneAliveWords(plans, live) {
     taken: [],
     machine: machine().name,
   });
-  if (decision.refuse)
-    return `The executor: none alive; ${count}, but none starts: ${decision.why.replace(/\.$/, "")}.`;
+  // With several, none starts while no number is free (Codex C11).
+  if (many) {
+    const sessions = live ? sessionsOf("executor", live, readLocks(), { plans }) : [];
+    const claims = readClaims(plans, live);
+    if (!free.some((plan) => takerFor(plan, { executors: proj().executors, sessions, claims })))
+      return `${count}, but none starts: every executor is at work.`;
+  }
+  if (decision.refuse) return `${count}, but none starts: ${decision.why.replace(/\.$/, "")}.`;
   if (decision.defer)
-    return `The executor: none alive; ${count}, but none starts: until ${hhmm(decision.until)}, ${decision.why}.`;
-  return `The executor: none alive; ${count}, and the next hook or timer starts one.`;
+    return `${count}, but none starts: until ${hhmm(decision.until)}, ${decision.why}.`;
+  return many
+    ? `${count}, and the next hook or timer starts an executor on the first.`
+    : `${count}, and the next hook or timer starts one.`;
+}
+
+/**
+ * **The executors, numbered** (plans/parallel-executors.md, part 9), as a
+ * Jenkins node lists its executors: a row per number with the session in
+ * that worktree, `free` with none, and under them what the free plans wait for.
+ */
+function executorsTable(rows, plans, live) {
+  const n = proj().executors;
+  const atWork = (one) => Boolean(one.on) || !/^(idle|not running)\b/.test(one.status || "");
+  const lines = [];
+  let working = 0;
+  for (let number = 1; number <= n; number++) {
+    const here = rows.filter((one) => one.number === number);
+    if (here.some((one) => atWork(one) && !one.retired)) working++;
+    lines.push(
+      here.length
+        ? here.map((one) => `  ${number}  ${describeSession(one)}`).join("\n")
+        : `  ${number}  free`,
+    );
+  }
+  for (const one of rows.filter((row) => !row.number || row.number > n))
+    lines.push(`  ${one.number || "-"}  ${describeSession(one)}`);
+  const free = noneAliveWords(plans, live, { many: true });
+  return [`The executors, ${working} of ${n} at work:`, ...lines, ...(free ? [free] : [])].join(
+    "\n",
+  );
 }
 
 /** The effort an agent's frontmatter names (`effort: high`), or "". */
@@ -3782,6 +4071,7 @@ function startHere(
     deferral = "",
     why = "",
     said = "",
+    net = false,
   } = {},
 ) {
   if (!proj().found) return NO_PROJECT;
@@ -3807,7 +4097,11 @@ function startHere(
       gone[plan.path] = {
         sessionId: plan.session,
         before: plan.text,
-        text: goneEdit(plan.text, { sessionId: plan.session, branch: branchOf(row.cwd) }),
+        text: goneEdit(plan.text, {
+          sessionId: plan.session,
+          branch: branchOf(row.cwd),
+          tree: treeNameOf(row.cwd),
+        }),
       };
     }
     if (Object.keys(gone).length)
@@ -3873,6 +4167,86 @@ function startHere(
       if (!paths.length) return "Nothing is waiting in the queue.";
     }
   }
+  // **One plan, to the lowest-numbered free executor** (plans/parallel-
+  // executors.md, parts 2 and 5): the first of the paths that waits on no
+  // other and is claimed by nobody; a path named alone that waits says why.
+  let number = 1;
+  let messaged = "";
+  if (kind === "executor" && agent === "executor") {
+    const claims = Object.fromEntries(
+      Object.entries(readClaims(plans, live)).filter(([, one]) => one.holder !== replace),
+    );
+    const free = freePlans(plans, { claims });
+    const sessions = sessionsOf("executor", live, readLocks(), { plans })
+      // A chat in the checkout is no number's: it builds nothing there.
+      .filter((one) => one.sessionId !== replace && one.number);
+    const trees = worktrees()
+      .map((tree) => numberOf(tree.path))
+      .filter(Boolean);
+    // A path the queue reads no plan in is taken as named, with nothing to wait on.
+    const open = paths
+      .map(
+        (path) =>
+          free.find((p) => p.path === path) ||
+          // A plan dated before the queue, named by path or a timer, is taken as named.
+          (plans.some((p) => p.path === path && p.state !== "old")
+            ? null
+            : { path, text: "", waitsOn: null }),
+      )
+      .filter((p) => p && !p.waitsOn && !claims[p.path]);
+    if (!open.length) {
+      const waiting = paths.map((path) => free.find((p) => p.path === path)).find(Boolean);
+      if (waiting?.waitsOn) return waitsWords(waiting);
+      const held = paths.find((path) => claims[path]);
+      if (held) return claimedWords(held, claims[held]);
+      return "Nothing is waiting in the queue.";
+    }
+    const executors = proj().executors;
+    // A Stop hook retiring its session starts the fresh one in its own number.
+    const own = numberOf(live?.find((row) => row.sessionId === replace)?.cwd);
+    const takeOf = (plan) =>
+      (own &&
+        own <= executors &&
+        plan.state !== "handed" &&
+        takerFor(plan, { executors: own, from: own, sessions, claims, trees })) ||
+      takerFor(plan, { executors, sessions, claims, trees });
+    const pick = open.find(takeOf);
+    if (!pick) {
+      // A handed plan waits for its own worktree's executor (part 7).
+      const own = ownTree(open[0], executors, trees);
+      if (own) {
+        const there = sessions.find((one) => one.number === own && !one.retired);
+        return `${open[0].path} waits on executor-${own}, where it was built${there?.on ? ` and ${there.name} is building ${there.on}` : ""}: it is resumed there once that executor is free.`;
+      }
+      const busy = sessions.filter((one) => one.number <= executors).map((one) => one.name);
+      return `All ${executors} executors are at work (${busy.join(", ") || "none read"}): the first to finish takes ${open[0].path}.`;
+    }
+    const taker = takeOf(pick);
+    number = taker.number;
+    paths = [pick.path];
+    // An idle chat with room is sent the plan by message, as a planner is a
+    // brief; a timer's start, which nobody watches, starts a fresh one.
+    const chat = taker.session;
+    if (chat && /^idle\b/.test(chat.status || "") && !timer && !net && !pausedSince()) {
+      const room = mayReuse({
+        usage: chat.usage,
+        shared: sharedTokens(pick.text, chat.seen),
+        inputs: reuseNow(),
+        kind: "executor",
+        fallback: proj().reuse.executor,
+      });
+      if (room.reuse) {
+        const who = `${chat.name} [${String(chat.sessionId).slice(0, 8)}]`;
+        const line = pick.first
+          ? `Plan first: ${pick.path}. Build it next, once the plan in hand is built; nothing to answer.`
+          : `Plan ready: ${pick.path}. Build it when you are free, in queue order; nothing to answer.`;
+        if (!dry && !claim(pick.path, { holder: chat.sessionId, name: chat.name, live }))
+          return claimedWords(pick.path, readJson(files.claims())?.[pick.path] || {});
+        messaged = `${who} in executor-${number} is idle with room for ${pick.path} (${room.why}): send it the plan with SendMessage, one message: ${line} It has until ${hhmm(Date.now() + ANSWER_WINDOW)} to take it; then a fresh executor is started on it.`;
+      }
+    }
+  }
+  if (messaged) return messaged;
   // **A lease's timer reads the table** (plans/brief-lease-per-brief.md, part
   // 2): a lease whose brief is no longer one ends, the due ones are those
   // past their own `until`, and the oldest due, in the plans' order, is the
@@ -3949,8 +4323,8 @@ function startHere(
     ? { start: true, name: `Probe ${Date.now() % 1000}`, note: "" }
     : canStart({
         kind,
-        lock: readJson(files.lock()),
-        alive: () => holderAlive(readJson(files.lock()), live),
+        lock: readJson(files.lock(number)),
+        alive: () => holderAlive(readJson(files.lock(number)), live),
         log: readLog(),
         progressAt:
           kind === "planner"
@@ -3964,7 +4338,9 @@ function startHere(
         sessions:
           kind === "assistant"
             ? []
-            : sessionsOf(kind, live, readJson(files.lock()), { plans, fallback, inputs })
+            : sessionsOf(kind, live, readLocks(), { plans, fallback, inputs })
+                // An executor is judged against its number's sessions alone.
+                .filter((one) => kind !== "executor" || one.number === number)
                 .filter((one) => one.sessionId !== replace && !one.retired)
                 .map((one) => ({
                   ...one,
@@ -3975,6 +4351,12 @@ function startHere(
                       : Math.max(0, ...paths.map((path) => sharedTokens(planText(path), one.seen))),
                 })),
         brief: kind === "executor" ? "" : paths[0],
+        elsewhere:
+          kind === "executor"
+            ? sessionsOf("executor", live, readLocks(), { plans, usageFor: () => null })
+                .filter((one) => one.number && one.number !== number && !one.retired)
+                .map((one) => one.name)
+            : [],
         // This checkout's chats only: one in another checkout reads another queue (Codex).
         open: kind === "assistant" ? openAssistants(live, proj().name) : [],
         name: proj().name,
@@ -3984,7 +4366,7 @@ function startHere(
         machine: machine().name,
         // Only the window's and a lease's timer: a usage limit's restart
         // refuses beside a live executor as before.
-        unwatched: timer && (deferral === "asking" || deferral === "handed"),
+        unwatched: net || (timer && (deferral === "asking" || deferral === "handed")),
         said,
       });
   if (decision.refuse) {
@@ -4054,7 +4436,7 @@ function startHere(
         ? isNote(paths[0])
           ? githubPrompt(paths[0])
           : assistantPrompt(paths[0])
-        : startPrompt(paths, plans);
+        : startPrompt(paths[0], plans);
   // **The agent file's effort, on the command line** (part 4): a settings
   // file's effort for the model outranks the frontmatter, and the user
   // settings set Opus to medium for the assistant; the command line outranks both.
@@ -4068,7 +4450,7 @@ function startHere(
   // **An executor works in its worktree** (plans/executors-build-in-
   // worktrees.md, part 3), reaching the checkout's plans/ by its link and by
   // `--add-dir`, which also takes every value up to the next flag.
-  const tree = kind === "executor" && !probe ? executorTree(1) : "";
+  const tree = kind === "executor" && !probe ? executorTree(number) : "";
   const args = [
     ...mcp,
     ...(tree ? ["--add-dir", join(root, "plans")] : []),
@@ -4094,8 +4476,10 @@ function startHere(
     ].join("\n");
   // The worktree is made before anyone is retired, so its refusal leaves all as it was.
   if (tree) {
-    const made = ensureTree(1);
+    const made = ensureTree(number);
     if (made !== tree) return made;
+    // The one lock of before the numbers goes with the first start.
+    rmSync(join(root, ".claude", "executor.lock"), { force: true });
   }
   // **A stale idle session is replaced**: retired and its lock released
   // before the launch, so the new executor's first prompt finds the lock
@@ -4103,7 +4487,7 @@ function startHere(
   const replaced = (decision.replace || []).map((old) => ({
     old,
     state: readState(old.sessionId),
-    lock: readJson(files.lock()),
+    lock: readJson(files.lock(number)),
   }));
   for (const { old, state } of replaced) {
     writeJson(files.state(old.sessionId), { ...state, retired: true });
@@ -4113,12 +4497,32 @@ function startHere(
     replaced.some(({ old }) => old.sessionId === one.sessionId),
   );
   for (const [path, one] of handed) writeFileSync(join(root, path), one.text);
+  // **The plan and the number are reserved before the launch** (Codex C2):
+  // for this process, so a start beside it at one moment takes neither.
+  const starter = `start:${process.pid}`;
+  // The session this start replaces gives up the plan its stop claimed.
+  if (tree && replace) unclaim(paths[0], replace);
+  if (tree) {
+    const plan = claim(paths[0], { holder: starter, name: decision.name, live });
+    const slot = plan && claim(`slot:${number}`, { holder: starter, name: decision.name, live });
+    if (!slot) {
+      if (plan) unclaim(paths[0], starter);
+      for (const { old, state, lock } of replaced) {
+        writeJson(files.state(old.sessionId), state);
+        if (lock?.sessionId === old.sessionId) writeJson(files.lock(number), lock);
+      }
+      for (const [path, one] of handed) writeFileSync(join(root, path), one.before);
+      return `${paths[0]} or executor-${number} was taken by another start at this moment; plans shows the queue.`;
+    }
+  }
   const seen = launch(args, decision.name, kind, tree || root);
+  if (tree) unclaim(`slot:${number}`, starter);
   // A launch that failed keeps the deferral, and with it the timer's pid.
   if (seen !== true && seen !== "unread") {
+    if (tree) unclaim(paths[0], starter);
     for (const { old, state, lock } of replaced) {
       writeJson(files.state(old.sessionId), state);
-      if (lock?.sessionId === old.sessionId) writeJson(files.lock(), lock);
+      if (lock?.sessionId === old.sessionId) writeJson(files.lock(number), lock);
     }
     for (const [path, one] of handed) writeFileSync(join(root, path), one.before);
     // A lease's timer that failed to launch leaves its due briefs free, as a refusal does.
@@ -4186,8 +4590,16 @@ function startHere(
   // A planner started by the assistant, with nothing to replace, still ends
   // the retired planners' chats: the next planner starting is their cut-off.
   if (kind === "planner") stopRetiredPlanners(live, { except: replace });
+  // **The plan is claimed for the executor started on it** (plans/parallel-
+  // executors.md, part 4), so no other start takes it before its Building line.
+  if (tree) {
+    const row = liveSessions({ fresh: true })?.find((one) => one.name === decision.name);
+    unclaim(paths[0], starter);
+    // Not listed yet: held by its name until it is, or for the start's span.
+    claim(paths[0], { holder: row ? row.sessionId : `name:${decision.name}`, name: decision.name });
+  }
   return [
-    `${decision.name} was started on: ${paths.join(", ")}.${unread}${decision.note ? ` ${decision.note}` : ""}${pastWords ? ` ${pastWords}` : ""}`,
+    `${decision.name} was started on: ${paths.join(", ")}${tree ? `, in ${basename(tree)}` : ""}.${unread}${decision.note ? ` ${decision.note}` : ""}${pastWords ? ` ${pastWords}` : ""}`,
     ...retiredWords,
   ].join(" ");
 }
@@ -4566,7 +4978,8 @@ export function list({ all = false, live, related = true, readers = null } = {})
   if (proj().found && proj().form === "compact") return COMPACT;
   live = live === undefined ? liveSessions() : live;
   const plans = withAsking(readPlans(join(root, "plans"), liveIds(live)), live);
-  const lock = readJson(files.lock());
+  const locks = readLocks();
+  const lock = locks.find((one) => !one.released) || null;
   const nameOf = (id) => live?.find((row) => row.sessionId === id)?.name || String(id).slice(0, 8);
   const now = new Date();
   const out = [];
@@ -4576,11 +4989,9 @@ export function list({ all = false, live, related = true, readers = null } = {})
   // executor.md): a retired executor that kept working held no lock and read
   // as "none alive". The lock alone speaks only when the sessions cannot be read.
   let executor = "";
-  if (live)
-    executor = sessionsLine(
-      "executor",
-      withShare(
-        sessionsOf("executor", live, lock, {
+  const executorRows = live
+    ? withShare(
+        sessionsOf("executor", live, locks, {
           trees,
           plans,
           fallback: proj().reuse.executor,
@@ -4589,9 +5000,11 @@ export function list({ all = false, live, related = true, readers = null } = {})
         "executor",
         plans,
         live,
-      ),
-    );
-  else if (lock && !lock.released)
+      )
+    : [];
+  if (proj().executors > 1) executor = executorsTable(executorRows, plans, live);
+  else if (live) executor = sessionsLine("executor", executorRows);
+  else if (lock)
     executor = `The executor: ${lock.name || nameOf(lock.sessionId)} [${String(lock.sessionId).slice(0, 8)}], status unknown.`;
   if (!executor || executor === "The executor: none alive.")
     executor = proj().found ? noneAliveWords(plans, live) : "The executor: none alive.";
@@ -4603,7 +5016,7 @@ export function list({ all = false, live, related = true, readers = null } = {})
       sessionsLine(
         "planner",
         withShare(
-          sessionsOf("planner", live, lock, {
+          sessionsOf("planner", live, locks, {
             trees,
             plans,
             fallback: proj().reuse.planner,
@@ -4621,7 +5034,7 @@ export function list({ all = false, live, related = true, readers = null } = {})
     out.push(ceilingsLine(proj().reuse, reuseNow()), ...lastFreshLines(readLog(), proj().name));
   // **The assistant line**, only while a chat the queue started is alive
   // (plans/project-follow-ups-reach-the-project.md, part 6).
-  const assistants = live ? sessionsOf("assistant", live, lock, { trees, plans }) : [];
+  const assistants = live ? sessionsOf("assistant", live, locks, { trees, plans }) : [];
   if (assistants.length) out.push(sessionsLine("assistant", assistants));
   const versions = versionLine(live);
   if (versions) out.push(versions);
@@ -4638,24 +5051,18 @@ export function list({ all = false, live, related = true, readers = null } = {})
   // with none the Stop hook's read is the only route (plans/checks-read-
   // with-the-app.md, part 2).
   if (proj().found && proj().land === "pull-request") out.push(...unreadLines(readSeen()));
-  // **Leftover worktrees are seen** (plans/queue-sees-worktree-executor.md):
-  // a background executor works in one, and a retired one leaves it behind.
+  // **A worktree that is no executor's is left over** (plans/parallel-
+  // executors.md, part 11): the executors' own are in their rows above.
   const under = join(root, ".claude", "worktrees") + "/";
-  const claudeTrees = trees.filter((tree) => tree.path.startsWith(under));
-  if (claudeTrees.length) {
-    const users = (path) =>
-      (live || [])
-        .filter((row) => row.cwd && (row.cwd === path || row.cwd.startsWith(`${path}/`)))
-        .map((row) => row.name || String(row.sessionId).slice(0, 8));
+  const leftOver = trees.filter((tree) => tree.path.startsWith(under) && !numberOf(tree.path));
+  if (leftOver.length)
     out.push(
-      `Worktrees under .claude/worktrees: ${claudeTrees
-        .map((tree) => {
-          const who = users(tree.path);
-          return `${basename(tree.path)}${tree.branch ? ` on ${tree.branch}` : ""} (${who.length ? who.join(", ") : "free"})`;
-        })
+      `Worktrees under .claude/worktrees: ${leftOver
+        .map(
+          (tree) => `left over: ${basename(tree.path)}${tree.branch ? ` on ${tree.branch}` : ""}`,
+        )
         .join(", ")}.`,
     );
-  }
   const paused = pausedSince();
   if (paused)
     out.push(`The queue is paused since ${paused} ("resume the queue" in any session lifts it).`);
@@ -4675,9 +5082,31 @@ export function list({ all = false, live, related = true, readers = null } = {})
   // once, and only when such a row exists, as `pullStates` is.
   const byPull = proj().land === "pull-request";
   const briefRows = plans.filter((p) => p.state === "brief" || p.state === "planning");
-  const readyRows = plans.filter(
-    (p) => (p.state === "ready" || p.state === "handed") && !p.askingIn,
-  );
+  // **What each waits on or who takes it** (plans/parallel-executors.md, part 9).
+  const claims = readClaims(plans, live);
+  const waits = new Map(freePlans(plans, { claims }).map((p) => [p.path, p.waitsOn]));
+  const treeNumbers = worktrees().map((tree) => numberOf(tree.path));
+  let poolRows;
+  const readyRows = plans
+    .filter((p) => (p.state === "ready" || p.state === "handed") && !p.askingIn)
+    .map((p) => {
+      // A handed plan whose own worktree's executor is at work waits for it (part 7).
+      const own = ownTree(p, proj().executors, treeNumbers);
+      const busyThere =
+        own &&
+        !takerFor(p, {
+          executors: proj().executors,
+          sessions: (poolRows ??= live ? sessionsOf("executor", live, readLocks(), { plans }) : []),
+          claims,
+          trees: treeNumbers,
+        });
+      return {
+        ...p,
+        waitsOn: waits.get(p.path) || null,
+        waitsTree: busyThere ? own : 0,
+        claim: claims[p.path] || null,
+      };
+    });
   const readRelated = byPull && related && (briefRows.length || readyRows.length);
   const work = readRelated ? readers || relatedReaders() : null;
   let unreadSaid = false;
@@ -4782,6 +5211,11 @@ export function list({ all = false, live, related = true, readers = null } = {})
           : "",
         byPull && p.relatedTo ? `related: ${relatedWords(p.relatedTo)}` : "",
         p.state === "handed" ? "handed over, resume" : "",
+        p.waitsOn ? `waits on ${p.waitsOn.path} (${p.waitsOn.why})` : "",
+        p.waitsTree ? `waits on executor-${p.waitsTree}, where it was built` : "",
+        p.claim
+          ? `${p.claim.name || String(p.claim.holder).slice(0, 8)} takes it, since ${hhmm(p.claim.at)}`
+          : "",
         p.asks ? "unanswered, the executor decides" : "",
         p.stuck ? "stuck, the assistant takes it" : "",
         p.stale ? "(a Building line from a session that is gone)" : "",
@@ -4983,7 +5417,7 @@ export function otherServices(rollup = []) {
  * (plans/executor-never-watches-ci.md, part 4). Null when none is red, none
  * is this checkout's, or `gh` cannot be read.
  */
-function pullChecks({ brought = false } = {}) {
+function pullChecks({ brought = false, only = null } = {}) {
   try {
     const { out, why } = checksRead([
       "pr",
@@ -5010,6 +5444,9 @@ function pullChecks({ brought = false } = {}) {
     );
     const open = JSON.parse(out)
       .filter((pull) => local.get(pull.headRefName) === pull.headRefOid)
+      // **Each executor answers for its own** (plans/parallel-executors.md,
+      // part 8): the pull requests of the plans this session took.
+      .filter((pull) => !only || only.includes(pull.number))
       .map((pull) => ({
         ...pull,
         verdict: checksVerdict(
@@ -5295,7 +5732,7 @@ export function pushedBranches({
 /**
  * What `relatedLines` reads: the open pull requests (null when unread) and the
  * pushed branches, inside one `budget` of milliseconds. No fetch while an
- * executor holds the lock, which fetches and pushes in this checkout itself
+ * executor holds a lock, which fetches and pushes in this checkout itself
  * (/code-review, 30 October): the branches are then as last fetched.
  */
 export function relatedReaders({ budget = 25_000 } = {}) {
@@ -5303,10 +5740,11 @@ export function relatedReaders({ budget = 25_000 } = {}) {
   const pulls = openPulls({ timeout: left(deadline, 10_000) });
   const merged = pulls ? mergedHeads({ timeout: left(deadline, 5000) }) : new Map();
   const heads = (pulls || []).map((pull) => pull.headRefName).filter(Boolean);
-  const lock = readJson(files.lock());
+  // No fetch while an executor builds: its own fetches keep the refs.
+  const building = readLocks().some((lock) => !lock.released);
   return {
     pulls,
-    branches: pushedBranches({ heads, merged, deadline, fetch: !(lock && !lock.released) }),
+    branches: pushedBranches({ heads, merged, deadline, fetch: !building }),
   };
 }
 
@@ -5421,21 +5859,49 @@ function takeGuard(guard) {
   }
 }
 
+/** Releases each number's lock this session holds. */
 function release(sessionId) {
-  const guard = `${files.lock()}.guard`;
-  const guarded = takeGuard(guard);
-  try {
-    const lock = readJson(files.lock());
-    if (lock && lock.sessionId === sessionId)
-      writeJson(files.lock(), { ...lock, released: Date.now() });
-  } finally {
-    if (guarded)
-      try {
-        unlinkSync(guard);
-      } catch {
-        // Gone already.
-      }
+  for (const n of lockNumbers()) {
+    const path = files.lock(n);
+    const guard = `${path}.guard`;
+    const guarded = takeGuard(guard);
+    try {
+      const lock = readJson(path);
+      if (lock && lock.sessionId === sessionId) writeJson(path, { ...lock, released: Date.now() });
+    } finally {
+      if (guarded)
+        try {
+          unlinkSync(guard);
+        } catch {
+          // Gone already.
+        }
+    }
   }
+}
+
+/** The numbers with a lock file, the project's own and any left above them. */
+function lockNumbers() {
+  let names = [];
+  try {
+    names = readdirSync(join(root, ".claude"));
+  } catch {
+    // No .claude: no lock.
+  }
+  return names
+    .map((name) => /^executor\.([1-9][0-9]*)\.lock$/.exec(name)?.[1])
+    .filter(Boolean)
+    .map(Number)
+    .sort((a, b) => a - b);
+}
+
+/** Every number's lock, each with its `number`. */
+function readLocks() {
+  return lockNumbers()
+    .map((number) => {
+      const lock = readJson(files.lock(number));
+      return lock ? { ...lock, number } : null;
+    })
+    .filter(Boolean);
 }
 
 /**
@@ -6174,6 +6640,41 @@ function firstDropped(input) {
  * new text adds a Building line, while `askingIn` holds the plan. The live
  * sessions are read only then, so every other edit costs nothing.
  */
+/** The refusal of a second plan to a session building one (Codex C6). */
+function oneAtATime(path, other) {
+  return `${path} is not taken: this session is building ${other}, and an executor builds one plan at a time.`;
+}
+
+/**
+ * **A Building line is refused on a plan that is not this session's to take**
+ * (plans/parallel-executors.md, part 6): one built already, one another live
+ * session is building or holds a claim on, one that waits on another. The
+ * plans as read before the line; "" when it may take it.
+ */
+function takenWords(path, plans, live, sessionId) {
+  const plan = plans.find((p) => p.path === path);
+  if (!plan) return "";
+  if (plan.state === "built") return `${path} is built already: its "Built" section stands.`;
+  const mine = plans.find(
+    (p) => p.state === "building" && p.session === sessionId && p.path !== path,
+  );
+  if (mine) return oneAtATime(path, mine.path);
+  if (live && plan.state === "building" && plan.session !== sessionId) {
+    const name = live?.find((row) => row.sessionId === plan.session)?.name;
+    return claimedWords(path, { holder: plan.session, name, at: plan.mtime || Date.now() });
+  }
+  const claims = readClaims(plans, live);
+  if (claims[path] && claims[path].holder !== sessionId) return claimedWords(path, claims[path]);
+  const others = Object.fromEntries(
+    Object.entries(claims).filter(([, one]) => one.holder !== sessionId),
+  );
+  const own = plans.map((p) => (p.path === path ? { ...p, state: "ready" } : p));
+  const waits = freePlans(own, { claims: others }).find((p) => p.path === path)?.waitsOn;
+  return waits
+    ? `${path} waits on ${waits.path} (${waits.why}): leave it, and build what the queue names.`
+    : "";
+}
+
 function buildingRefusal(input, statePath) {
   if (!["Edit", "Write", "MultiEdit"].includes(input.tool_name)) return "";
   const path = planPath(input.tool_input?.file_path);
@@ -6194,9 +6695,19 @@ function buildingRefusal(input, statePath) {
   // plan is put first ahead of this one; with no sessions read, nothing.
   if (live) {
     // Each plan's time is its file's, read by `readPlans`, as `mtimeOf` reads this one's.
-    const ahead = firstAhead(path, readPlans(join(root, "plans"), liveIds(live)), { live });
+    const plans = readPlans(join(root, "plans"), liveIds(live));
+    const ahead = firstAhead(path, plans, { live, sessionId: input.session_id });
     if (ahead.length) return outOfTurnWords(path, ahead[0]);
   }
+  // Judged with the sessions unread too, from the plans' text and the
+  // claims (Codex C5).
+  const taken = takenWords(
+    path,
+    readPlans(join(root, "plans"), liveIds(live)),
+    live,
+    input.session_id,
+  );
+  if (taken) return taken;
   // Judged with the sessions in hand, the plan is not judged again by the
   // shell's check; unjudged (no sessions read), the next shell command's
   // check reads them again (Codex, 28 October).
@@ -6481,16 +6992,35 @@ function hook(mode, input) {
           : [];
         for (const plan of unjudged) {
           const asking = heldFromBuilding(plan.path, plan.text, live, { mtime: hookTime(plan) });
-          const ahead = asking ? [] : firstAhead(plan.path, queued, { live, timeOf: hookTime });
+          const ahead = asking
+            ? []
+            : firstAhead(plan.path, queued, { live, timeOf: hookTime, sessionId });
           // No sessions read is the hook doing nothing, as when it fails:
           // judged, so a failing list is not asked again on every command.
-          if (!asking && !ahead.length) {
+          // Judged as the plans stood before the line (part 6).
+          // One line a command: a second taken in it is refused (Codex C6).
+          const refused =
+            asking || ahead.length
+              ? ""
+              : newly.length
+                ? oneAtATime(plan.path, newly[0])
+                : takenWords(
+                    plan.path,
+                    live ? queued : readPlans(join(root, "plans")),
+                    live,
+                    sessionId,
+                  );
+          if (!asking && !ahead.length && !refused) {
             taken.push(plan.path);
             newly.push(plan.path);
             continue;
           }
           writeFileSync(plan.file, plan.text.replace(own, ""));
-          const words = asking ? holdWords(plan.path, asking) : outOfTurnWords(plan.path, ahead[0]);
+          const words = asking
+            ? holdWords(plan.path, asking)
+            : ahead.length
+              ? outOfTurnWords(plan.path, ahead[0])
+              : refused;
           said.push(`${words} Its Building line was taken out.`);
         }
       }
@@ -6516,7 +7046,7 @@ function hook(mode, input) {
   if (mode === "tool") {
     const command = input.tool_name === "Bash" ? input.tool_input?.command || "" : null;
     if (command !== null && allowedWhileLocked(command)) return;
-    const lock = readJson(files.lock());
+    const lock = readJson(files.lock(executorNumber(input)));
     let reason = "";
     if (lockHeldByOther(lock, sessionId)) reason = blockReason(lock);
     else if (state.retired)
@@ -6547,7 +7077,9 @@ function hook(mode, input) {
       process.stdout.write(JSON.stringify({ decision: "block", reason: IN_CHECKOUT }));
       return;
     }
-    const lock = readJson(files.lock());
+    // The session's own number's lock (plans/parallel-executors.md, part 1).
+    const number = executorNumber(input);
+    const lock = readJson(files.lock(number));
     if (lockHeldByOther(lock, sessionId, () => holderAlive(lock, live))) {
       process.stdout.write(JSON.stringify({ decision: "block", reason: blockReason(lock) }));
       return;
@@ -6559,10 +7091,13 @@ function hook(mode, input) {
       );
       return;
     }
-    if (!takeLock(sessionId, live)) {
+    if (!takeLock(sessionId, live, { path: files.lock(number) })) {
       // Another prompt hook took it between the check above and the create.
       process.stdout.write(
-        JSON.stringify({ decision: "block", reason: blockReason(readJson(files.lock()) || {}) }),
+        JSON.stringify({
+          decision: "block",
+          reason: blockReason(readJson(files.lock(number)) || {}),
+        }),
       );
       return;
     }
@@ -6583,7 +7118,16 @@ function hook(mode, input) {
     const plans = readPlans(join(root, "plans"), liveIds(live));
     const plan = plans.find((p) => p.state === "building" && p.session === sessionId);
     if (!plan) return;
-    writeFileSync(plan.file, cutoffEdit(plan.text, { sessionId, branch: branchOf(input.cwd) }));
+    writeFileSync(
+      plan.file,
+      cutoffEdit(plan.text, {
+        sessionId,
+        branch: branchOf(input.cwd),
+        tree:
+          treeNameOf(input.cwd) ||
+          (executorNumber(input) ? `executor-${executorNumber(input)}` : ""),
+      }),
+    );
     let transcript = "";
     try {
       transcript = readFileSync(input.transcript_path, "utf8").slice(-200_000);
@@ -6595,7 +7139,7 @@ function hook(mode, input) {
     return;
   }
   if (mode === "stop") {
-    const lock = readJson(files.lock());
+    const lock = readJson(files.lock(executorNumber(input)));
     // **A finished chat ends an hour after it goes quiet** (plans/idle-chats-end.md):
     // every stop that does not block arms the end timer.
     if (lockHeldByOther(lock, sessionId, () => holderAlive(lock, live))) {
@@ -6607,13 +7151,50 @@ function hook(mode, input) {
     // hook that failed) still stops the retired planner whose plan it took.
     stopTakenPlanners(live);
     // "Asked once": a plan its planner is still asking about is not named.
-    const waiting = withAsking(
-      plans.filter((p) => p.state === "ready"),
-      live,
+    // **One plan at a time** (plans/parallel-executors.md, parts 2 and 5):
+    // the first plan free for this session, one that waits on none and that
+    // no other session holds a claim on; a handed plan only its own
+    // number's, or one whose worktree is no executor's now.
+    const mine = executorNumber(input) || 1;
+    const claims = Object.fromEntries(
+      Object.entries(readClaims(plans, live)).filter(([, one]) => one.holder !== sessionId),
+    );
+    const free = freePlans(withAsking(plans, live), { claims }).filter(
+      (p) => !p.waitsOn && !claims[p.path],
+    );
+    // Claimed before it is named, so two stops at one moment name it once (part 4).
+    const current = plans.find((p) => p.state === "building" && p.session === sessionId) || null;
+    const name = live?.find((row) => row.sessionId === sessionId)?.name || "";
+    const mayName = !current && !state.retired && !pausedSince();
+    const waiting = (
+      mayName
+        ? [
+            free.find(
+              (p) => p.state === "ready" && claim(p.path, { holder: sessionId, name, live }),
+            ),
+          ]
+        : []
     )
-      .filter((p) => !p.askingIn)
+      .filter(Boolean)
+      // Judged again with the claims as they are now: another stop may have
+      // claimed a plan this one waits on meanwhile (Codex C3).
+      .filter((p) => {
+        const now = Object.fromEntries(
+          Object.entries(readClaims(plans, live)).filter(([, one]) => one.holder !== sessionId),
+        );
+        const still = freePlans(withAsking(plans, live), { claims: now }).find(
+          (one) => one.path === p.path,
+        );
+        if (still && !still.waitsOn) return true;
+        unclaim(p.path, sessionId);
+        return false;
+      })
       .map((p) => ({ ...p, shared: sharedTokens(p.text, seenOf(sessionId)) }));
-    const handed = plans.filter((p) => p.state === "handed");
+    const handed = free.filter((p) => {
+      if (p.state !== "handed") return false;
+      const n = Number(/^executor-(\d+)$/.exec(p.tree || "")?.[1]) || 0;
+      return !n || n === mine || n > proj().executors || !existsSync(executorTree(n));
+    });
     const building = new RegExp(`^## Building, [^,\\n]+, session ${sessionId}\\b`, "m");
     const carry = carryOf(
       plans.filter(
@@ -6625,7 +7206,7 @@ function hook(mode, input) {
     );
     const decision = decideStop({
       carry,
-      current: plans.find((p) => p.state === "building" && p.session === sessionId) || null,
+      current,
       waiting,
       handed,
       // The pull request mode reads its pull requests' failed checks that no
@@ -6641,6 +7222,15 @@ function hook(mode, input) {
           ? pullThenRun(
               pullChecks({
                 brought: Boolean(secret("WORKFLOW_WEBHOOK_SECRET") && webhookAlive()),
+                // With one executor every pull request of the queue is its own.
+                only:
+                  proj().executors > 1
+                    ? plans
+                        .filter(
+                          (p) => p.state === "built" && p.pr && (state.held || []).includes(p.path),
+                        )
+                        .map((p) => p.pr)
+                    : null,
               }),
               imageRun({
                 only: plans.filter((p) => p.state === "built" && p.fix && p.sha).map((p) => p.sha),
@@ -6657,6 +7247,8 @@ function hook(mode, input) {
       inputs: reuseNow(),
       fallback: proj().reuse.executor,
     });
+    // A plan claimed and not named goes back to the queue.
+    if (waiting.length && !decision?.kept && !decision?.retire) unclaim(waiting[0].path, sessionId);
     if (!decision) {
       armEnd(sessionId, live);
       // A retired session whose successor's start was refused, deferred or
@@ -8153,7 +8745,13 @@ export function main(args = process.argv.slice(2)) {
     return;
   }
   if (mode === "check") {
-    const denied = checkDeny();
+    const written = proj().written.executors;
+    const denied = [
+      ...checkDeny(),
+      ...(written !== undefined && executorsOf(written) !== Number(written)
+        ? [`executors: ${written} is no whole number of 1 or more.`]
+        : []),
+    ];
     const { text, faults } = checkCatalogues();
     process.stdout.write(`${[...denied, text].join("\n")}\n`);
     if (faults || denied.length) process.exitCode = 1;

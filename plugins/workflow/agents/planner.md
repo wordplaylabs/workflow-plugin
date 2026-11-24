@@ -202,10 +202,10 @@ plan</summary>` … `</details>`, written to
 run and its address in the body. Such a plan waits for `status: ready`;
 say the issue's address.
 
-**Any other plan** is handed to the executor ("The queue"): run `plans`;
-a live executor gets one `SendMessage`, `Plan ready: plans/<topic>.md. Build it when you are free, in queue order; nothing to answer.` (a plan with a `First` line:
-`Plan first: plans/<topic>.md. Build it next, once the plan in hand is built; nothing to answer.`), else run
-`plans start plans/<topic>.md`. When ${user_config.owner} says here to
+**Any other plan** is handed to the executor ("The queue"): run `plans
+start plans/<topic>.md` and do what its line says: send the message it
+gives to the chat it names, once, or nothing. The message is `Plan ready: plans/<topic>.md. Build it when you are free, in queue order; nothing to answer.`, or
+`Plan first: plans/<topic>.md. Build it next, once the plan in hand is built; nothing to answer.` for a plan put first. When ${user_config.owner} says here to
 put your plan first, run `plans first plans/<topic>.md` before the
 hand-off. Say which happened, or the refusal, and
 with `land: pull-request` the topic and whether its pull request opens.

@@ -223,6 +223,7 @@ deny:                     # MCP tools an agent here may never call, by agent
   assistant:
     - "mcp__server__write_.*"
 form: compact             # one chat decides and builds; omit for the full queue
+executors: 2              # how many executors build at once, each in its own worktree; omit for one
 reuse: 200000             # the context above which a finished session retires while this project has under five sessions of the agent: one number, or a map of executor and planner; with history the queue works the ceiling out from this project's transcripts
 reviews:                  # the reviews before a push; omit for all three (none when compact)
   - code-review
@@ -234,7 +235,9 @@ reply: \javi              # the command the author answers notes with
 **`form: compact` is the compact form**: one chat, `workflow:maker`,
 decides and builds, and the queue's hooks do nothing. A project moves
 between the forms by this line alone; `branch` may be omitted, and the
-maker then commits nothing; it reads no `land`. (decisions.md#compact-form)
+maker then commits nothing; it reads no `land`. There are two forms,
+this and the queue; how many executors the queue builds with is its
+`executors`, never a form. (decisions.md#compact-form)
 
 **A project's chats open as its agent, from the project's own
 settings.** A plain `claude` in a project with a project file opens as
@@ -299,7 +302,7 @@ its own. (decisions.md#stack-only-on-use,
 decisions.md#pull-requests-heading)
 
 **A branch is brought up to date by merging, never force-pushed**, a
-conflicting pull request at a batch's start included, pushed to its own
+conflicting pull request at a plan's start included, pushed to its own
 head branch only. (decisions.md#merge-never-force)
 
 **The executor refreshes only the queue's own pull requests, with the
@@ -497,33 +500,43 @@ rest, the latest marked on top, then oldest first, a handed-over plan
 still before all, and `plans` says `first since` on each. The executor
 takes it at the point between two plans and never stops the one in
 hand: the tool hook refuses a Building line on another plan while a
-ready plan put first is free, one it would not refuse as still asking, and without `land: pull-request` a plan
-built as first is pushed before the rest of its batch is built. The
+ready plan put first is free, one it would not refuse as still asking. The
 planner carries a brief's line into its plan, and its tool hook
 refuses a write that drops it. The line counts only
 while its file waits; `plans first --undo <path>` takes it out.
 (decisions.md#plan-put-first)
 
-**One checkout has one executor**, which holds `.claude/executor.lock`;
+**A queue has as many executors as its project file's `executors`
+says**, one by default, numbered; each works in its own worktree, holds
+its number's lock (`.claude/executor.<n>.lock`) and builds one plan at a
+time, and the lowest-numbered free one takes the next plan it may build;
 it edits only its own worktree and `plans/`. Its Stop hook holds the stop on a red or
-unfinished `run` of its push, or a pull request of the checkout with a
-failed check no webhook brings to the assistant, whose fix is pushed
+unfinished `run` of its push, or a pull request of the plans it took
+with a failed check no webhook brings to the assistant, whose fix is pushed
 where the red one was, before anything else, then names
-the waiting plans to a session it may reuse (a context under the
+the next plan free for it to a session it may reuse (a context under the
 ceiling the queue works out for this project and agent: the wash of
 "context-cost" from inputs measured in its transcripts, raised by what
 the chat read or wrote of the files the plan names, the project
 file's `reuse` (200k for an
 executor, 160k for a planner by default) only while it has under five
 sessions of the agent, and never over 480k; a cache still warm), else
-retires it and starts the next executor, judged at every stop while
-plans wait, the plans it was named included. A plan the usage limit cuts
+retires it and starts the next executor in its number, judged at every
+stop while a plan waits, the plan it was named included. A plan the usage limit cuts
 off, `plans end --now` ends, or whose executor a start finds with no
 process, is handed over (work committed, a
-"Handing over" section, stop); twice at the same step, or six times, it
+"Handing over" section naming the branch and the worktree, stop) and
+is resumed in the worktree it was built in; twice at the same step, or six times, it
 is written "Built" with the item and handed to the assistant.
-(decisions.md#one-executor, decisions.md#context-cost,
+(decisions.md#executor-pool, decisions.md#context-cost,
 decisions.md#shared-is-what-is-held)
+
+**A plan waits on another** when it rests on it (its header
+paragraph names it and it is not built), lands on its topic, or
+changes a file it changes while that one is being built; `plans`
+says which and why, a Building line on it is refused, and the next
+free plan is taken meanwhile. A plan is claimed for the executor it
+is named to, so two never take one. (decisions.md#plan-waits-on)
 
 **A push is not waited on.** The executor runs the project's checks
 once, under **Before the push**, pushes and starts the next plan: it
@@ -553,17 +566,19 @@ app's where the project has one; a read both are refused is said in
 timed out or startup failure, or a commit status of failure or error.
 (decisions.md#push-not-waited-on)
 
-**Ready plans never wait with no executor**: a plan the Stop hook
+**A free plan never waits while an executor is free**: a plan the Stop hook
 named to a session that stops without taking it goes to a fresh
-executor, the session retired on every waiting plan; and a planner's
+executor, the session retired on it; `plans start` gives the next free
+plan to the lowest-numbered free executor, an idle chat with room by
+the message it prints, an empty number by a fresh start; and a planner's
 or an assistant's Stop hook, a retired executor's, or the end timer
-that finds plans ready, no executor alive (one listed with no process is
-not alive) and the queue open starts
+that finds a free plan, a free executor (one listed with no process is
+free) and the queue open starts
 one under "Starts are bounded", two at one moment starting one.
-`plans` says on its first line that the next hook or timer starts one,
+`plans` says under its executors that the next hook or timer starts one,
 or why none does. (decisions.md#plans-reach-an-executor)
 
-**Starts are bounded**: one executor at a time; none while the five-hour
+**Starts are bounded**: at most `executors` at a time; none while the five-hour
 window is above 80 percent or the seven-day above 95, deferred to the
 reset; none after a quick death; none once the last five of a kind, in
 a day, ended with nothing built, planned or written, however many

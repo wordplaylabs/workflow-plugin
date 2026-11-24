@@ -3695,6 +3695,95 @@ describe("the queue's faults, closed", () => {
       expect(existsSync(ran)).toBe(false);
     });
 
+    /** A project with a plan, a starts log holding one line and a claude that records any call. */
+    const startable = (name: string) => {
+      const dir = fixture(name);
+      writeFileSync(
+        join(dir, "plans", "x.md"),
+        "# X\n\nPlan only, 24 November 2026, for Javi; the executor builds it.\n",
+      );
+      const log = join(dir, ".claude", "starts.log");
+      writeFileSync(log, `${JSON.stringify({ at: 1, name: "Old Executor 1 (lab)" })}\n`);
+      const ran = join(dir, "ran");
+      const env = {
+        WORKFLOW_CLAUDE: fakeClaude(temp(`${name.toLowerCase()}-claude-`), { calls: ran }),
+        WORKFLOW_STARTS_LOG: log,
+      };
+      const before = readFileSync(log, "utf8");
+      const nothingStarted = () => {
+        expect(readFileSync(log, "utf8")).toBe(before);
+        expect(existsSync(ran)).toBe(false);
+      };
+      return { dir, env, nothingStarted };
+    };
+    /** Exit 2, stdout empty, the line first on stderr and the usage after it. */
+    const refused = (done: ReturnType<typeof spawnSync>, line: string) => {
+      expect(done.status).toBe(2);
+      expect(done.stdout).toBe("");
+      const [first, second] = String(done.stderr).split("\n");
+      expect(first).toBe(line);
+      expect(second.startsWith(usageStart)).toBe(true);
+    };
+
+    it("When plans start --dryy runs, then it exits 2, names the option on stderr and starts nothing", () => {
+      const { dir, env, nothingStarted } = startable("Option");
+      for (const args of [
+        ["start", "--dryy"],
+        ["start", "--dryy", "plans/x.md"],
+        ["start", "plans/x.md", "--dryy"],
+      ])
+        refused(spawnIn(dir, args, env), 'plans: unknown option "--dryy"');
+      nothingStarted();
+    });
+
+    it("When plans start --owner-said has no words, or a path or a flag in their place, then it exits 2 and starts nothing", () => {
+      const { dir, env, nothingStarted } = startable("Needs");
+      for (const args of [
+        ["start", "plans/x.md", "--owner-said"],
+        ["start", "--owner-said", "  ", "plans/x.md"],
+        ["start", "--owner-said", "--dry", "plans/x.md"],
+        ["start", "--owner-said", "plans/x.md"],
+        ["start", "--owner-said", "plans/my plan.md"],
+      ])
+        refused(
+          spawnIn(dir, args, env),
+          "plans: plans start --owner-said needs what Javi said, in quotes, before the path.",
+        );
+      nothingStarted();
+    });
+
+    it("When plans hold has no name, no -- and command, a --wait that is no number or a word too many, then it exits 2 saying which", () => {
+      const dir = fixture("Hold");
+      const ran = join(dir, "ran");
+      const touch = ["--", "sh", "-c", `touch ${ran}`];
+      for (const [args, line] of [
+        [[], "plans: plans hold needs a resource's name."],
+        [touch, "plans: plans hold needs a resource's name."],
+        [["--wait", "5", ...touch], "plans: plans hold needs a resource's name."],
+        [["Big", ...touch], "plans: plans hold needs a resource's name."],
+        [["browser"], "plans: plans hold needs -- and the command to run."],
+        [["browser", "--"], "plans: plans hold needs -- and the command to run."],
+        [["browser", "sh", "-c", "true"], "plans: plans hold needs -- and the command to run."],
+        [
+          ["browser", "--wait", "soon", ...touch],
+          "plans: plans hold --wait takes minutes, a number.",
+        ],
+        [["browser", "--wait", "", ...touch], "plans: plans hold --wait takes minutes, a number."],
+        [["browser", "--wait"], "plans: plans hold --wait takes minutes, a number."],
+        [
+          ["browser", "--wait", "1e309", ...touch],
+          "plans: plans hold --wait takes minutes, a number.",
+        ],
+        [["--wait", "browser", ...touch], "plans: plans hold --wait takes minutes, a number."],
+        [["browser", "--", ""], "plans: plans hold needs -- and the command to run."],
+        [["browser", "extra", ...touch], "plans: plans hold takes one resource's name before --."],
+        [["browser", "--typo", ...touch], 'plans: unknown option "--typo"'],
+      ] as [string[], string][])
+        refused(spawnIn(dir, ["hold", ...args]), line);
+      expect(existsSync(ran)).toBe(false);
+      expect(readdirSync(join(dir, ".claude")).filter((f) => f.includes(".hold."))).toEqual([]);
+    });
+
     it("When plans or plans help runs, then it exits 0 with the queue or the usage on stdout", () => {
       const dir = fixture("Known");
       const listed = spawnIn(dir, []);
@@ -4987,26 +5076,6 @@ describe("the queue's faults, closed", () => {
         );
         expect(last).toMatchObject({ name: "Said Executor 6 (lab)", said: words });
         expect(last.why).toContain(sentence);
-      });
-
-      it("prints the needs line for words left out, and starts nothing", () => {
-        const dir = looped("Needs");
-        const { script, rows } = stub();
-        const env = { WORKFLOW_CLAUDE: script, STUB_ROWS: rows };
-        const log = () => readFileSync(join(dir, ".claude", "starts.log"), "utf8");
-        const before = log();
-        for (const args of [
-          ["plans/x.md", "--owner-said"],
-          ["--owner-said", "  ", "plans/x.md"],
-          ["--owner-said", "--dry", "plans/x.md"],
-          ["--owner-said", "plans/x.md"],
-        ]) {
-          expect(startIn(dir, env, args)).toBe(
-            "plans start --owner-said needs what Javi said, in quotes, before the path.\n",
-          );
-        }
-        expect(log()).toBe(before);
-        expect(readFileSync(rows, "utf8")).toBe("[]");
       });
 
       it("a start deferred by usage keeps his words for the timer", { timeout: 30_000 }, () => {

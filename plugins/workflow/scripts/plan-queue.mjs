@@ -9415,15 +9415,26 @@ async function holdCommand(args) {
   const before = dash < 0 ? args : args.slice(0, dash);
   const command = dash < 0 ? [] : args.slice(dash + 1);
   const at = before.indexOf("--wait");
-  const minutes = at < 0 ? HOLD_WAIT : Number(before[at + 1]);
-  const name = before.filter((_, i) => at < 0 || (i !== at && i !== at + 1))[0];
-  if (
-    !command.length ||
-    !RESOURCE_NAME.test(name || "") ||
-    before.length !== (at < 0 ? 1 : 3) ||
-    !(minutes >= 0)
-  ) {
-    process.stderr.write(`${USAGE}\n`);
+  // An empty word is no number, though Number reads it as 0.
+  const minutes = at < 0 ? HOLD_WAIT : before[at + 1]?.trim() ? Number(before[at + 1]) : NaN;
+  const given = before.filter((_, i) => at < 0 || (i !== at && i !== at + 1));
+  const flag = given.find((word) => word.startsWith("--"));
+  const name = given[0];
+  // A line it cannot read names what is wrong, as an unknown command does.
+  // The wait before the name: a name taken for its value is not missing.
+  const wrong = flag
+    ? `unknown option "${flag}"`
+    : !(Number.isFinite(minutes) && minutes >= 0)
+      ? "plans hold --wait takes minutes, a number."
+      : !RESOURCE_NAME.test(name || "")
+        ? "plans hold needs a resource's name."
+        : !command[0]
+          ? "plans hold needs -- and the command to run."
+          : given.length !== 1
+            ? "plans hold takes one resource's name before --."
+            : "";
+  if (wrong) {
+    refuse(wrong);
     return 2;
   }
   const say = (line) => process.stderr.write(`${line}\n`);
@@ -9752,6 +9763,9 @@ export function main(args = process.argv.slice(2)) {
       else if (rest[i] === "--timer") timer = Number(rest[++i]);
       else if (rest[i] === "--deferral") options.deferral = rest[++i];
       else if (rest[i] === "--owner-said") options.said = rest[++i] ?? "";
+      // A flag it does not take, a mistyped --dry say, is refused before
+      // anything is read or started, not taken for a plan's path.
+      else if (rest[i].startsWith("--")) return refuse(`unknown option "${rest[i]}"`);
       else paths.push(rest[i]);
     }
     // An agent that is none of the three is refused, as an unknown subcommand is.
@@ -9759,15 +9773,18 @@ export function main(args = process.argv.slice(2)) {
     if ("agent" in options && !["executor", "planner", "assistant"].includes(options.agent))
       return refuse(`unknown agent "${options.agent ?? ""}"`);
     // **The owner's words, or nothing starts** (decisions.md#starts-bounded):
-    // words left out, or a path or a flag taken for them.
+    // words left out, or a path (one with spaces too) or a flag taken for them.
     if ("said" in options) {
       const words = options.said.trim();
-      if (!words || words.startsWith("--") || /^\S+\.md$/.test(words)) {
-        process.stdout.write(
-          `plans start --owner-said needs what ${owner()} said, in quotes, before the path.\n`,
+      if (
+        !words ||
+        words.startsWith("--") ||
+        /^\S+\.md$/.test(words) ||
+        /^(\.\/)?plans\/.*\.md$/.test(words)
+      )
+        return refuse(
+          `plans start --owner-said needs what ${owner()} said, in quotes, before the path.`,
         );
-        return;
-      }
     }
     if (timer) {
       // The deferred start: a wait and then the same start, nothing else. **A

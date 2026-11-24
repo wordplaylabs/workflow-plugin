@@ -39,9 +39,16 @@
 // project's `ui` paths, a call outside its `tools`, or nothing matching.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { catalogueFiles, globToRegExp, paragraphs, tierOf } from "./turn-audit.mjs";
 import { data } from "./plan-queue.mjs";
 import { kindOf, matches, owner, project } from "./project.mjs";
@@ -461,9 +468,18 @@ function shownPath(sessionId) {
   return sessionId ? join(tmpdir(), `workflow-catalogue-${sessionId}.json`) : "";
 }
 
-/** The project's catalogue locations, the inherited first: `{path, label, own}`. */
-export function locations(proj, dir = root) {
-  const at = (p) => (isAbsolute(p) ? p : resolve(dir, p));
+/**
+ * The project's catalogue locations, the inherited first: `{path, label, own}`.
+ * `dir` is the tree read and `home` the checkout: from an executor's
+ * worktree, a path that leaves the project (`../.claude/decisions`), or one
+ * git does not carry into the worktree, is the checkout's.
+ */
+export function locations(proj, dir = root, home = dir) {
+  const at = (p) => {
+    if (isAbsolute(p)) return p;
+    const here = resolve(dir, p);
+    return normalize(p).split(/[\\/]/)[0] === ".." || !existsSync(here) ? resolve(home, p) : here;
+  };
   const label = (p) => p.replace(/\/$/, "");
   return [
     ...proj.inherits.map((p) => ({ path: at(p), label: label(p), own: false })),

@@ -12666,4 +12666,49 @@ describe("several executors build at once", () => {
     }
     expect(said).toContain("executors: 0 is no whole number of 1 or more.");
   });
+
+  it("plans check lints the catalogue of the worktree it is run in, and the checkout's from the checkout", () => {
+    // Inherited: one beside the checkout, and one in it that git does not
+    // carry into a worktree; both are the checkout's from the worktree too.
+    const shared = temp("lint-shared-");
+    writeFileSync(join(shared, "a.md"), "- `s` **Shared.** (Javi, 2026-10-21)\n");
+    const one = pool(
+      "Lint",
+      {},
+      `catalogue: docs/decisions.md\ninherits:\n  - ../${basename(shared)}\n  - local\n`,
+    );
+    mkdirSync(join(one.dir, "local"));
+    writeFileSync(join(one.dir, "local", "a.md"), "- `l` **Local.** (Javi, 2026-10-21)\n");
+    mkdirSync(join(one.dir, "docs"));
+    writeFileSync(join(one.dir, "docs", "decisions.md"), "- `x` **One.** (Javi, 2026-10-21)\n");
+    g(one.dir, "add", "docs");
+    g(one.dir, "commit", "-q", "-m", "two");
+    g(one.dir, "worktree", "add", "-q", "--detach", one.tree(1));
+    writeFileSync(
+      join(one.tree(1), "docs", "decisions.md"),
+      "- `x` **One.** (Javi, 2026-10-21)\n- **No tier.**\n",
+    );
+    const check = (cwd: string) => {
+      try {
+        const out = execFileSync("node", [join(here, "plan-queue.mjs"), "check"], {
+          cwd,
+          encoding: "utf8",
+          env: one.env,
+        });
+        return { out, code: 0 };
+      } catch (error) {
+        const e = error as { stdout: string; status: number };
+        return { out: e.stdout, code: e.status };
+      }
+    };
+    const inTree = check(one.tree(1));
+    expect(inTree.code).toBe(1);
+    expect(inTree.out).toContain("docs/decisions.md: no tier and date: **No tier.**");
+    expect(inTree.out).not.toContain("no such catalogue");
+    expect(inTree.out).toContain("4 entries in 3 files, 1 fault.");
+    const inCheckout = check(one.dir);
+    expect(inCheckout.code).toBe(0);
+    expect(inCheckout.out).not.toContain("no tier and date");
+    expect(inCheckout.out).toContain("3 entries in 3 files, no faults.");
+  });
 });

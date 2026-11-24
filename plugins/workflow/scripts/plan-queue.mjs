@@ -994,6 +994,30 @@ function treeOf(cwd, trees) {
 }
 
 /**
+ * The tree a command is run in: the worktree under `.claude/worktrees/` that
+ * holds the working folder, else the checkout. **An executor builds in its
+ * own worktree** (decisions.md#executors-in-worktrees): the queue's files stay
+ * the checkout's, but `plans check` lints the catalogue being built there,
+ * and the checkout's for a path git does not carry into the worktree.
+ */
+function treeHere(cwd = process.cwd()) {
+  // As given and by real paths, as numberOf reads them.
+  const tree =
+    treeOf(cwd, worktrees()) ||
+    treeOf(
+      realPath(cwd),
+      worktrees().map((t) => ({ ...t, path: realPath(t.path) })),
+    );
+  if (!tree || tree.path === root) return root;
+  const trees = join(root, ".claude", "worktrees");
+  const under = (base, dir) => {
+    const rel = relative(base, dir);
+    return !!rel && !rel.startsWith("..") && !isAbsolute(rel);
+  };
+  return under(trees, tree.path) || under(realPath(trees), realPath(tree.path)) ? tree.path : root;
+}
+
+/**
  * **Any live executor counts**: a session is an executor by its name (`Executor
  * n`, given by `start()`), by the state its prompt hook wrote (`agent:
  * "executor"`, so one the owner started by hand counts too), or by holding the
@@ -7299,7 +7323,7 @@ export function checkDeny(project = proj(), agents = pluginAgents()) {
  * catalogue has. Then the count.
  */
 function checkCatalogues(project = proj(), dir = root) {
-  const locs = locations(project, dir);
+  const locs = locations(project, dir, root);
   const named = [...project.inherits, project.catalogue].filter(Boolean);
   if (!named.length)
     return { text: "No catalogue: the project file names no catalogue or inherits.", faults: 0 };
@@ -8705,7 +8729,7 @@ export function main(args = process.argv.slice(2)) {
         ? [`executors: ${written} is no whole number of 1 or more.`]
         : []),
     ];
-    const { text, faults } = checkCatalogues();
+    const { text, faults } = checkCatalogues(proj(), treeHere());
     process.stdout.write(`${[...denied, text].join("\n")}\n`);
     if (faults || denied.length) process.exitCode = 1;
     return;

@@ -8709,7 +8709,7 @@ export async function ghCommand(
 
 const USAGE = `plans                 the queue: briefs, asking, ready, building, built
 plans --all           with the older plans listed by path
-plans start [path...] start an executor on the waiting plans, or these
+plans start [path]    start the lowest-numbered free executor on the next free plan, or this one
 plans start --agent planner <brief>   start a planner on a brief
 plans start --agent assistant <plan>  start an assistant chat on a built plan's follow-ups
 plans start --owner-said "<words>" [path...]  start one more past a refusal that says the owner decides, on the owner's yes

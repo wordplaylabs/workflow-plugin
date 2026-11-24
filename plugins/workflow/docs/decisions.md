@@ -628,6 +628,20 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   - ~~A background session works in the checkout, one executor
     holding the lock.~~ (Javi, 27 October; a worktree per session
     made the queue lose track of what was built where)
+- `resource-slots` **A heavy step takes a slot of a named resource,
+  and the executor that built a change still runs its checks and
+  reviews.** (Javi, 24 November) With each executor running its own
+  suites, the number of executors was also the number of browser
+  suites at once, which a four-core machine holds at two, while
+  writing code waits on a model and could be more. GitLab's resource
+  groups, Buildkite's concurrency groups and Jenkins's lockable
+  resources limit a named resource and leave the jobs that share it
+  to wait, oldest first by Buildkite's default; Jenkins makes a
+  resource a lock names and nobody defined. A separate stage that
+  tests and reviews what the executors built was not taken: its
+  findings would go back to a chat that no longer holds the change,
+  and the reviews already read in contexts of their own.
+  plans/parallel-executors-follow-up.md.
 - `queues-in-parallel` **Each project's queue runs apart from every
   other, in parallel.** (Javi, 27 October) A change to the workflow is
   never held by the project it was noticed in.

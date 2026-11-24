@@ -387,7 +387,7 @@ export function checkoutOf(dir) {
 }
 
 /**
- * `{ name, branch, run, land, ui, catalogue, inherits, tools, mcp, deny,
+ * `{ name, branch, run, land, ui, catalogue, inherits, tools, mcp, deny, executors, resources,
  * written, form, reuse, reviews, body, pullRequests, found }` for the project
  * at `root`: the name defaults to the directory's, the branch to the
  * remote's default (else main; `plans init` writes the branch checked out
@@ -445,10 +445,13 @@ export function project(root) {
         : {},
     // The key as written beside the map above, and the lines the parser could
     // not read, for `plans check`: the file is parsed once.
-    written: { deny: front.deny, executors: front.executors, unread },
+    written: { deny: front.deny, executors: front.executors, resources: front.resources, unread },
     // How many executors build at once, each in its own worktree: a whole
     // number, 1 by default.
     executors: executorsOf(front.executors),
+    // How many executors run each heavy step at once, by the resource's
+    // name (decisions.md#resource-slots): `plans hold` takes a slot.
+    resources: resourcesOf(front.resources),
     form: front.form === "compact" ? "compact" : "full",
     // The context, in tokens, above which a finished session retires, by
     // agent and by whether the work waiting is related to its own.
@@ -475,6 +478,30 @@ export function executorsOf(value) {
   const n =
     typeof value === "number" ? value : /^\d+$/.test(String(value ?? "")) ? Number(value) : 0;
   return Number.isInteger(n) && n >= 1 ? n : 1;
+}
+
+/** A resource's name, as `plans hold` takes it and its files are named. */
+export const RESOURCE_NAME = /^[a-z0-9-]+$/;
+
+/**
+ * The `resources` key as a map of a name to its slots, a whole number of 1 or
+ * more each; a value that is no such number is left out, which `plans check`
+ * says, and the name then has one slot as any name the file does not give.
+ */
+export function resourcesOf(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([name, written]) => {
+      const one = slotsWritten(written);
+      return RESOURCE_NAME.test(name) && /^[1-9][0-9]*$/.test(one) ? [[name, Number(one)]] : [];
+    }),
+  );
+}
+
+/** A `resources` value as written: the parser gives a nested key's value as a list; a map is "". */
+export function slotsWritten(value) {
+  if (Array.isArray(value)) return value.join(" ").trim();
+  return typeof value === "object" && value ? "" : String(value ?? "").trim();
 }
 
 /**
@@ -541,6 +568,8 @@ branch: ${defaultBranch(root, { checkedOut: true })}
 #     - "mcp__server__write_.*"
 # form: compact          one chat decides and builds; omit for the full queue
 # executors: 2  # how many executors build at once, each in its own worktree; omit for one
+# resources:                # heavy steps only so many executors run at once; a step takes a slot with plans hold
+#   browser: 1
 # reuse: 200000 # the context above which a finished session retires while this project has under five sessions of the agent: one number, or a map of executor and planner; with history the queue works the ceiling out from this project's transcripts; a map's assistant (150000) is where the assistant chat is handed on
 # reviews:               the reviews before a push: plan, code-review, codex, or a plugin skill; omit for all three
 #   - code-review

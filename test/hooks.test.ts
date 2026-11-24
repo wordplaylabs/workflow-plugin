@@ -12869,4 +12869,228 @@ describe("several executors build at once", () => {
     expect(inCheckout.out).not.toContain("no tier and date");
     expect(inCheckout.out).toContain("3 entries in 3 files, no faults.");
   });
+
+  /**
+   * **A heavy step takes a slot**: `plans hold` started in the background in a
+   * pool, its command a shell line that appends its start and end to one log.
+   */
+  const holding = (front: string) => {
+    const one = pool("Hold", {}, `executors: 3\n${front}`);
+    const log = join(one.dir, "steps.log");
+    const lines = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
+    const hold = (
+      tag: string,
+      args: string[],
+      { seconds = 1, extra = {} as Record<string, string> } = {},
+    ) => {
+      const child = spawn(
+        "node",
+        [
+          join(here, "plan-queue.mjs"),
+          "hold",
+          ...args,
+          "--",
+          "sh",
+          "-c",
+          `echo start ${tag} >> '${log}'; sleep ${seconds}; echo end ${tag} >> '${log}'`,
+        ],
+        { env: { ...one.env, WORKFLOW_HOLD_POLL: "200", ...extra }, detached: true },
+      );
+      let err = "";
+      child.stderr.on("data", (chunk) => (err += chunk));
+      const done = new Promise<{ code: number | null; err: string }>((resolve) =>
+        child.on("exit", (code) => resolve({ code, err })),
+      );
+      return { child, done };
+    };
+    const until = async (ok: () => boolean, ms = 10_000) => {
+      const end = Date.now() + ms;
+      while (!ok()) {
+        if (Date.now() > end) throw new Error(`timed out; log: ${lines().join(" | ")}`);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    };
+    const waiting = (pid: number | undefined) =>
+      existsSync(join(one.dir, ".claude", `executor.wait.browser.${pid}.json`));
+    /** Kills a `plans hold` and the command's own process group, as a machine's kill of both would. */
+    const kill = (child: ReturnType<typeof spawn>) => {
+      const slots = readdirSync(join(one.dir, ".claude")).filter((f) =>
+        f.startsWith("executor.hold."),
+      );
+      for (const file of slots) {
+        const held = JSON.parse(readFileSync(join(one.dir, ".claude", file), "utf8"));
+        if (held.pid === child.pid && held.group) process.kill(-held.group, "SIGKILL");
+      }
+      process.kill(-(child.pid as number), "SIGKILL");
+    };
+    return { ...one, log, lines, hold, until, waiting, kill };
+  };
+
+  it("runs a second step on a resource of one slot only after the first has ended", async () => {
+    const one = holding("resources:\n  browser: 1\n");
+    const a = one.hold("a", ["browser"]);
+    await one.until(() => one.lines().includes("start a"));
+    const b = one.hold("b", ["browser"]);
+    await Promise.all([a.done, b.done]);
+    expect(one.lines()).toEqual(["start a", "end a", "start b", "end b"]);
+    expect((await b.done).err).toMatch(
+      /^Waiting for browser: 1 of 1 taken \(pid \d+, since \d\d:\d\d\), 0 ahead\.\nbrowser is free: running sh -c /,
+    );
+  });
+
+  it("runs two steps at once on a resource of two slots, and the third waits", async () => {
+    const one = holding("resources:\n  browser: 2\n");
+    const a = one.hold("a", ["browser"], { seconds: 2 });
+    const b = one.hold("b", ["browser"], { seconds: 2 });
+    await one.until(() => one.lines().length >= 2);
+    const c = one.hold("c", ["browser"]);
+    await Promise.all([a.done, b.done, c.done]);
+    const lines = one.lines();
+    expect(lines.slice(0, 2).sort()).toEqual(["start a", "start b"]);
+    expect(lines[2]).toMatch(/^end [ab]$/);
+    expect(lines.indexOf("start c")).toBeGreaterThan(2);
+  });
+
+  it("runs the step that began waiting first first", async () => {
+    const one = holding("resources:\n  browser: 1\n");
+    const a = one.hold("a", ["browser"], { seconds: 2 });
+    await one.until(() => one.lines().includes("start a"));
+    const b = one.hold("b", ["browser"]);
+    await one.until(() => one.waiting(b.child.pid));
+    const c = one.hold("c", ["browser"]);
+    await Promise.all([a.done, b.done, c.done]);
+    expect(one.lines()).toEqual(["start a", "end a", "start b", "end b", "start c", "end c"]);
+  });
+
+  it(
+    "starts the next waiting step within ten seconds of the holder being killed",
+    { timeout: 40_000 },
+    async () => {
+      const one = holding("resources:\n  browser: 1\n");
+      const a = one.hold("a", ["browser"], { seconds: 30 });
+      await one.until(() => one.lines().includes("start a"));
+      // The queue's own five seconds between looks, not the tests' faster one.
+      const b = one.hold("b", ["browser"], { extra: { WORKFLOW_HOLD_POLL: "" } });
+      await one.until(() => one.waiting(b.child.pid));
+      one.kill(a.child);
+      const killed = Date.now();
+      await one.until(() => one.lines().includes("start b"), 10_000);
+      expect(Date.now() - killed).toBeLessThan(10_000);
+      expect((await b.done).code).toBe(0);
+    },
+  );
+
+  it("keeps the slot taken while the command runs, its plans hold process killed alone", async () => {
+    const one = holding("resources:\n  browser: 1\n");
+    const a = one.hold("a", ["browser"], { seconds: 2 });
+    await one.until(() => one.lines().includes("start a"));
+    const b = one.hold("b", ["browser"]);
+    await one.until(() => one.waiting(b.child.pid));
+    process.kill(a.child.pid as number, "SIGKILL");
+    await b.done;
+    expect(one.lines()).toEqual(["start a", "end a", "start b", "end b"]);
+  });
+
+  it("exits with the command's code, the command's output its own", () => {
+    const one = holding("resources:\n  browser: 1\n");
+    const done = spawnSync(
+      "node",
+      [join(here, "plan-queue.mjs"), "hold", "browser", "--", "sh", "-c", "echo out; exit 3"],
+      { env: one.env, encoding: "utf8" },
+    );
+    expect(done.status).toBe(3);
+    expect(done.stdout).toBe("out\n");
+    expect(done.stderr).toBe("");
+    expect(readdirSync(join(one.dir, ".claude")).filter((f) => f.includes(".hold."))).toEqual([]);
+  });
+
+  it("holds a resource named as an object's own key, constructor, as any other", () => {
+    const one = holding("resources:\n  browser: 1\n");
+    const done = spawnSync(
+      "node",
+      [join(here, "plan-queue.mjs"), "hold", "constructor", "--", "sh", "-c", "echo ran"],
+      { env: one.env, encoding: "utf8" },
+    );
+    expect(done.status).toBe(0);
+    expect(done.stdout).toBe("ran\n");
+  });
+
+  it("gives a name the project file does not give one slot", async () => {
+    const one = holding("resources:\n  browser: 2\n");
+    const a = one.hold("a", ["gpu"], { seconds: 2 });
+    await one.until(() => one.lines().includes("start a"));
+    const b = one.hold("b", ["gpu"]);
+    await Promise.all([a.done, b.done]);
+    expect(one.lines()).toEqual(["start a", "end a", "start b", "end b"]);
+    expect((await b.done).err).toContain(
+      `Waiting for gpu: 1 of 1 taken (pid ${a.child.pid}, since`,
+    );
+  });
+
+  it("exits 75 and runs nothing when no slot comes free in the wait", async () => {
+    const one = holding("resources:\n  browser: 1\n");
+    const a = one.hold("a", ["browser"], { seconds: 10 });
+    await one.until(() => one.lines().includes("start a"));
+    const b = one.hold("b", ["browser", "--wait", "0.05"]);
+    const { code, err } = await b.done;
+    expect(code).toBe(75);
+    expect(err).toMatch(
+      new RegExp(
+        `\\nNo slot of browser came free in 0\\.05 minutes \\(pid ${a.child.pid}, since \\d\\d:\\d\\d\\): nothing was run\\.\\n$`,
+      ),
+    );
+    expect(one.lines()).toEqual(["start a"]);
+    expect(one.waiting(b.child.pid)).toBe(false);
+    one.kill(a.child);
+  });
+
+  it("lists the resource's line under the executors and the executors' words on their rows", async () => {
+    const one = holding("resources:\n  browser: 1\n");
+    one.write(
+      [2, 3].map((n) => ({
+        sessionId: `hold-${n}`,
+        name: `Hold Executor ${n} (lab)`,
+        kind: "background",
+        status: "busy",
+        cwd: one.tree(n),
+      })),
+    );
+    const a = one.hold("a", ["browser"], { seconds: 10, extra: { WORKFLOW_EXECUTOR: "2" } });
+    await one.until(() => one.lines().includes("start a"));
+    const b = one.hold("b", ["browser"], { extra: { WORKFLOW_EXECUTOR: "3" } });
+    await one.until(() => one.waiting(b.child.pid));
+    const listed = one.queue(["list"]);
+    for (const child of [a.child, b.child]) one.kill(child);
+    expect(listed).toMatch(
+      /\n  2  Hold Executor 2 \(lab\) \[hold-2\], busy, [^\n]*, running browser\n/,
+    );
+    expect(listed).toMatch(
+      /\n  3  Hold Executor 3 \(lab\) \[hold-3\], busy, [^\n]*, waiting for browser\n/,
+    );
+    expect(listed).toMatch(
+      /\nbrowser: 1 of 1 taken \(executor 2, since \d\d:\d\d\), 1 waiting \(executor 3, since \d\d:\d\d\)\n/,
+    );
+  });
+
+  it("plans check says a resources value that is no whole number of 1 or more", () => {
+    const one = pool("Slots", {}, "resources:\n  browser: 0\n  db: two\n  Big: 2\n  gpu: 2\n");
+    let said = "";
+    try {
+      one.queue(["check"]);
+    } catch (error) {
+      said = String((error as { stdout?: string }).stdout || "");
+    }
+    expect(said).toContain("resources: browser: 0 is no whole number of 1 or more.");
+    expect(said).toContain("resources: db: two is no whole number of 1 or more.");
+    expect(said).toContain("resources: Big is no name plans hold takes (a-z, 0-9 and -).");
+    expect(said).not.toContain("gpu");
+    const flat = pool("Flat", {}, "resources: 2\n");
+    try {
+      flat.queue(["check"]);
+      said = "";
+    } catch (error) {
+      said = String((error as { stdout?: string }).stdout || "");
+    }
+    expect(said).toContain("resources: 2 is no map of names to whole numbers.");
+  });
 });

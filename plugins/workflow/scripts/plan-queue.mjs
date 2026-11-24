@@ -27,6 +27,8 @@
 //                            executors and planners, within the bounds below
 //   plan-queue.mjs end       `plans end`: ends this queue's finished chats; with
 //                            --timer, the end timer each stop arms an hour on
+//   plan-queue.mjs hold      `plans hold`: a heavy step run when a slot of
+//                            its resource is free (decisions.md#resource-slots)
 //   plan-queue.mjs pause | resume | sync | init
 //
 // **Bounded, as every loop over model calls is**: as many executors at a time as the project says
@@ -63,7 +65,7 @@ import {
   appendFileSync,
 } from "node:fs";
 import { connect } from "node:net";
-import { homedir, tmpdir } from "node:os";
+import { constants, homedir, tmpdir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentsChoice, catalogueFiles, paragraphs, shellWrites, untiered } from "./turn-audit.mjs";
@@ -97,7 +99,9 @@ import {
   pluginAgents,
   project,
   REUSE_DEFAULT,
+  RESOURCE_NAME,
   sessionAgent,
+  slotsWritten,
 } from "./project.mjs";
 import { costWords, inputsOf, measure, measureFile, priceOf } from "./cost.mjs";
 import { briefPaths, noteSeen, seenIn, seenOf } from "./seen.mjs";
@@ -1332,6 +1336,8 @@ export function describeSession(one) {
       ? "in the checkout"
       : `in ${one.where}${one.branch ? ` on ${one.branch}` : ""}`,
     one.on ? `building ${one.on}` : "",
+    // "running browser", "waiting for browser" (decisions.md#resource-slots).
+    ...(one.holding || []),
     keptWords(one),
     one.retired ? "retired" : "",
   ]
@@ -5111,6 +5117,19 @@ export function list({ all = false, live, related = true, readers = null } = {})
         live,
       )
     : [];
+  // **What each executor holds or waits for**, on the row of its number that
+  // is not retired, and a line per resource under the executors.
+  const holds = holdsNow();
+  for (const [name, { slots, waiting }] of holds)
+    for (const [words, ones] of [
+      [`running ${name}`, slots],
+      [`waiting for ${name}`, waiting],
+    ])
+      for (const one of ones) {
+        const rows = executorRows.filter((row) => one.executor && row.number === one.executor);
+        const row = rows.find((each) => !each.retired) || rows[0];
+        if (row) row.holding = [...(row.holding || []), words];
+      }
   if (proj().executors > 1) executor = executorsTable(executorRows, plans, live);
   else if (live) executor = sessionsLine("executor", executorRows);
   else if (lock)
@@ -5119,6 +5138,7 @@ export function list({ all = false, live, related = true, readers = null } = {})
     executor = proj().found ? noneAliveWords(plans, live) : "The executor: none alive.";
   const here = machine();
   out.push(`Plans on ${here.name}, ${today(now)} ${hhmm(now)}. ${executor}`);
+  out.push(...resourceLines(holds));
   // **The planner line**: the queue's planners only.
   if (live)
     out.push(
@@ -8846,6 +8866,308 @@ export async function ghCommand(
   return { said: "", status: done.status ?? 1 };
 }
 
+/**
+ * **A heavy step takes a slot** (decisions.md#resource-slots): the project
+ * file's `resources` says how many may run a named step at once, and `plans
+ * hold <name> -- <command>` waits for a slot, oldest first, as Buildkite's
+ * concurrency groups do, runs the command and frees the slot when it ends or
+ * its process dies. A name the file does not give has one slot, as Jenkins
+ * makes a resource a lock names. A ticket is `executor.wait.<name>.<pid>.json`,
+ * a slot `executor.hold.<name>.<k>.json`, both in the checkout's `.claude/`,
+ * so every worktree's executor shares them.
+ */
+const HOLD_POLL = 5000;
+/** The default wait for a slot, in minutes, and the exit when none came (EX_TEMPFAIL). */
+const HOLD_WAIT = 120;
+const HOLD_GAVE_UP = 75;
+/** A slot or ticket untouched this long, in ms, is no one's, its pid alive or not. */
+const HOLD_STALE = 60_000;
+const HOLD_FILE = /^executor\.(hold|wait)\.([a-z0-9-]+)\.([0-9]+)\.json$/;
+
+const holdFiles = {
+  guard: (name) => join(root, ".claude", `executor.hold.${name}.guard`),
+  slot: (name, k) => join(root, ".claude", `executor.hold.${name}.${k}.json`),
+  ticket: (name, pid) => join(root, ".claude", `executor.wait.${name}.${pid}.json`),
+};
+
+/** How many may hold a resource at once: the project file's number, else one. */
+function slotsOf(name, resources = proj().resources) {
+  return (Object.hasOwn(resources, name) && resources[name]) || 1;
+}
+
+/** Whether a process group lives: `plans hold` starts its command as one, so its children count. */
+function groupAlive(pgid) {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+/**
+ * Whether a slot or ticket is still someone's: its `plans hold` process alive
+ * and its file touched within `HOLD_STALE` (a pid the system gave to another
+ * process stops touching it), or the command it started still running.
+ */
+function heldAlive(one, touched) {
+  if (!one?.pid) return false;
+  if (one.group && groupAlive(one.group)) return true;
+  return pidAlive(one.pid) && Date.now() - touched < HOLD_STALE;
+}
+
+/**
+ * Every resource's slots taken and tickets waiting, oldest first, by name:
+ * a Map of `{ slots: [{ k, pid, executor, at }], waiting: [{ pid, executor, at }] }`.
+ * A file no one holds is left out, and removed when its resource is `drop`,
+ * the one whose guard the caller holds.
+ */
+function holdsNow({ drop = "" } = {}) {
+  const out = new Map();
+  let names = [];
+  try {
+    names = readdirSync(join(root, ".claude"));
+  } catch {
+    return out;
+  }
+  for (const file of names) {
+    const match = HOLD_FILE.exec(file);
+    if (!match) continue;
+    const [, kind, name, number] = match;
+    const path = join(root, ".claude", file);
+    const one = readJson(path);
+    let touched = 0;
+    try {
+      touched = statSync(path).mtimeMs;
+    } catch {
+      // Gone since the listing.
+    }
+    if (!heldAlive(one, touched)) {
+      if (name === drop && one)
+        try {
+          unlinkSync(path);
+        } catch {
+          // Removed by another waiter.
+        }
+      continue;
+    }
+    if (!out.has(name)) out.set(name, { slots: [], waiting: [] });
+    if (kind === "hold") out.get(name).slots.push({ ...one, k: Number(number) });
+    else out.get(name).waiting.push(one);
+  }
+  for (const one of out.values())
+    for (const list of [one.slots, one.waiting]) list.sort((a, b) => a.at - b.at || a.pid - b.pid);
+  return out;
+}
+
+/** "executor 2, since 11:02; pid 4242, since 11:03": who holds or waits, by number or pid. */
+function holdersWords(holders) {
+  return holders
+    .map(
+      (one) =>
+        `${one.executor ? `executor ${one.executor}` : `pid ${one.pid}`}, since ${hhmm(one.at)}`,
+    )
+    .join("; ");
+}
+
+/** " (<holders>)", or "" for nobody. */
+function inBrackets(holders) {
+  return holders.length ? ` (${holdersWords(holders)})` : "";
+}
+
+/** `plans`'s line per resource in use or waited for. */
+function resourceLines(holds = holdsNow()) {
+  return [...holds]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(
+      ([name, { slots, waiting }]) =>
+        `${name}: ${slots.length} of ${slotsOf(name)} taken${inBrackets(slots)}, ${waiting.length} waiting${inBrackets(waiting)}`,
+    );
+}
+
+/**
+ * Takes a free slot of `name` for this process's ticket when as many slots
+ * are free as there are tickets up to its own, oldest first, under the
+ * resource's guard: the slot's number, or 0. A ticket dropped while this
+ * process could not touch it (stopped, say) is written again with its time.
+ */
+function takeSlot(name, me) {
+  const guard = holdFiles.guard(name);
+  if (!takeHoldGuard(guard)) return 0;
+  try {
+    const ticket = holdFiles.ticket(name, me.pid);
+    if (!existsSync(ticket)) writeJson(ticket, me);
+    const { slots = [], waiting = [] } = holdsNow({ drop: name }).get(name) || {};
+    // The number as the file says it now, not as it said when the wait began.
+    const free = slotsOf(name, project(root).resources) - slots.length;
+    const place = waiting.findIndex((one) => one.pid === me.pid);
+    if (place < 0 || place >= free) return 0;
+    const taken = new Set(slots.map((one) => one.k));
+    let k = 1;
+    while (taken.has(k)) k++;
+    writeJson(holdFiles.slot(name, k), { ...me, at: Date.now() });
+    unlinkSync(ticket);
+    return k;
+  } finally {
+    try {
+      if (readFileSync(guard, "utf8") === String(process.pid)) unlinkSync(guard);
+    } catch {
+      // Gone already.
+    }
+  }
+}
+
+/**
+ * A resource's guard, created exclusively with this process's pid; waits up to
+ * three seconds. Unlike the lock's guard it never goes stale by age, only when
+ * the process that wrote it is gone, so a waiter paused inside it keeps it.
+ */
+function takeHoldGuard(guard) {
+  const deadline = Date.now() + 3000;
+  for (;;) {
+    try {
+      writeFileSync(guard, String(process.pid), { flag: "wx" });
+      return true;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+    try {
+      const pid = Number(readFileSync(guard, "utf8"));
+      if (pid && !pidAlive(pid)) {
+        unlinkSync(guard);
+        continue;
+      }
+    } catch {
+      // Released between the create and the look: try again.
+      continue;
+    }
+    if (Date.now() > deadline) return false;
+    sleep(25);
+  }
+}
+
+/** Removes a file of this process's, unless another process's has replaced it. */
+function dropOwn(path) {
+  try {
+    if (readJson(path)?.pid === process.pid) unlinkSync(path);
+  } catch {
+    // Gone already.
+  }
+}
+
+/**
+ * `plans hold <name> [--wait <minutes>] -- <command>`: the command's exit
+ * code, 75 when no slot came free in the wait, 2 for a line it cannot read.
+ * The queue's own lines go to stderr, so the command's output is its own.
+ */
+async function holdCommand(args) {
+  const dash = args.indexOf("--");
+  const before = dash < 0 ? args : args.slice(0, dash);
+  const command = dash < 0 ? [] : args.slice(dash + 1);
+  const at = before.indexOf("--wait");
+  const minutes = at < 0 ? HOLD_WAIT : Number(before[at + 1]);
+  const name = before.filter((_, i) => at < 0 || (i !== at && i !== at + 1))[0];
+  if (
+    !command.length ||
+    !RESOURCE_NAME.test(name || "") ||
+    before.length !== (at < 0 ? 1 : 3) ||
+    !(minutes >= 0)
+  ) {
+    process.stderr.write(`${USAGE}\n`);
+    return 2;
+  }
+  const say = (line) => process.stderr.write(`${line}\n`);
+  const me = {
+    pid: process.pid,
+    executor: numberOf(process.cwd()) || Number(process.env.WORKFLOW_EXECUTOR) || 0,
+    at: Date.now(),
+  };
+  const ticket = holdFiles.ticket(name, me.pid);
+  let k = 0;
+  const cleanup = () => {
+    dropOwn(ticket);
+    if (k) dropOwn(holdFiles.slot(name, k));
+  };
+  process.on("exit", cleanup);
+  // **Alive is touched**: the ticket, then the slot, every third of the
+  // staleness, so a pid the system hands on holds nothing for long.
+  const touch = setInterval(() => {
+    const path = k ? holdFiles.slot(name, k) : ticket;
+    try {
+      if (readJson(path)?.pid === process.pid) utimesSync(path, new Date(), new Date());
+    } catch {
+      // Dropped while stopped: the next look writes the ticket again.
+    }
+  }, HOLD_STALE / 3);
+  touch.unref();
+  let child = null;
+  const numbered = (signal) => 128 + (constants.signals[signal] || 0);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+    process.on(signal, () => {
+      // The command's whole group, so a shell's children stop too.
+      if (child?.pid)
+        try {
+          process.kill(-child.pid, signal);
+        } catch {
+          // Ended already.
+        }
+      else {
+        cleanup();
+        process.exit(numbered(signal));
+      }
+    });
+  mkdirSync(join(root, ".claude"), { recursive: true });
+  writeJson(ticket, me);
+  k = takeSlot(name, me);
+  const words = command.join(" ");
+  if (!k) {
+    const { slots = [], waiting = [] } = holdsNow().get(name) || {};
+    const ahead = waiting.findIndex((one) => one.pid === me.pid);
+    say(
+      `Waiting for ${name}: ${slots.length} of ${slotsOf(name)} taken${inBrackets(slots)}, ${Math.max(0, ahead)} ahead.`,
+    );
+    const poll = Number(process.env.WORKFLOW_HOLD_POLL) || HOLD_POLL;
+    const deadline = me.at + minutes * MINUTE;
+    while (!k) {
+      const left = deadline - Date.now();
+      if (left <= 0) {
+        cleanup();
+        say(
+          `No slot of ${name} came free in ${minutes} minutes${inBrackets(holdsNow().get(name)?.slots || [])}: nothing was run.`,
+        );
+        return HOLD_GAVE_UP;
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(poll, left)));
+      // A look that wakes past the wait takes nothing.
+      if (Date.now() < deadline) k = takeSlot(name, me);
+    }
+    say(`${name} is free: running ${words}.`);
+  }
+  return new Promise((resolve) => {
+    // One word may be a shell line (`plans hold browser -- "npm run e2e && npm run a11y"`).
+    // Its own process group, signalled whole, and alive while any of it is.
+    child = spawn(command[0], command.slice(1), {
+      stdio: "inherit",
+      shell: command.length === 1,
+      detached: true,
+    });
+    // **The slot is the command's too**: killed alone, this process leaves
+    // the command running, and the slot stays taken until it ends.
+    const slot = holdFiles.slot(name, k);
+    if (child.pid && readJson(slot)?.pid === process.pid)
+      writeJson(slot, { ...readJson(slot), group: child.pid });
+    child.on("error", (error) => {
+      say(`${command[0]}: ${error.message}`);
+      cleanup();
+      resolve(127);
+    });
+    child.on("exit", (code, signal) => {
+      cleanup();
+      resolve(code ?? numbered(signal));
+    });
+  });
+}
+
 const USAGE = `plans                 the queue: briefs, asking, ready, building, built
 plans --all           with the older plans listed by path
 plans start [path]    start the lowest-numbered free executor on the next free plan, or this one
@@ -8859,6 +9181,7 @@ plans end [id...] [--now]  end this queue's finished chats, or these; --now ends
 plans sync            move a clean checkout with no commit of its own to the branch, detached
 plans init            write .claude/workflow.md for this project
 plans check           lint the catalogues and the deny key the project file names
+plans hold <name> [--wait <minutes>] -- <command>   run a heavy step when a slot of <name> is free
 plans cost [--since yyyy-mm-dd] [<folder>]  what this queue's sessions cost, by agent, from their transcripts
 plans chat [--dry] [args...]  open the maker (compact) or the assistant here, with the project's mcp and inherits
 plans gh <args...>    gh as the project's own GitHub App (WORKFLOW_APP_ID, WORKFLOW_APP_KEY)
@@ -8886,11 +9209,24 @@ export function main(args = process.argv.slice(2)) {
   }
   if (mode === "check") {
     const written = proj().written.executors;
+    const slots = proj().written.resources;
     const denied = [
       ...checkDeny(),
       ...(written !== undefined && executorsOf(written) !== Number(written)
         ? [`executors: ${written} is no whole number of 1 or more.`]
         : []),
+      // A key with nothing under it names no resource.
+      ...(slots === undefined || slots === "" || (Array.isArray(slots) && !slots.length)
+        ? []
+        : slots && typeof slots === "object" && !Array.isArray(slots)
+          ? Object.entries(slots)
+              .filter(([name]) => !(name in proj().resources))
+              .map(([name, value]) =>
+                RESOURCE_NAME.test(name)
+                  ? `resources: ${name}: ${slotsWritten(value)} is no whole number of 1 or more.`
+                  : `resources: ${name} is no name plans hold takes (a-z, 0-9 and -).`,
+              )
+          : [`resources: ${slotsWritten(slots)} is no map of names to whole numbers.`]),
     ];
     const { text, faults } = checkCatalogues(proj(), treeHere());
     process.stdout.write(`${[...denied, text].join("\n")}\n`);
@@ -8975,6 +9311,11 @@ export function main(args = process.argv.slice(2)) {
     if (status) process.exitCode = status;
     return;
   }
+  // **`plans hold`** (decisions.md#resource-slots).
+  if (mode === "hold")
+    return holdCommand(rest).then((code) => {
+      process.exitCode = code;
+    });
   if (!["sync", "pause", "resume", "start", ...HOOK_MODES].includes(mode)) {
     process.stdout.write(`${USAGE}\n`);
     return;

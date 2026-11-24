@@ -238,6 +238,8 @@ deny:                     # MCP tools an agent here may never call, by agent
     - "mcp__server__write_.*"
 form: compact             # one chat decides and builds; omit for the full queue
 executors: 2              # how many executors build at once, each in its own worktree; omit for one
+resources:                # heavy steps only so many executors run at once; a step takes a slot with plans hold
+  browser: 1
 reuse: 200000             # the context above which a finished session retires while this project has under five sessions of the agent: one number, or a map of executor and planner; with history the queue works the ceiling out from this project's transcripts
 reviews:                  # the reviews before a push; omit for all three (none when compact)
   - code-review
@@ -349,7 +351,8 @@ every chat, a subagent included; `plans check` lints it. (decisions.md#deny-key)
 
 **The body's headings are the executor's steps for this project**:
 **Before a build**, **While working** (which tests for one change),
-**Before the push** (screenshots, checks, suites, in order), **After the
+**Before the push** (screenshots, checks, suites, in order, a step that
+takes a slot written as `plans hold`), **After the
 push** (what to watch), **Reading** (which tools read code and docs),
 **Products** (the product people know for each kind of thing, which
 `design-research` follows first), **People** (whose calls are theirs,
@@ -533,6 +536,17 @@ changes a file it changes while that one is being built; `plans`
 says which and why, a Building line on it is refused, and the next
 free plan is taken meanwhile. A plan is claimed for the executor it
 is named to, so two never take one. (decisions.md#plan-waits-on)
+
+**A heavy step takes a slot.** The project file's `resources` names
+what only so many executors may run at once (`browser: 1`), and a
+step of **Before the push** takes one by running as `plans hold
+<name> -- <command>`: it waits its turn, oldest first, runs, and
+frees the slot when it ends or its process dies. How many executors
+write code is `executors`; how many run a heavy step at once is the
+resource's number, so the first can be more than the machine runs of
+the second. The executor that built a plan runs its checks and
+reviews and fixes what they find: the reviews read, each in a
+context of its own, and take no slot. (decisions.md#resource-slots)
 
 **A push is not waited on.** The executor runs the project's checks
 once, under **Before the push**, pushes and starts the next plan: it

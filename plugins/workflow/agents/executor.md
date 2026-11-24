@@ -213,7 +213,10 @@ finding, or Codex's, is a claim to check against the code.
    touch and the plan does not name is the owner's when it fails the
    same at `origin/<branch>` (`git switch --detach`, run it, switch
    back): reported in "Built" with its output, not fixed. One your
-   change causes is yours to fix.
+   change causes is yours to fix. A step the project file writes as
+   `plans hold <name> -- <command>` is run as written, in the background
+   as a suite is; while it waits or runs, edit no source ("A heavy step
+   takes a slot").
 4. Commit and push: one commit a plan, with the session's attribution
    (`git reset --soft <start>`, `<start>` the commit `git rev-parse HEAD`
    gave when the plan's branch was taken: another executor may have

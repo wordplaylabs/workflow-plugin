@@ -220,11 +220,16 @@ const DELIVERIES_KEPT = 500;
  * title, permission, pull }`, in the items' order. `context` says what the
  * checkout's plans hold: `carried` (the issues a plan or a brief carries),
  * `planned` (a planned plan's issues), `own` (the queue's own pull requests),
- * `slug` (the app's) and `issuesOff` (every delivery is marked seen, and only
- * failed runs and merges are events). Kinds: `issue` (an issue opened,
+ * `slug` (the app's), `people` (the logins the project file's **People**
+ * gives, lower-cased) and `issuesOff` (every delivery is marked seen, and only
+ * failed runs and merges are events). A comment from a person `people` names
+ * is an event on any issue and any pull request, a review or an inline
+ * comment of theirs when it has words; another writer's only where it
+ * mentions the app, on an issue a plan carries or on the queue's own pull
+ * request (decisions.md#people-act-on-github). Kinds: `issue` (an issue opened,
  * unlabelled), `plan` (`status: planning` set on an issue nothing carries),
- * `mention` (`@<slug>` in a comment), `comment` (on an issue a plan carries),
- * `review`, `ready` (`status: ready` on a planned plan's issue), `merged` (a
+ * `mention` (`@<slug>` in a comment), `comment` (on an issue), `review` (on a
+ * pull request), `ready` (`status: ready` on a planned plan's issue), `merged` (a
  * pull request merged, told once by its number, `issue` its `For #<n>` line's
  * or 0 with issues off, with `base` and `head`; nobody is gated, since only a
  * person with write access merges), `failed` (a run that failed on the queue's
@@ -238,6 +243,7 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
   const carried = new Set(context.carried || []);
   const planned = new Set(context.planned || []);
   const own = new Set(context.own || []);
+  const people = new Set((context.people || []).map((login) => login.toLowerCase()));
   const slug = context.slug || "";
   const next = {
     ...NOTHING_SEEN,
@@ -332,6 +338,7 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
       });
     const mentions = slug && new RegExp(`(^|[^\\w-])@${slug}\\b`, "i").test(item.text || "");
     const ours = own.has(item.number) || Boolean(item.head && own.has(item.head));
+    const named = people.has(author.toLowerCase());
     if (item.kind === "opened") {
       // An issue opened with a label is labelled too, and that item is the one that counts.
       if (!item.labels?.length) event("issue");
@@ -349,9 +356,11 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
       }
     } else if (item.kind === "comment") {
       if (mentions) event("mention");
-      else if (item.pull ? ours : carried.has(item.number)) event(item.pull ? "review" : "comment");
+      else if (named || (item.pull ? ours : carried.has(item.number)))
+        event(item.pull ? "review" : "comment");
     } else if (item.kind === "review") {
-      if (ours) event(mentions ? "mention" : "review");
+      // A review with no words on another person's pull request asks nothing.
+      if (ours || (named && (item.text || "").trim())) event(mentions ? "mention" : "review");
     }
   }
   next.deliveries = next.deliveries.slice(-DELIVERIES_KEPT);

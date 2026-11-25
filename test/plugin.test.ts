@@ -38,6 +38,7 @@ import {
   ignoreQueueFiles,
   init,
   kindOf,
+  peopleOf,
   matches,
   project,
   QUEUE_IGNORES,
@@ -122,6 +123,20 @@ catalogue: docs/patterns
     expect(project(root).pullRequests).toBe("A pull request per topic.");
     writeFileSync(file, "---\nname: Pulls\n---\n\n## Reading\n\nRead.\n");
     expect(project(root).pullRequests).toBe("");
+  });
+
+  it("reads the logins in backticks under ## People as people, and none without the heading", () => {
+    const root = dir("people-");
+    mkdirSync(join(root, ".claude"));
+    const file = join(root, ".claude", "workflow.md");
+    writeFileSync(
+      file,
+      "---\nname: People\n---\n\n## People\n\nHenry (`@Henry-B`) decides the copy; Anton (`anton_x`) the data, with `henry-b` again.\nMara has no login. `not a login` and `-dash` are none.\n\n## Reading\n\nRead `main`.\n",
+    );
+    expect(project(root).people).toEqual(["henry-b", "anton_x"]);
+    expect(peopleOf("## People\n\n`henry`\n")).toEqual(["henry"]);
+    writeFileSync(file, "---\nname: People\n---\n\n## Reading\n\nRead `henry`.\n");
+    expect(project(root).people).toEqual([]);
   });
 
   it("defaults the name to the directory and the branch to the remote's default, else main", () => {
@@ -3729,13 +3744,23 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
       "the reversal of a rule with his or a third person's name, a direction beyond the issue's or pull request's topic, a merge, a production push, money or a secret;",
     );
     expect(reaches).toContain("a change from a writer **People** does not name");
+    expect(reaches).toContain(
+      "The comment of a person **People** gives a login in backticks reaches you wherever they wrote it, on an issue no plan carries and on another person's pull request too: there, act only on a clear task or a question put to the queue; talk between people gets no reply and no question to the owner, and its Handled line says so.",
+    );
     const docs = flat("docs/workflow.md");
     expect(docs).toContain(
-      "**People** (whose calls are theirs, what each decides, and each one's GitHub login, whose clear tasks on GitHub the queue acts on)",
+      "**People** (whose calls are theirs, what each decides, and each one's GitHub login in backticks, whose clear tasks on GitHub the queue acts on wherever they write them)",
+    );
+    expect(docs).toContain(
+      "a comment from a person **People** names by login is an event on any issue or pull request, another writer's only where it mentions the app, on an issue a plan carries or on one of the queue's own pull requests; a failed run and a merge arrive the same way",
     );
     expect(docs).toContain("decisions.md#people-act-on-github)");
-    expect(flat("docs/decisions.md")).toContain(
+    const decisions = flat("docs/decisions.md");
+    expect(decisions).toContain(
       "- `people-act-on-github` **A clear task from a person the project names, in an issue or a pull request, is acted on without the owner.** (Javi, 25 November)",
+    );
+    expect(decisions).toContain(
+      "Their comments are events wherever they are written, an issue no plan carries and another person's pull request too, by the login **People** gives in backticks, as Prow reads its people from the repository's OWNERS file and acts on their comments on any pull request; no mention is asked of them, since his ask was the task and not a way of writing it; write access is still required, and what is no task there gets no reply, so the app stays out of talk between people. plans/owner-requests-nov-25.md and plans/people-comments-reach-the-queue.md.",
     );
   });
 

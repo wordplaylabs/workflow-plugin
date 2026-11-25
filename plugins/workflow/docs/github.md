@@ -79,8 +79,13 @@ once:
   --body-file`);
 - a task or a change from a person **People** names, by the GitHub
   login it gives them, or by name where it gives none: when it is clear
-  and not the owner's call, act on it without him. One that fits a short
-  plan ("Which session a topic goes to") is written and started at once,
+  and not the owner's call, act on it without him. The comment of a
+  person **People** gives a login in backticks reaches you wherever they
+  wrote it, on an issue no plan carries and on another person's pull
+  request too: there, act only on a clear task or a question put to the
+  queue; talk between people gets no reply and no question to the owner,
+  and its Handled line says so. One that fits a short plan ("Which
+  session a topic goes to") is written and started at once,
   landing in that pull request when it was said on one of the queue's
   own (`Lands: topic <the head branch>, waiting; lands in #<n>.`), or is
   a "Decided" line with their name when the plan is planned and has no
@@ -98,7 +103,8 @@ once:
   the commenter's call, else the question tool to the owner;
 - `plan`, a brief started as exit 4;
 - `ready`, the Ready step, first line `Ready on GitHub, <d Month>.`;
-- `review`, a short plan for a fix or an answer on the pull request;
+- `review`, a short plan for a fix or an answer on the pull request; on
+  another person's, only a named person's clear task or question, as above;
 - `merged`, a pull request merged into a branch the queue's own are on:
   its indented lines name them. For a `merged` note, write one refresh
   plan ("A refresh plan") for those under `behind` and `stacked on it`,

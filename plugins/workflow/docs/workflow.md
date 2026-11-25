@@ -360,8 +360,8 @@ takes a slot written as `plans hold`), **After the
 push** (what to watch), **Reading** (which tools read code and docs),
 **Products** (the product people know for each kind of thing, which
 `design-research` follows first), **People** (whose calls are theirs,
-what each decides, and each one's GitHub login, whose clear tasks on
-GitHub the queue acts on) and **Issues** (`Detail:`, a skill or command that
+what each decides, and each one's GitHub login in backticks, whose clear
+tasks on GitHub the queue acts on wherever they write them) and **Issues** (`Detail:`, a skill or command that
 turns a plan into an address an issue links, and `Check:`, a command that
 fails on what may not leave the repository; its presence turns issues on
 with `land: pull-request`, since issues need pull requests)
@@ -782,7 +782,10 @@ app's webhook**: `plans webhook` listens on the container behind the
 host's reverse proxy, checks each delivery's signature, notes each event in
 `plans/github/`, starts the assistant on it, or sends the open one its
 line, and closes an issue when its
-pull request merges; a failed run and a merge arrive the same way in
+pull request merges; a comment from a person **People** names by login
+is an event on any issue or pull request, another writer's only where it
+mentions the app, on an issue a plan carries or on one of the queue's own
+pull requests; a failed run and a merge arrive the same way in
 any project with `land: pull-request`; a delivery the queue takes nothing from is answered and
 not kept; `plans github` reads what was missed, says any list GitHub would not give it,
 in its own output and in `plans` until a read gets everything, and does

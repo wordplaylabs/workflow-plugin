@@ -388,7 +388,7 @@ export function checkoutOf(dir) {
 
 /**
  * `{ name, branch, run, land, ui, catalogue, inherits, tools, mcp, deny, executors, resources,
- * written, form, reuse, reviews, body, pullRequests, found }` for the project
+ * written, form, reuse, reviews, body, pullRequests, people, found }` for the project
  * at `root`: the name defaults to the directory's, the branch to the
  * remote's default (else main; `plans init` writes the branch checked out
  * in a repository with no remote), `run`, `ui` and `catalogue` to none, `land` to
@@ -396,7 +396,8 @@ export function checkoutOf(dir) {
  * pull request to the branch instead of pushing it), `form` to "full"
  * ("compact" when the frontmatter says so: one chat, no queue),
  * `pullRequests` to "" (the text under the body's `## Pull requests`: how
- * the project's plans group into pull requests).
+ * the project's plans group into pull requests), `people` to [] (the
+ * logins in backticks under the body's `## People`, by `peopleOf`).
  */
 export function project(root) {
   let text = "";
@@ -469,8 +470,28 @@ export function project(root) {
     pullRequests: (
       /^## Pull requests[ \t]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body)?.[1] ?? ""
     ).trim(),
+    // Whose comments on GitHub are events wherever they are written
+    // (decisions.md#people-act-on-github).
+    people: peopleOf(body),
     found: Boolean(text),
   };
+}
+
+/**
+ * The GitHub logins the body's `## People` gives, as CODEOWNERS writes
+ * them: every span in backticks under the heading, up to the next `## ` or
+ * the end, that is a login whole (an optional `@`, a letter or digit, then
+ * up to 38 letters, digits, hyphens or underscores), lower-cased, each
+ * once, in the order written; [] with no heading. A word in backticks that
+ * is no person reads as a login and does no harm: an event still needs it
+ * to be the author of a comment, with write access.
+ */
+export function peopleOf(body) {
+  const under = /^## People[ \t]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body)?.[1] ?? "";
+  const logins = [...under.matchAll(/`@?([A-Za-z\d][\w-]{0,38})`/g)].map((one) =>
+    one[1].toLowerCase(),
+  );
+  return [...new Set(logins)];
 }
 
 /** The `executors` key as a whole number of 1 or more; 1 when absent or no such number. */

@@ -825,7 +825,15 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   already takes only writers; a small low-level comment waited on him
   for nothing; what is plainly his is still asked: a rule with a name
   reversed, a direction beyond the topic, a merge, a production push,
-  money or a secret. plans/owner-requests-nov-25.md.
+  money or a secret. Their comments are events wherever they are
+  written, an issue no plan carries and another person's pull request
+  too, by the login **People** gives in backticks, as Prow reads its
+  people from the repository's OWNERS file and acts on their comments on
+  any pull request; no mention is asked of them, since his ask was the
+  task and not a way of writing it; write access is still required, and
+  what is no task there gets no reply, so the app stays out of talk
+  between people. plans/owner-requests-nov-25.md and
+  plans/people-comments-reach-the-queue.md.
 - `note-sent-to-open-chat` **A note from GitHub reaches an open
   assistant chat by a message the queue sends itself, within a
   minute.** (Javi, 24 November) A failed run sat forty minutes in a

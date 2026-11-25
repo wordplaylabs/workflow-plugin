@@ -8026,13 +8026,17 @@ async function armWebhook(env = process.env) {
   return spawnListener(seen, env);
 }
 
-/** What the checkout's plans hold for `githubEvents`: carried, planned and own. */
+/**
+ * What the checkout's plans hold for `githubEvents`: carried, planned and
+ * own; with them `people`, the logins the project file's **People** gives.
+ */
 function githubContext(plans = readPlans(join(root, "plans"))) {
   const own = ownOf(plans);
   return {
     carried: plans.filter((p) => p.issue && p.state !== "dropped").map((p) => p.issue),
     planned: plans.filter((p) => p.state === "planned").map((p) => p.issue),
     own: [...own.keys()],
+    people: proj().people,
   };
 }
 
@@ -8808,8 +8812,19 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
       10_000,
     ) || [];
   const own = new Set(context.own);
+  const people = new Set(context.people);
+  // **Another person's pull request is read when a named person wrote on it
+  // since the last read** (decisions.md#people-act-on-github): its comments
+  // and reviews as the queue's own, no run list, a failed run being told
+  // for the queue's own alone; none on a first read, which has no line.
+  const namedSince = (pull) =>
+    [
+      ...(pull.comments || []).map((one) => [one.author?.login, one.createdAt]),
+      ...(pull.reviews || []).map((one) => [one.author?.login, one.submittedAt]),
+    ].some(([login, at]) => login && people.has(login.toLowerCase()) && newer(at));
   for (const pull of pulls) {
-    if (!own.has(pull.number) && !own.has(pull.headRefName)) continue;
+    const ours = own.has(pull.number) || own.has(pull.headRefName);
+    if (!ours && !(issuesOn && since && namedSince(pull))) continue;
     const base = {
       number: pull.number,
       title: pull.title,
@@ -8820,23 +8835,25 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
     };
     // The head commit's runs alone, so a busy branch's older runs do not
     // crowd a failed one out.
-    const runs = listOf(
-      `the runs of #${pull.number}`,
-      "runs",
-      [
-        "run",
-        "list",
-        "--branch",
-        pull.headRefName,
-        "--commit",
-        pull.headRefOid,
-        "--limit",
-        "100",
-        "--json",
-        "databaseId,attempt,status,conclusion,headSha,workflowName,updatedAt,url",
-      ],
-      5000,
-    );
+    const runs = !ours
+      ? null
+      : listOf(
+          `the runs of #${pull.number}`,
+          "runs",
+          [
+            "run",
+            "list",
+            "--branch",
+            pull.headRefName,
+            "--commit",
+            pull.headRefOid,
+            "--limit",
+            "100",
+            "--json",
+            "databaseId,attempt,status,conclusion,headSha,workflowName,updatedAt,url",
+          ],
+          5000,
+        );
     if (runs) items.push(...failedRunsOf(pull, base, runs, newerRun));
     if (!issuesOn) continue;
     for (const comment of pull.comments || [])

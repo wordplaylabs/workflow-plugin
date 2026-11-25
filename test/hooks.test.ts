@@ -9665,6 +9665,83 @@ describe("github webhook", () => {
     expect(first.seen.labeled).toEqual(["21:status: planning"]);
   });
 
+  // plans/people-comments-reach-the-queue.md, part 2: a named person's comment is an event
+  // wherever it is written; another writer's stays where it was.
+  const named = { ...context, people: ["Henry", "reader"] };
+  const onIssue = (id: string, login: string, number = 30) =>
+    itemsOfDelivery(
+      "issue_comment",
+      {
+        action: "created",
+        issue: { number, title: "Loose", labels: [], html_url: `u${number}` },
+        comment: { body: "Could the list sort by date?", user: user(login), created_at: at(9) },
+      },
+      id,
+    );
+  const theirPull = { number: 50, title: "Theirs", head: { ref: "their-branch" }, labels: [] };
+  const onPull = (id: string, login: string, body = "Rename this.") => [
+    ...itemsOfDelivery(
+      "issue_comment",
+      {
+        action: "created",
+        issue: { number: 50, title: "Theirs", labels: [], pull_request: {} },
+        comment: { body, user: user(login), created_at: at(10), html_url: `${id}a` },
+      },
+      `${id}a`,
+    ),
+    ...itemsOfDelivery(
+      "pull_request_review_comment",
+      {
+        action: "created",
+        pull_request: theirPull,
+        comment: { body, user: user(login), created_at: at(11), html_url: `${id}b` },
+      },
+      `${id}b`,
+    ),
+    ...itemsOfDelivery(
+      "pull_request_review",
+      {
+        action: "submitted",
+        pull_request: theirPull,
+        review: { body, user: user(login), submitted_at: at(12), html_url: `${id}c` },
+      },
+      `${id}c`,
+    ),
+  ];
+
+  it("a named person's comment on an issue no plan carries is a comment event, with its note", () => {
+    const { events } = githubEvents(seen, onIssue("p1", "henry"), named);
+    expect(events.map((one) => [one.kind, one.number, one.by])).toEqual([["comment", 30, "henry"]]);
+    expect(noteFor(events[0], { first: true })).toMatch(
+      /^# GitHub #30: Loose\n\ncomment, 3 November 2026 \d\d:09, by henry \(write\): u30\n {4}Could the list sort by date\?\n\n$/,
+    );
+  });
+
+  it("a named person's comment on a pull request not the queue's own is a review event", () => {
+    const { events } = githubEvents(seen, onPull("p2", "henry"), named);
+    expect(events.map((one) => [one.kind, one.number, one.by, one.url])).toEqual([
+      ["review", 50, "henry", "p2a"],
+      ["review", 50, "henry", "p2b"],
+      ["review", 50, "henry", "p2c"],
+    ]);
+    // One that names the app is a mention there, as anywhere.
+    const mention = githubEvents(seen, onPull("p3", "henry", "@docs-claude rename this."), named);
+    expect(mention.events.map((one) => one.kind)).toEqual(["mention", "mention", "mention"]);
+  });
+
+  it("a writer People does not name, a named reader and a review with no words are no events there", () => {
+    const anton = [...onIssue("p4", "anton"), ...onPull("p5", "anton")];
+    expect(githubEvents(seen, anton, named).events).toEqual([]);
+    const reader = [...onIssue("p6", "reader"), ...onPull("p7", "reader")];
+    expect(githubEvents(seen, reader, named).events).toEqual([]);
+    const silent = onPull("p8", "henry", "  ").slice(1);
+    expect(githubEvents(seen, silent, named).events).toEqual([]);
+    // Without `people`, henry's comments there are no events either.
+    expect(
+      githubEvents(seen, [...onIssue("p9", "henry"), ...onPull("p10", "henry")], context).events,
+    ).toEqual([]);
+  });
+
   it("notesWaiting lists the notes with an event after their last Handled line, oldest first", () => {
     const dir = mkdtempSync(join(tmpdir(), "notes-"));
     writeFileSync(
@@ -10497,6 +10574,82 @@ else say([]);
             const calls = readFileSync(asked, "utf8");
             expect(calls).toContain(`run list --branch series-order --commit ${sha}`);
             expect(calls).not.toContain("statusCheckRollup");
+          } finally {
+            rmSync(read, { recursive: true, force: true });
+          }
+        },
+      );
+
+      // plans/people-comments-reach-the-queue.md, part 3: when plans github reads after a time
+      // with no listener, then a named person's comments on another person's open pull request
+      // are noted, and a pull request no named person wrote on since is asked for nothing.
+      it(
+        "plans github reads a named person's comments on another person's open pull request",
+        { timeout: 30_000 },
+        () => {
+          const read = mkdtempSync(join(tmpdir(), "people-read-"));
+          try {
+            execFileSync("git", ["init", "-q"], { cwd: read });
+            execFileSync("git", ["remote", "add", "origin", "https://github.com/o/r.git"], {
+              cwd: read,
+            });
+            mkdirSync(join(read, ".claude"));
+            mkdirSync(join(read, "plans"));
+            writeFileSync(
+              join(read, ".claude", "workflow.md"),
+              "---\nname: Runs\nbranch: test\nland: pull-request\n---\n\n# Runs\n\n## Issues\n\nTopics here are GitHub issues.\n\n## People\n\nHenry (`@Henry`) decides the copy.\n",
+            );
+            writeFileSync(
+              join(read, ".claude", "github-seen.json"),
+              JSON.stringify({ readAt: "2026-11-14T00:00:00.000Z" }),
+            );
+            const asked = join(read, "asked.log");
+            const gh = join(stubDir, "gh-people");
+            // #50 is another person's, henry wrote on it since the read's line; #51 has anton's
+            // comment alone; #52 henry's from before the line.
+            writeFileSync(
+              gh,
+              `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(asked)}, args.join(" ") + "\\n");
+const say = (value) => process.stdout.write(JSON.stringify(value));
+const pull = (number, login, at) => ({ number, title: "Theirs " + number,
+  url: "https://github.com/o/r/pull/" + number, headRefName: "b" + number, headRefOid: "abc" + number,
+  comments: [{ author: { login }, createdAt: at, body: "Could this sort by date?" }], reviews: [] });
+if (args[0] === "pr" && args.includes("open"))
+  say([pull(50, "henry", "2026-11-14T21:00:00Z"), pull(51, "anton", "2026-11-14T21:00:00Z"),
+    pull(52, "henry", "2026-11-13T21:00:00Z")]);
+else if (args[0] === "api" && /collaborators/.test(args[1])) process.stdout.write("write");
+else if (args[0] === "api" && args[1].endsWith("pulls/50/comments"))
+  say([{ user: { login: "henry" }, created_at: "2026-11-14T21:05:00Z", body: "And rename this.",
+    html_url: "https://github.com/o/r/pull/50#r1" }]);
+else say([]);
+`,
+            );
+            chmodSync(gh, 0o755);
+            writeFileSync(rows, "[]");
+            const said = spawnSync("node", [join(here, "plan-queue.mjs"), "github"], {
+              encoding: "utf8",
+              env: {
+                ...env(),
+                WORKFLOW_ROOT: read,
+                CLAUDE_PROJECT_DIR: read,
+                WORKFLOW_GH: gh,
+                WORKFLOW_WEBHOOK_SECRET: "",
+                WORKFLOW_SECRETS_FILE: "",
+              },
+            }).stdout;
+            expect(said).toMatch(/GitHub: #50 review by henry, noted/);
+            expect(said).not.toMatch(/#51|#52/);
+            const note = readFileSync(join(read, "plans", "github", "50.md"), "utf8");
+            expect(note).toContain("    Could this sort by date?");
+            expect(note).toContain("    And rename this.");
+            expect(existsSync(join(read, "plans", "github", "51.md"))).toBe(false);
+            const calls = readFileSync(asked, "utf8");
+            expect(calls).not.toContain("run list");
+            expect(calls.match(/pulls\/50\/comments/g)).toHaveLength(1);
+            expect(calls).not.toMatch(/pulls\/5[12]\/comments/);
           } finally {
             rmSync(read, { recursive: true, force: true });
           }

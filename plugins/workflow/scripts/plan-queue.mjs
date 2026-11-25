@@ -2753,7 +2753,7 @@ export function cutoffEdit(text, { sessionId, branch, tree = "", day = today() }
  * over line would read as an executor's taking (`planTaken`). Text with no
  * such line of the session's is returned as it is.
  */
-export function endedEdit(text, { sessionId, by, branch = "", tree = "", day = today() }) {
+export function endedEdit(text, { sessionId, branch = "", tree = "", day = today() }) {
   const planning = new RegExp(
     `^## Planning, [^\\n]*session ${sessionIdSource(sessionId)}[^\\n]*(?:\\n[ \\t]*(?=\\n))?\\n?`,
     "m",
@@ -2764,7 +2764,7 @@ export function endedEdit(text, { sessionId, by, branch = "", tree = "", day = t
   const where = branch ? ` on branch \`${branch}\`${treeWords(tree)}` : "";
   return handOverEdit(
     text,
-    `## Handing over, ${day}, ended by ${by}\n\nStep in hand: unknown, ${by} ended session ${sessionId} with \`plans end --now\`${where} in the middle of its work. Read the branch's commits for what it did.\n`,
+    `## Handing over, ${day}, ended with plans end --now\n\nStep in hand: unknown, session ${sessionId} was ended with plans end --now${where} in the middle of its work. Read the branch's commits for what it did.\n`,
   );
 }
 
@@ -3326,7 +3326,6 @@ function endSession(
     plan.file,
     endedEdit(text, {
       sessionId,
-      by: owner(),
       branch: branchOf(row.cwd),
       tree: treeNameOf(row.cwd),
     }),

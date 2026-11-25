@@ -642,9 +642,10 @@ turn is over reads `idle` and is a finished chat, and one with no
 process `not running`. (decisions.md#waiting-is-an-open-prompt)
 
 **`plans end <id> --now` ends a named chat whatever it is doing**, writes
-its plan a "Handing over, <date>, ended by <owner>" section, releases
-the lock and starts a fresh session on it; the assistant runs it on the
-owner's word, or its own for a chat that is stuck. (decisions.md#end-now)
+its plan a "Handing over, <date>, ended with plans end --now" section,
+releases the lock and starts a fresh session on it; the assistant runs it
+on the owner's word, or its own for a chat that is stuck.
+(decisions.md#end-now)
 
 **A hiccup is fixed, not asked about**: a stuck or stale executor, a
 plan the queue leased wrongly, a run that fails on what the diff does

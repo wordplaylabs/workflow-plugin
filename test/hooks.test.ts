@@ -7308,13 +7308,12 @@ describe("a finished chat ends", () => {
       "# A plan\n\n## Building, 28 October 2026, session abc\n\nShort plan, 28 October 2026, by the assistant.\n\n## The change\n";
     const out = endedEdit(plan, {
       sessionId: "abc",
-      by: "Javi",
       branch: "fix",
       day: "28 October 2026",
     });
     expect(out).not.toContain("## Building");
     expect(out).toContain(
-      "Short plan, 28 October 2026, by the assistant.\n\n## Handing over, 28 October 2026, ended by Javi\n\nStep in hand: unknown, Javi ended session abc with `plans end --now` on branch `fix`",
+      "Short plan, 28 October 2026, by the assistant.\n\n## Handing over, 28 October 2026, ended with plans end --now\n\nStep in hand: unknown, session abc was ended with plans end --now on branch `fix` in the middle of its work. Read the branch's commits for what it did.\n",
     );
     expect(stateOf(out)).toMatchObject({
       state: "handed",
@@ -7324,11 +7323,11 @@ describe("a finished chat ends", () => {
     const brief =
       "# A brief\n\n## Planning, 28 October 2026, session abc\n\nBrief for the planner, 28 October 2026.\n\nWhat to plan.\n";
     // A brief only loses its Planning line: a Handing over line would read as an executor's taking.
-    const back = endedEdit(brief, { sessionId: "abc", by: "Javi", day: "28 October 2026" });
+    const back = endedEdit(brief, { sessionId: "abc", day: "28 October 2026" });
     expect(back).toBe("# A brief\n\nBrief for the planner, 28 October 2026.\n\nWhat to plan.\n");
     expect(stateOf(back)).toMatchObject({ kind: "Brief", state: "brief" });
     // Another session's line, or none (it wrote Built while it was stopped), is left as it is.
-    expect(endedEdit(plan, { sessionId: "other", by: "Javi" })).toBe(plan);
+    expect(endedEdit(plan, { sessionId: "other" })).toBe(plan);
   });
 
   // plans/short-session-id-is-live.md: `plans end --now` finds a plan by a
@@ -7336,18 +7335,18 @@ describe("a finished chat ends", () => {
   it("endedEdit hands over a plan and frees a brief whose line names the session by a short id", () => {
     const id = "abcd1234-0000-4000-8000-000000000001";
     const plan = `# A plan\n\n## Building, 25 November 2026, session abcd1234\n\nShort plan, 25 November 2026, by the assistant.\n`;
-    const out = endedEdit(plan, { sessionId: id, by: "Javi", day: "25 November 2026" });
+    const out = endedEdit(plan, { sessionId: id, day: "25 November 2026" });
     expect(out).not.toContain("## Building");
     expect(stateOf(out)).toMatchObject({ state: "handed" });
     const brief = `# A brief\n\n## Planning, 25 November 2026, session abcd1234-00\n\nBrief for the planner, 25 November 2026.\n`;
-    expect(endedEdit(brief, { sessionId: id, by: "Javi" })).toBe(
+    expect(endedEdit(brief, { sessionId: id })).toBe(
       "# A brief\n\nBrief for the planner, 25 November 2026.\n",
     );
     // Another session's start, or one under eight, is left as it is.
     const other = plan.replace("abcd1234", "abcd1239");
-    expect(endedEdit(other, { sessionId: id, by: "Javi" })).toBe(other);
+    expect(endedEdit(other, { sessionId: id })).toBe(other);
     const under = plan.replace("abcd1234", "abcd123");
-    expect(endedEdit(under, { sessionId: id, by: "Javi" })).toBe(under);
+    expect(endedEdit(under, { sessionId: id })).toBe(under);
   });
 
   // plans/waiting-means-a-question.md
@@ -7833,7 +7832,7 @@ describe("a finished chat ends", () => {
         const text = readFileSync(taken, "utf8");
         expect(text).not.toContain("## Building");
         expect(text).toMatch(
-          /^## Handing over, [^,\n]+, ended by [^\n]+\n\nStep in hand: unknown/m,
+          /^## Handing over, [^,\n]+, ended with plans end --now\n\nStep in hand: unknown, session [^\n]+ was ended with plans end --now[^\n]* in the middle of its work\. Read the branch's commits for what it did\.$/m,
         );
         expect(stateOf(text)).toMatchObject({ state: "handed" });
         // A failed stop leaves the plan as it was.
@@ -13556,7 +13555,7 @@ describe("several executors build at once", () => {
       expect(
         endedEdit(
           `# P\n\n## Building, 24 November 2026, session s1\n\nPlan only, 24 November 2026.\n`,
-          { sessionId: "s1", by: "Javi", branch: "x", tree: "executor-2" },
+          { sessionId: "s1", branch: "x", tree: "executor-2" },
         ),
       ).toContain("on branch `x` in worktree `executor-2` in the middle of its work");
     },

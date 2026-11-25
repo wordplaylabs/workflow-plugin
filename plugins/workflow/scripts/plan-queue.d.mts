@@ -562,7 +562,7 @@ export function cutoffEdit(
 /** `plans end <id> --now`'s hand-over of the plan the ended session had under way. */
 export function endedEdit(
   text: string,
-  options: { sessionId: string; by: string; branch?: string; tree?: string; day?: string },
+  options: { sessionId: string; branch?: string; tree?: string; day?: string },
 ): string;
 /** A start's hand-over of the plan of an executor it found with no process. */
 export function goneEdit(

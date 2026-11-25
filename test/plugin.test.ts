@@ -17,6 +17,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   agentLine,
   appLine,
+  attachLine,
   canStart,
   checkDeny,
   data,
@@ -2488,8 +2489,9 @@ describe("a pull request per topic", () => {
       "its screenshots attached with `gh pr edit --attach`, and nothing is posted.** (Javi, 31 October)",
     );
     expect(read("docs/workflow.md")).not.toContain("written again and one comment says");
-    expect(read("docs/workflow.md")).toContain(
-      "`gh pr create --attach` and `gh pr edit --attach`, which need gh 2.99",
+    // plans/screenshots-reach-github.md: as the project's app, which needs Contents.
+    expect(read("docs/workflow.md").replace(/\s+/g, " ")).toContain(
+      "as the project's app (`plans gh pr create --attach`, `plans gh pr edit --attach`), which needs gh 2.99 or newer (from GitHub's apt repository; Debian's is 2.23) and the app's Contents read and write;",
     );
     expect(read("agents/assistant.md")).toContain(
       "Lands: <fix | fix, now | topic <name>, waiting | topic <name>, ready>.",
@@ -3577,10 +3579,10 @@ describe("the agent a project's chats open as", () => {
       repo: "o/r",
     };
     // A listener's record, its pid this test's, alive.
-    const record = (lacks?: object) =>
+    const record = (lacks?: object, attach?: object) =>
       writeFileSync(
         join(root, ".claude", "webhook.json"),
-        JSON.stringify({ pid: process.pid, port: 1, at: Date.now(), lastAt: 0, lacks }),
+        JSON.stringify({ pid: process.pid, port: 1, at: Date.now(), lastAt: 0, lacks, attach }),
       );
     const start = (id: string, agent = "") =>
       // No secret, from the environment or a secrets file, so no listener is armed here.
@@ -3603,6 +3605,16 @@ describe("the agent a project's chats open as", () => {
     expect(start("a3b", "workflow:executor")).toBe("");
     expect(JSON.parse(start("a4", "workflow:assistant")).systemMessage).toBe(appLine(accept));
     expect(start("a5")).toBe("");
+    // plans/screenshots-reach-github.md: what attaching lacks is said once beside it, alone when
+    // the failed run's line was said already.
+    const contents = { ...app, what: ["Contents read and write"] };
+    record(accept, contents);
+    expect(JSON.parse(start("a5b")).systemMessage).toBe(attachLine(contents));
+    expect(start("a5c")).toBe("");
+    record(app, { ...accept, what: ["Contents read and write"] });
+    expect(JSON.parse(start("a5d")).systemMessage).toBe(
+      `${appLine(app)}\n${attachLine({ ...accept, what: ["Contents read and write"] })}`,
+    );
     record();
     expect(start("a6")).toBe("");
   });

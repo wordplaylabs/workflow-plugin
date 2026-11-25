@@ -192,17 +192,20 @@ plan's file name without .md>, waiting`, its "Built" and the final
 message saying why (decisions.md#fix-landing).
 
 **The screenshots, when `--attach` fails** (gh under 2.99.0, or the
-upload refused; decisions.md#screenshots-attach): take the images that
+upload refused; decisions.md#screenshots-attach): look first whether a
+refused `gh pr create` opened one anyway (`gh pr view <name> --json
+number,url`), and try the upload once more, by `gh pr edit <n>` on the
+one it opened, else by the same command; then take the images that
 failed out of the body, each one's line kept as a line of its own (its
-alt text), and set it without
-`--attach`, one line under `## To try it`. A refused `gh pr create` that
-opened one anyway (`gh pr view <name> --json number,url`) gets its body
-replaced, never a second; a refused `gh pr edit` that set part of the
-body is read back (`gh pr view <n> --json body`) and set again. The
-line: `Screenshots: kept in plans/<topic>/; the assistant chat sends
-them. Attaching them here needs gh 2.99 or newer in this container,
-signed in with a token that can upload (the plugin's docs,
-"Installing").` "Built" and the `Built:` message say the same.
+alt text), and set it without `--attach`, one line under `## To try it`.
+A pull request a refused create opened gets its body replaced, never a
+second; a refused `gh pr edit` that set part of the body is read back
+(`gh pr view <n> --json body`) and set again. The line: `Screenshots:
+not attached yet, kept in plans/<topic>/. <The cause.>`, the cause `This
+container's gh is older than 2.99.` when gh's own line is `unknown flag:
+--attach`, else the step `plans gh` printed (the app's settings, or the
+installation's address). "Built" and the `Built:` message say
+`Screenshots not attached: <the cause>`.
 
 **The checks are not waited on** ("A push is not waited on"): after
 the push and the pull request's create or edit, start the next plan;

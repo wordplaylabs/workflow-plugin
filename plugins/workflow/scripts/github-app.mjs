@@ -191,3 +191,18 @@ export function appLacks(standing) {
     };
   return null;
 }
+
+/**
+ * **Where the app cannot attach a screenshot** (decisions.md#screenshots-attach):
+ * gh's `--attach` uploads as the app, which takes Contents read and write, on
+ * its registration, else on its installation, whose new permissions wait on
+ * the account's owner; null when both have it.
+ */
+export function attachLacks(standing) {
+  const what = ["Contents read and write"];
+  if (standing.app?.permissions?.contents !== "write")
+    return { where: "app", what, slug: standing.slug };
+  if (standing.installation?.permissions?.contents !== "write")
+    return { where: "installation", what, slug: standing.slug, url: standing.installation.url };
+  return null;
+}

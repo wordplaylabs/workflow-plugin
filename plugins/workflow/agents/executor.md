@@ -184,7 +184,8 @@ finding, or Codex's, is a claim to check against the code.
 
 1. When **Before the push** asks for screenshots: look at each and fix
    what is wrong; they stay in `plans/<topic>/`, sent by nobody here,
-   and the `Built:` message names each by path with what it shows.
+   attached to the pull request by the landing, and the `Built:` message
+   names each by path with what it shows.
 2. The reviews `reviews` names ("A second model reviews every plan's
    diff"; all three when the key is absent, none when it is empty):
    1. `codex`: in the background, a Bash command, never during a suite:

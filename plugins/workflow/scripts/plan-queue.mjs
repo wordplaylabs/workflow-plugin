@@ -72,7 +72,14 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { fileURLToPath } from "node:url";
 import { agentsChoice, catalogueFiles, paragraphs, shellWrites, untiered } from "./turn-audit.mjs";
 import { locations } from "./catalogue-context.mjs";
-import { appLacks, appSlug, appStanding, installationToken, repoOfRemote } from "./github-app.mjs";
+import {
+  appLacks,
+  appSlug,
+  appStanding,
+  attachLacks,
+  installationToken,
+  repoOfRemote,
+} from "./github-app.mjs";
 import {
   FAILED_CONCLUSIONS,
   NOTHING_SEEN,
@@ -6992,22 +6999,42 @@ export function appLine(lacks) {
 }
 
 /**
- * **An app that cannot send a failed run is said once** in a chat the owner
- * reads (`ownerReads`: not a planner's, an executor's or the reviewer's),
- * while the listener's record says it lacks something; said again only when
- * what it lacks changes. As `sayAgent` says its line; any failure says
- * nothing.
+ * The line that tells the owner his app cannot attach a screenshot
+ * (decisions.md#screenshots-attach): what it lacks and where to add it, or,
+ * the registration having it, where to accept it.
+ */
+export function attachLine(lacks) {
+  const opening = "The project's Claude cannot attach screenshots on GitHub: ";
+  const until = "Until then screenshots stay in plans/.";
+  if (lacks.where === "installation")
+    return `${opening}its app's new permissions are not accepted on ${lacks.repo} yet. Accept them at ${lacks.url}. ${until}`;
+  return `${opening}its app lacks Contents read and write. Add it on GitHub (Settings, Developer settings, GitHub Apps, ${lacks.slug}, Permissions & events) and accept the new permission if GitHub asks. ${until}`;
+}
+
+/**
+ * **An app that cannot send a failed run, or attach a screenshot, is said
+ * once** in a chat the owner reads (`ownerReads`: not a planner's, an
+ * executor's or the reviewer's), while the listener's record says it lacks
+ * something; each said again only when what it lacks changes, the told file
+ * keeping both. As `sayAgent` says its line; any failure says nothing.
  */
 function sayApp(input) {
   try {
     if (!ownerReads(input) || proj().land !== "pull-request") return;
-    const lacks = webhookAlive()?.lacks;
-    if (!lacks?.what?.length) return;
-    const key = `${lacks.where}: ${lacks.what.join(", ")}`;
-    if (readJson(files.webhookTold())?.told === key) return;
-    const line = appLine(lacks);
-    sayOnce(line);
-    writeJson(files.webhookTold(), { told: key, at: Date.now() });
+    const record = webhookAlive();
+    const keyOf = (lacks) =>
+      lacks?.what?.length ? `${lacks.where}: ${lacks.what.join(", ")}` : "";
+    const key = keyOf(record?.lacks);
+    const attach = keyOf(record?.attach);
+    if (!key && !attach) return;
+    const told = readJson(files.webhookTold()) || {};
+    const lines = [
+      key && told.told !== key ? appLine(record.lacks) : "",
+      attach && told.attach !== attach ? attachLine(record.attach) : "",
+    ].filter(Boolean);
+    if (!lines.length) return;
+    sayOnce(lines.join("\n"));
+    writeJson(files.webhookTold(), { told: key, attach, at: Date.now() });
   } catch {
     // Said nothing, which is the start without it.
   }
@@ -7976,7 +8003,12 @@ export function webhookLine(record = webhookAlive(), last = readJson(files.webho
   const reads = why
     ? `; the app sends no failed run (${why}), so they are read every five minutes`
     : "";
-  return `The webhook: listening on ${record.port} since ${hhmm(record.at)}${delivered}${down}${reads}.`;
+  // **An app that cannot attach a screenshot is said while it holds**
+  // (decisions.md#screenshots-attach).
+  const attach = !record.attach?.what?.length
+    ? ""
+    : `; the app cannot attach screenshots (${record.attach.where === "installation" ? "its new permissions are not accepted" : "it lacks Contents read and write"})`;
+  return `The webhook: listening on ${record.port} since ${hhmm(record.at)}${delivered}${down}${reads}${attach}.`;
 }
 
 /**
@@ -9103,7 +9135,9 @@ export async function webhookCommand(
   // **What the app has**, asked of GitHub: "has", "lacks" (set on the record),
   // "unknown" when GitHub's answer or the record's write failed, the record's
   // `lacks` left as it was, and "none" with no app's id, key or repository
-  // here. Never throws: the listener outlives a failed check.
+  // here. What attaching a screenshot lacks is kept beside it, `attach`, from
+  // the same read; only the failed run's lack decides the answer. Never
+  // throws: the listener outlives a failed check.
   const check = async () => {
     try {
       const id = secret("WORKFLOW_APP_ID", env);
@@ -9111,14 +9145,27 @@ export async function webhookCommand(
       const repo = repoHere(spawnSync, env, false);
       if (!id || !key || !repo) return "none";
       const [owner, name] = repo.split("/");
-      const lacks = appLacks(await appStanding({ owner, repo: name, id, key, fetch }));
+      const standing = await appStanding({ owner, repo: name, id, key, fetch });
+      const lacks = appLacks(standing);
+      const attach = attachLacks(standing);
       if (lacks) record.lacks = { ...lacks, repo };
-      else {
-        delete record.lacks;
+      else delete record.lacks;
+      if (attach) record.attach = { ...attach, repo };
+      else delete record.attach;
+      // Each lack's told key goes when the lack does, so a lack that comes
+      // back is said again; the file goes with the last.
+      if (!lacks && !attach) {
         try {
           unlinkSync(files.webhookTold());
         } catch {
           // Never told.
+        }
+      } else {
+        const told = readJson(files.webhookTold());
+        if (told && ((!lacks && told.told) || (!attach && told.attach))) {
+          if (!lacks) delete told.told;
+          if (!attach) delete told.attach;
+          writeJson(files.webhookTold(), told);
         }
       }
       writeJson(files.webhook(), record);
@@ -9153,13 +9200,16 @@ export async function webhookCommand(
     // What a container that was down missed, once, as `plans github` reads it.
     run([]);
     const first = await check();
-    if (first === "has" || first === "none") return;
+    if (first === "none" || (first === "has" && !record.attach)) return;
     // **While the app cannot send a failed run, the listener reads them
     // itself**, asking GitHub again each time, so the read ends once it can:
     // also while what the app has is unknown, or its id, key or repository
     // cannot be read for a moment; one read more when it gains them, for a
     // run that failed since the last; and none once pull requests are off,
-    // the project file read afresh.
+    // the project file read afresh. While it cannot attach a screenshot,
+    // GitHub is asked again on the same beat, reading no run, so `plans`
+    // stops saying it once Contents is granted.
+    let lacking = first !== "has";
     let checking = false;
     const timer = setInterval(async () => {
       if (checking) return;
@@ -9167,9 +9217,13 @@ export async function webhookCommand(
       checking = true;
       const standing = await check();
       checking = false;
-      if (standing !== "has") return run([]);
-      clearInterval(timer);
-      run([]);
+      if (standing !== "has") {
+        lacking = true;
+        return run([]);
+      }
+      if (!record.attach) clearInterval(timer);
+      if (lacking) run([]);
+      lacking = false;
     }, every);
     server.on("close", () => clearInterval(timer));
   });
@@ -9189,7 +9243,7 @@ function eventsWords() {
 
 /** `plans gh`'s refusal with no app here. */
 export function noAppWords(repo = "", env = process.env, project = proj().name) {
-  return `The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; ${eventsWords()}), install it on ${repo || "this repository"}, and ${setWhere("WORKFLOW_APP_ID and WORKFLOW_APP_KEY", env, project)}`;
+  return `The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Contents, Issues, Pull requests and Actions read and write; ${eventsWords()}), install it on ${repo || "this repository"}, and ${setWhere("WORKFLOW_APP_ID and WORKFLOW_APP_KEY", env, project)}`;
 }
 
 /**
@@ -9217,8 +9271,9 @@ function repoHere(run = spawnSync, env = process.env, ask = true) {
  * with `GH_TOKEN` set to the app's installation token, its output the
  * terminal's, so the token is never printed. `gh pr ready` without `--undo`
  * is refused as the tool hook refuses it; with no app's id or key here, one
- * line says what to register and nothing runs. `{ said, status }`, `said`
- * the refusal or "".
+ * line says what to register and nothing runs; a call with `--attach` that
+ * gh ends with a failure says what the app lacks to upload, or that it lacks
+ * nothing. `{ said, status }`, `said` the refusal, the step or "".
  */
 export async function ghCommand(
   args = [],
@@ -9269,7 +9324,23 @@ export async function ghCommand(
   });
   if (done.error)
     return { said: `The project's Claude could not run gh: ${done.error.message}.`, status: 1 };
-  return { said: "", status: done.status ?? 1 };
+  const status = done.status ?? 1;
+  // **An upload refused says the step** (decisions.md#screenshots-attach): only
+  // a failed call with `--attach` reads what the app has; a read that fails
+  // says nothing more than gh did.
+  if (status === 0 || !args.some((word) => /^--attach(=|$)/.test(String(word))))
+    return { said: "", status };
+  try {
+    const lacks = attachLacks(await appStanding({ owner, repo: repository, id, key, fetch, now }));
+    return {
+      said: lacks
+        ? attachLine({ ...lacks, repo: name })
+        : `The upload was refused though the app has Contents read and write on ${name}: gh's line above says why.`,
+      status,
+    };
+  } catch {
+    return { said: "", status };
+  }
 }
 
 /**

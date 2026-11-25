@@ -53,6 +53,7 @@ import {
   sweepTemp,
   ghCommand,
   appLine,
+  attachLine,
   webhookLine,
   unreadLines,
   behindOf,
@@ -149,6 +150,7 @@ import {
   appJwt,
   appLacks,
   appStanding,
+  attachLacks,
   repoOfRemote,
 } from "../plugins/workflow/scripts/github-app.mjs";
 import {
@@ -9031,6 +9033,39 @@ describe("github-app", () => {
     ).toEqual({ where: "app", what: ["the Workflow run event"], slug: "s" });
   });
 
+  // plans/screenshots-reach-github.md, part 1.
+  it("attachLacks names Contents where it is missing", () => {
+    const url = "https://github.com/settings/installations/7";
+    const what = ["Contents read and write"];
+    const without = { permissions: { issues: "write" }, events: [] };
+    const read = { permissions: { contents: "read" }, events: [] };
+    const write = { permissions: { contents: "write" }, events: [] };
+    expect(attachLacks({ slug: "s", app: without, installation: { ...write, url } })).toEqual({
+      where: "app",
+      what,
+      slug: "s",
+    });
+    expect(attachLacks({ slug: "s", app: write, installation: { ...without, url } })).toEqual({
+      where: "installation",
+      what,
+      slug: "s",
+      url,
+    });
+    expect(attachLacks({ slug: "s", app: write, installation: { ...write, url } })).toBeNull();
+    // Read alone uploads nothing.
+    expect(attachLacks({ slug: "s", app: read, installation: { ...write, url } })).toEqual({
+      where: "app",
+      what,
+      slug: "s",
+    });
+    expect(attachLacks({ slug: "s", app: write, installation: { ...read, url } })).toEqual({
+      where: "installation",
+      what,
+      slug: "s",
+      url,
+    });
+  });
+
   it("reads the repository from a GitHub remote, https or ssh", () => {
     expect(repoOfRemote("https://github.com/o/r.git\n")).toBe("o/r");
     expect(repoOfRemote("git@github.com:o/r")).toBe("o/r");
@@ -9077,7 +9112,7 @@ describe("plans gh", () => {
       cacheFile: cache(),
     });
     expect(done).toEqual({
-      said: "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
+      said: "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Contents, Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
       status: 1,
     });
     expect(runs).toEqual([]);
@@ -9087,7 +9122,7 @@ describe("plans gh", () => {
   it("in a container setup made, names the host's file and the rebuild", () => {
     const mounted = { WORKFLOW_SECRETS_FILE: "/run/secrets/workflow.env" };
     expect(noAppWords("o/r", mounted, "Docs")).toBe(
-      "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY in ~/.config/workflow/docs.env on the host, then rebuild the container.",
+      "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Contents, Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY in ~/.config/workflow/docs.env on the host, then rebuild the container.",
     );
     expect(noSecretWords(mounted, "Docs")).toBe(
       "The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub, subscribed to the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run, with the address routed to this container and a secret, and set WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT in ~/.config/workflow/docs.env on the host, then rebuild the container.",
@@ -9098,7 +9133,7 @@ describe("plans gh", () => {
   it("with any other secrets file, says where GH_TOKEN is set as before", () => {
     const other = { WORKFLOW_SECRETS_FILE: ".secrets/workflow.env" };
     expect(noAppWords("o/r", other, "Docs")).toBe(
-      "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
+      "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Contents, Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
     );
     expect(noSecretWords(other, "Docs")).toBe(
       "The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub, subscribed to the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run, with the address routed to this container and a secret, and set WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
@@ -9121,6 +9156,96 @@ describe("plans gh", () => {
     // The tool hook reads `plans gh` as `gh`.
     expect(marksReady("plans gh pr ready 12")).toBe(true);
     expect(marksReady("plans gh pr ready --undo 12")).toBe(false);
+  });
+
+  // plans/screenshots-reach-github.md, part 2: an upload refused says the step.
+  describe("with --attach", () => {
+    const url = "https://github.com/settings/installations/7";
+    /** GitHub with the app's and the installation's Contents as given; every call counted. */
+    const standing = (app: string | null, installation: string | null) => {
+      const calls: string[] = [];
+      const fetch = async (address: string, init: { method: string }) => {
+        const path = new URL(address).pathname;
+        calls.push(`${init.method} ${path}`);
+        const permissions = (contents: string | null) => (contents ? { contents } : {});
+        const body =
+          path === "/app"
+            ? { slug: "docs-claude", permissions: permissions(app), events: [] }
+            : path.endsWith("/installation")
+              ? { id: 77, html_url: url, permissions: permissions(installation), events: [] }
+              : { token: "t", expires_at: new Date(now + 3600_000).toISOString() };
+        return new Response(JSON.stringify(body), { status: 200 });
+      };
+      return { calls, fetch };
+    };
+    /** gh, ending with the status given. */
+    const failing = (status: number) => () => ({ status, stdout: "", stderr: "" });
+
+    it("plans gh with --attach refused says the step", async () => {
+      const { fetch } = standing(null, null);
+      const options = { env, run: failing(1), fetch, repo: "o/r", now, cacheFile: cache() };
+      expect(await ghCommand(["pr", "create", "--attach", "a.png"], options)).toEqual({
+        said: "The project's Claude cannot attach screenshots on GitHub: its app lacks Contents read and write. Add it on GitHub (Settings, Developer settings, GitHub Apps, docs-claude, Permissions & events) and accept the new permission if GitHub asks. Until then screenshots stay in plans/.",
+        status: 1,
+      });
+      // The registration has it, the installation does not; `--attach=<file>` is the same flag.
+      const accept = standing("write", "read");
+      expect(
+        await ghCommand(["issue", "create", "--attach=a.png"], {
+          ...options,
+          run: failing(4),
+          fetch: accept.fetch,
+          cacheFile: cache(),
+        }),
+      ).toEqual({
+        said: `The project's Claude cannot attach screenshots on GitHub: its app's new permissions are not accepted on o/r yet. Accept them at ${url}. Until then screenshots stay in plans/.`,
+        status: 4,
+      });
+    });
+
+    it("plans gh with --attach refused though Contents is granted says so", async () => {
+      const { fetch } = standing("write", "write");
+      const done = await ghCommand(["pr", "create", "--attach", "a.png"], {
+        env,
+        run: failing(1),
+        fetch,
+        repo: "o/r",
+        now,
+        cacheFile: cache(),
+      });
+      expect(done).toEqual({
+        said: "The upload was refused though the app has Contents read and write on o/r: gh's line above says why.",
+        status: 1,
+      });
+    });
+
+    it("a failed plans gh without --attach reads no standing", async () => {
+      const { calls, fetch } = standing(null, null);
+      const options = { env, run: failing(1), fetch, repo: "o/r", now, cacheFile: cache() };
+      expect(await ghCommand(["issue", "list"], options)).toEqual({ said: "", status: 1 });
+      // A call with --attach that gh ends well reads none either.
+      expect(
+        await ghCommand(["pr", "create", "--attach", "a.png"], { ...options, run: failing(0) }),
+      ).toEqual({ said: "", status: 0 });
+      expect(calls).not.toContain("GET /app");
+    });
+
+    it("says nothing more than gh when what the app has cannot be read", async () => {
+      const { fetch } = standing(null, null);
+      const broken = async (address: string, init: { method: string }) =>
+        new URL(address).pathname === "/app"
+          ? new Response(JSON.stringify({ message: "Bad credentials" }), { status: 401 })
+          : fetch(address, init);
+      const done = await ghCommand(["pr", "create", "--attach", "a.png"], {
+        env,
+        run: failing(1),
+        fetch: broken,
+        repo: "o/r",
+        now,
+        cacheFile: cache(),
+      });
+      expect(done).toEqual({ said: "", status: 1 });
+    });
   });
 
   it("mints the token once and reuses it until five minutes before it ends", async () => {
@@ -9276,7 +9401,7 @@ describe("secrets from a file", () => {
       repo: "o/r",
     });
     expect(done).toEqual({
-      said: "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
+      said: "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Contents, Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
       status: 1,
     });
     expect(ran).toEqual([]);
@@ -11034,6 +11159,41 @@ describe("an app that sends no failed run", () => {
     );
   });
 
+  // plans/screenshots-reach-github.md, part 2.
+  it("plans names an app that cannot attach", () => {
+    const record = { pid: 1, port: 8789, at: Date.now(), lastAt: 0 };
+    const attach = {
+      where: "app" as const,
+      what: ["Contents read and write"],
+      slug: "docs-claude",
+      repo: "o/r",
+    };
+    expect(webhookLine({ ...record, attach })).toMatch(
+      /^The webhook: listening on 8789 since \d\d:\d\d; the app cannot attach screenshots \(it lacks Contents read and write\)\.$/,
+    );
+    expect(
+      webhookLine({ ...record, lacks: app, attach: { ...attach, where: "installation", url } }),
+    ).toMatch(
+      /; the app sends no failed run \(it lacks Actions read and write and the Workflow run event\), so they are read every five minutes; the app cannot attach screenshots \(its new permissions are not accepted\)\.$/,
+    );
+  });
+
+  it("attachLine says what to add and where, or where to accept", () => {
+    expect(
+      attachLine({
+        where: "app",
+        what: ["Contents read and write"],
+        slug: "docs-claude",
+        repo: "o/r",
+      }),
+    ).toBe(
+      "The project's Claude cannot attach screenshots on GitHub: its app lacks Contents read and write. Add it on GitHub (Settings, Developer settings, GitHub Apps, docs-claude, Permissions & events) and accept the new permission if GitHub asks. Until then screenshots stay in plans/.",
+    );
+    expect(attachLine({ ...installation, what: ["Contents read and write"] })).toBe(
+      "The project's Claude cannot attach screenshots on GitHub: its app's new permissions are not accepted on o/r yet. Accept them at https://github.com/settings/installations/7. Until then screenshots stay in plans/.",
+    );
+  });
+
   // plans/checks-read-with-the-app.md, parts 1 and 2.
   it("unreadLines says a list or the checks GitHub would not give, and nothing without", () => {
     expect(unreadLines({})).toEqual([]);
@@ -11179,7 +11339,10 @@ else say([]);
         const fetch = async (address: string) => {
           const path = new URL(address).pathname;
           asked.push(path);
-          const granted = { permissions: { actions: "write" }, events: ["workflow_run"] };
+          const granted = {
+            permissions: { actions: "write", contents: "write" },
+            events: ["workflow_run"],
+          };
           const body =
             path === "/app"
               ? { slug: "docs-claude", ...granted }
@@ -11201,8 +11364,14 @@ else say([]);
         try {
           await until(() => existsSync(join(dir, ".claude", "webhook.json")) && record().lacks);
           expect(record().lacks).toEqual({ ...installation, repo: "o/r" });
+          // plans/screenshots-reach-github.md: what attaching lacks, from the same read.
+          expect(record().attach).toEqual({
+            ...installation,
+            what: ["Contents read and write"],
+            repo: "o/r",
+          });
           expect(queue.webhookLine(record())).toContain(
-            "; the app sends no failed run (its new permissions are not accepted), so they are read every five minutes.",
+            "; the app sends no failed run (its new permissions are not accepted), so they are read every five minutes; the app cannot attach screenshots (its new permissions are not accepted).",
           );
           // The read at the start, then the timer's: run list asked again.
           await until(() => runLists() >= 2);
@@ -11218,11 +11387,76 @@ else say([]);
           writeFileSync(told, JSON.stringify({ told: "installation: x", at: 1 }));
           has = true;
           await until(() => !record().lacks);
+          expect(record().attach).toBeUndefined();
           expect(existsSync(told)).toBe(false);
           await pause(2000);
           const [calls, reads] = [asked.length, runLists()];
           await pause(600);
           expect([asked.length, runLists()]).toEqual([calls, reads]);
+        } finally {
+          await new Promise((done) => server!.close(done));
+        }
+      },
+    );
+
+    // plans/screenshots-reach-github.md: GitHub asked again while only attaching is lacking.
+    it(
+      "asks GitHub again while the app cannot attach, reading no run, and stops once it can",
+      { timeout: 60_000, retry: 2 },
+      async () => {
+        let contents = "";
+        const asked: string[] = [];
+        const fetch = async (address: string) => {
+          asked.push(new URL(address).pathname);
+          const body = {
+            slug: "docs-claude",
+            id: 7,
+            html_url: url,
+            permissions: { actions: "write", ...(contents ? { contents } : {}) },
+            events: ["workflow_run"],
+          };
+          return new Response(JSON.stringify(body), { status: 200 });
+        };
+        const file = join(dir, ".claude", "webhook.json");
+        const log = join(stub, "asked.log");
+        rmSync(file, { force: true });
+        rmSync(log, { force: true });
+        // Both lacks told before: the failed run's key goes, the app having what it takes.
+        const told = join(dir, ".claude", "webhook.told.json");
+        const attachKey = "app: Contents read and write";
+        writeFileSync(told, JSON.stringify({ told: "installation: x", attach: attachKey, at: 1 }));
+        const record = () => JSON.parse(readFileSync(file, "utf8"));
+        const runLists = () =>
+          (existsSync(log) ? readFileSync(log, "utf8") : "")
+            .split("\n")
+            .filter((line) => line.startsWith("run list")).length;
+        const port = await freePort();
+        const queue = await queueAt(dir);
+        const { server } = await queue.webhookCommand(["--serve"], env(port), { fetch, every: 50 });
+        try {
+          await until(() => existsSync(file) && record().attach);
+          expect(record().attach).toEqual({
+            where: "app",
+            what: ["Contents read and write"],
+            slug: "docs-claude",
+            repo: "o/r",
+          });
+          expect(record().lacks).toBeUndefined();
+          expect(JSON.parse(readFileSync(told, "utf8"))).toEqual({ attach: attachKey, at: 1 });
+          // The read at the start, and then none, while GitHub is asked again.
+          await until(() => runLists() >= 1);
+          await pause(1000);
+          const [calls, reads] = [asked.length, runLists()];
+          await until(() => asked.length >= calls + 4);
+          expect(runLists()).toBe(reads);
+          contents = "write";
+          await until(() => !record().attach);
+          expect(existsSync(told)).toBe(false);
+          await pause(2000);
+          const after = [asked.length, runLists()];
+          await pause(600);
+          expect([asked.length, runLists()]).toEqual(after);
+          expect(runLists()).toBe(reads);
         } finally {
           await new Promise((done) => server!.close(done));
         }

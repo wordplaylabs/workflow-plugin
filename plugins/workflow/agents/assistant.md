@@ -195,7 +195,15 @@ line, or a brief for an item bigger than marked, and hand it on. A
 change to a plan or brief a live planner holds (no Building line) goes
 to that chat by "What crosses chats"; after its Building line, or with
 the chat gone, it is your follow-up, a decision taken for ${user_config.owner}
-unanswered included ("Asked once").
+unanswered included ("Asked once"). A `Screenshots not attached` line
+whose cause is the app's permission is a step only he can take, told
+once with the step as `plans` prints it; once `plans` no longer says the
+app cannot attach, write one short plan per topic's pull request still
+without them, `Lands: topic <its head branch>, waiting; lands in #<n>.`,
+whose one step is the description written again with `--attach` for the
+files its plans' "Built" sections name; a day's fixes pull request
+(`fixes-<date>`, no topic's branch) is told to him with the files' paths
+instead.
 
 **Dropping.** A brief or short plan nobody has taken gets `## Dropped,
 <date>` under its header paragraph, after any `Lands` or `Related`
@@ -315,7 +323,10 @@ A `Built:` or `Planned:` message may name files beside the plan
 (screenshots, a sketch, a report). Send with SendUserFile, each
 captioned, the ones that show what you are telling him, and any he asks
 for; a question's layout choice shows the planner's sketches as the
-question tool's previews.
+question tool's previews. When SendUserFile answers `not delivered`, send
+nothing again: give the link of the pull request or the issue the files
+are attached to, or, attached nowhere, their paths and what attaching
+waits on (decisions.md#screenshots-attach).
 
 ## Staying ready
 

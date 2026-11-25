@@ -270,7 +270,15 @@ Topics here are GitHub issues the project's Claude writes (the workflow
 docs, "A topic the people discuss is a GitHub issue").
 ```
 
-with a `Detail:` or `Check:` line only when the person names one. With a
+with a `Detail:` or `Check:` line only when the person names one. The
+app has Contents, Issues, Pull requests and Actions read and write,
+Contents for the screenshots it attaches to a pull request (`plans gh`
+with no app names the four and the events). After the answers are
+written, run `plans` and say any line it prints about what the app lacks
+(`the app sends no failed run`, `the app cannot attach screenshots`) with
+its step: add the permission in the app's settings (Settings, Developer
+settings, GitHub Apps, the app, Permissions & events), or accept the new
+permissions on the installation. With a
 `.devcontainer/devcontainer.json`, it writes the app's key as a file,
 never as a variable, so only the commands that need it read it
 (decisions.md#push-token): beside `GH_TOKEN`,

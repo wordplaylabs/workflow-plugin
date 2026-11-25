@@ -990,13 +990,18 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   app has Actions read and write, so a failed run reaches the queue and
   the assistant can rerun it, and `plans gh` with no app names its
   permissions and the events the webhook reads, so an app registered by
-  that line sends every delivery the queue takes.
+  that line sends every delivery the queue takes. It has Contents read
+  and write for attachments alone, and the queue pushes nothing with it.
   plans/push-to-github.md, plans/secrets-from-a-file.md,
   plans/secrets-file-made-on-host.md, plans/executor-never-watches-ci.md,
   plans/app-words-name-failed-runs.md.
-- `screenshots-attach` **Screenshots on a pull request go up through `gh
-  pr create --attach` and `gh pr edit --attach`, from gh 2.99.** (as
-  GitHub CLI does, 31 October) GitHub's changelog of 1 September 2026
-  added `--attach` to the create and the edit together; an older gh opens
-  the pull request without them and says so.
-  plans/land-by-pull-request.md, plans/joined-pull-request-no-comment.md.
+- `screenshots-attach` **Screenshots on a pull request or an issue go up
+  through gh's `--attach`, as the project's app with Contents read and
+  write.** (Javi, 25 November) GitHub CLI added `--attach` on 1 September
+  2026 and has no other upload an app's token can use; as the app it was
+  refused, "attaching files requires write access to the repository", and
+  GitHub named `contents=write` (observed in the project that asked); a
+  side branch of images was weighed and left as complicated, kept for the
+  case the permission does not clear it.
+  plans/land-by-pull-request.md, plans/joined-pull-request-no-comment.md,
+  plans/screenshots-reach-github.md.

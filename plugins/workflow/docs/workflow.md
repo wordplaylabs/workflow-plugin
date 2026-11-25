@@ -922,11 +922,13 @@ expires. A project with issues carries its app's id and private key the
 same way, `WORKFLOW_APP_ID` and `WORKFLOW_APP_KEY` (the PEM's text),
 from which `plans gh` mints the app's token, and its webhook's secret
 and port, `WORKFLOW_WEBHOOK_SECRET` and `WORKFLOW_WEBHOOK_PORT` (8789
-when unset). The app has Issues, Pull requests and Actions read and
-write and is subscribed to the events the webhook reads: Issues, Issue
-comment, Pull request, Pull request review, Pull request review comment
-and Workflow run; without Actions and Workflow run no failed run reaches
-the queue, and without one of the others its notes do not. `plans gh`
+when unset). The app has Contents, Issues, Pull requests and Actions
+read and write and is subscribed to the events the webhook reads:
+Issues, Issue comment, Pull request, Pull request review, Pull request
+review comment and Workflow run; without Contents no screenshot is
+attached, without Actions and Workflow run no failed run reaches the
+queue, and without one of the others its notes do not. The push stays
+the person's token. `plans gh`
 with no app says the same, and `plans webhook` with no secret names the
 same events, both from the webhook's own list. Any
 of the four variables left out of
@@ -935,11 +937,12 @@ file that `WORKFLOW_SECRETS_FILE` names (a relative path from the
 checkout's root), and never put into the environment, so the key stays
 out of every other program's environment. (decisions.md#push-token)
 
-**Screenshots on a pull request** go up through `gh pr create --attach`
-and `gh pr edit --attach`, which need gh 2.99 or newer (from GitHub's apt
-repository; Debian's is 2.23) and a token that can upload (a classic one
-with `repo` when a fine-grained one is refused); with an older gh the
-pull request opens without them and says so.
+**Screenshots on a pull request** or an issue go up through `--attach`
+as the project's app (`plans gh pr create --attach`, `plans gh pr edit
+--attach`), which needs gh 2.99 or newer (from GitHub's apt repository;
+Debian's is 2.23) and the app's Contents read and write; without either
+the pull request opens without them and says the step, which `plans gh`
+prints and `plans` repeats while the app lacks it.
 (decisions.md#screenshots-attach)
 
 The research-writing skills are a second plugin, `writing@workflow`, that

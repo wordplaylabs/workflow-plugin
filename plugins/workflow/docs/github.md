@@ -222,10 +222,13 @@ hand-opened issue keeps its own.
    while any is. Whoever changes a plan with an `Issue`
    line that no executor holds runs steps 1 and 2 again; nobody else
    posts a plan or a brief on an issue.
-3. `plans gh issue edit <n> --remove-label "status: planning"
-   --add-label "status: ready"`; once it has taken, write the plan's
-   Ready section, on the owner's standing word, and hand the plan on
-   with `plans start` as any other plan:
+3. Without a `Held on` line in its "Decided", `plans gh issue edit <n>
+   --add-label "status: ready"` with a `--remove-label` for each other
+   `status:` label the issue carries (`plans gh issue view <n> --json
+   labels --jq '.labels[].name'`; a read that fails stops the step, its
+   output said), so it keeps one `status:` label; once it has taken,
+   write the plan's Ready section, on the owner's standing word, and hand
+   the plan on with `plans start` as any other plan:
 
    ```
    ## Ready, <date>
@@ -233,6 +236,9 @@ hand-opened issue keeps its own.
    Ready on <the owner>'s standing word, <d Month>.
    ```
 4. A plan whose "Decided" carries `Held on <the owner>'s word: <until
-   what>.` gets no Ready section: `plans gh issue edit <n> --remove-label
-   "status: planning" --add-label "status: planned"`, and it waits for
-   "Ready on his word"; say the issue's address and what it waits for.
+   what>.` gets no Ready section: `plans gh issue edit <n> --add-label
+   "status: planned"` with a `--remove-label` for each other `status:`
+   label the issue carries, read as in step 3, and it waits for "Ready
+   on his word"; say the issue's address and what it waits for, and a
+   `status: ready` the edit took off, since a writer's may have been
+   meant as the release.

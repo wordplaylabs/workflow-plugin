@@ -3740,13 +3740,22 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
     );
   });
 
+  it("a held plan with an issue gets no Ready from step 3", () => {
+    const plan = section("docs/github.md", "A plan with an `Issue` line");
+    expect(plan.indexOf(" 4. ")).toBeGreaterThan(plan.indexOf(" 3. "));
+    const step3 = plan.slice(plan.indexOf(" 3. "), plan.indexOf(" 4. "));
+    expect(step3.startsWith(' 3. Without a `Held on` line in its "Decided",')).toBe(true);
+    expect(step3.indexOf("Without a `Held on` line")).toBeLessThan(step3.indexOf("issue edit"));
+    expect(step3.indexOf("Without a `Held on` line")).toBeLessThan(step3.indexOf("Ready section"));
+  });
+
   it("a planned plan with an issue is made ready on the owner's standing word, unless he held it", () => {
     const plan = section("docs/github.md", "A plan with an `Issue` line");
     expect(plan).toContain(
-      '3. `plans gh issue edit <n> --remove-label "status: planning" --add-label "status: ready"`; once it has taken, write the plan\'s Ready section, on the owner\'s standing word, and hand the plan on with `plans start` as any other plan: ``` ## Ready, <date> Ready on <the owner>\'s standing word, <d Month>. ```',
+      "3. Without a `Held on` line in its \"Decided\", `plans gh issue edit <n> --add-label \"status: ready\"` with a `--remove-label` for each other `status:` label the issue carries (`plans gh issue view <n> --json labels --jq '.labels[].name'`; a read that fails stops the step, its output said), so it keeps one `status:` label; once it has taken, write the plan's Ready section, on the owner's standing word, and hand the plan on with `plans start` as any other plan: ``` ## Ready, <date> Ready on <the owner>'s standing word, <d Month>. ```",
     );
     expect(plan).toContain(
-      'A plan whose "Decided" carries `Held on <the owner>\'s word: <until what>.` gets no Ready section',
+      'A plan whose "Decided" carries `Held on <the owner>\'s word: <until what>.` gets no Ready section: `plans gh issue edit <n> --add-label "status: planned"` with a `--remove-label` for each other `status:` label the issue carries, read as in step 3, and it waits for "Ready on his word"; say the issue\'s address and what it waits for, and a `status: ready` the edit took off, since a writer\'s may have been meant as the release.',
     );
     expect(section("docs/github.md", "GitHub issues")).toContain(
       "only when he said to hold that one; never ask whether to.",

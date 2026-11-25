@@ -763,12 +763,12 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   by default; a description rewritten into a "Decided" list read as
   another issue; one issue got three plan comments; the comment is found
   again by a hidden first line, as sticky comment bots do
-  (marocchino/sticky-pull-request-comment). A body whose pictures'
-  upload was refused is set once more, as the issue is made, without
-  them and with the not-attached line (Javi, 25 November): a broken
-  image is worse than the one edit, and nobody has read the body yet.
+  (marocchino/sticky-pull-request-comment). An issue is never made with
+  a picture that did not go up (`screenshots-attach`), so its body is set
+  once and no more.
   plans/plans-as-github-issues.md, plans/owner-requests-nov-25.md,
-  plans/issue-body-set-once-on-refused-upload.md.
+  plans/issue-body-set-once-on-refused-upload.md,
+  plans/screenshots-by-owners-login.md.
   - ~~A topic the people discuss is a GitHub issue, one sentence of what
     should be true with the detail under it and the plan behind it.~~
     (Javi, 3 November)
@@ -782,7 +782,9 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   time; an app is nobody's name, as Copilot's and Claude's apps post as
   `[bot]`, its token is minted on the machine, so no workflow and no
   runner; who opened a pull request need not be told apart, since the
-  checkout's plans name the queue's own. plans/plans-as-github-issues.md.
+  checkout's plans name the queue's own. A picture's upload is the one
+  thing done with a person's login (`screenshots-attach`).
+  plans/plans-as-github-issues.md, plans/screenshots-by-owners-login.md.
 - `ready-before-built` **A plan with an issue is built once it is
   planned, on the owner's standing word, unless he said to hold that
   one; the issue's stage is one `status:` label.** (Javi, 25 November)
@@ -1015,21 +1017,29 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   app has Actions read and write, so a failed run reaches the queue and
   the assistant can rerun it, and `plans gh` with no app names its
   permissions and the events the webhook reads, so an app registered by
-  that line sends every delivery the queue takes. It has Contents read
-  and write for attachments alone, and the queue pushes nothing with it.
+  that line sends every delivery the queue takes.
   plans/push-to-github.md, plans/secrets-from-a-file.md,
   plans/secrets-file-made-on-host.md, plans/executor-never-watches-ci.md,
-  plans/app-words-name-failed-runs.md.
-- `screenshots-attach` **Screenshots on a pull request or an issue go up
-  through gh's `--attach`, as the project's app with Contents read and
-  write.** (Javi, 25 November) GitHub CLI added `--attach` on 1 September
-  2026 and has no other upload an app's token can use; as the app it was
-  refused, "attaching files requires write access to the repository", and
-  GitHub named `contents=write` (observed in the project that asked); a
-  side branch of images was weighed and left as complicated, kept for the
-  case the permission does not clear it. An issue attaches when it is made
-  and when its plan comment is first posted; a patch of that comment keeps
-  the addresses GitHub already gave its images, since `gh api` uploads
-  nothing.
+  plans/app-words-name-failed-runs.md, plans/screenshots-by-owners-login.md.
+- `screenshots-attach` **Screenshots on a pull request or an issue are
+  uploaded with the owner's own gh login and written into text the
+  project's app posts.** (Javi, 25 November) GitHub documents no upload
+  for a comment's pictures; gh's `--attach` posts the file to
+  `uploads.github.com/user-attachments/assets`, which takes a person's
+  token and only some apps', and it refused the project's app with
+  Contents read and write granted (observed in the project that asked).
+  So `plans gh` sends that one request with the login `gh auth token`
+  gives, puts the address in the body and runs gh as the app without the
+  flag: a stored image is the one thing under his name, never a post. A
+  picture that does not go up posts nothing, so no broken image is
+  shown. A side branch of images was weighed and left as hacky. A
+  project with no app uses gh's own flag, added 1 September 2026. An
+  issue attaches when it is made and when its plan comment is first
+  posted; a patch of that comment keeps the addresses GitHub already
+  gave its images, since `gh api` uploads nothing.
   plans/land-by-pull-request.md, plans/joined-pull-request-no-comment.md,
-  plans/screenshots-reach-github.md, plans/screenshots-reach-github-follow-up.md.
+  plans/screenshots-reach-github.md, plans/screenshots-reach-github-follow-up.md,
+  plans/screenshots-by-owners-login.md.
+  - ~~Screenshots on a pull request or an issue go up through gh's
+    `--attach`, as the project's app with Contents read and write.~~
+    (Javi, 25 November)

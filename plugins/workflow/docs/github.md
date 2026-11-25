@@ -44,29 +44,19 @@ say what it says.
   collapsed comment below, once it is planned." and takes no label until
   a brief carries its number; the topic ends as answered, with its
   address. The body is written when the issue is made and no agent edits
-  it after, save one setting, as it is made, when its pictures' upload
-  was refused (below); a hand-opened issue's body is never edited. Run
+  it after; a hand-opened issue's body is never edited. Run
   the Issues heading's `Check` on the file (with none, read it for a
   host address, a secret or a personal email), then `plans gh issue
   create --title "<the sentence>" --body-file plans/<topic>/issue.md
   --label "status: planning" --attach plans/<topic>/<file>`, the label
   left out for an issue alone, one `--attach` per picture the body
-  references, so the issue opens with them shown. A refused `--attach`
-  is not tried again (landing.md, "The screenshots, when `--attach`
-  fails", finds the cause), and the not-attached line, `Screenshots: not
-  attached yet, kept in plans/<topic>/. <The cause.>`, stands in place
-  of the picture lines that failed. An issue the refused command made
-  anyway, its address printed, is not made twice; its body is read back
-  (`plans gh issue view <n> --json body`), a failed read leaving it as
-  made and the cause said where its address is. The failed pictures are
-  the ones whose line still reads `./<file>` there; the file takes, in
-  place of each uploaded picture's local reference, the address GitHub
-  gave it in that body, matched by its alt text. The `Check` runs on the
-  file again, then `plans gh issue edit <n> --body-file
-  plans/<topic>/issue.md`, once, the failed pictures taken out and the
-  not-attached line added; the body is not edited again. Else the
-  command is run once more without `--attach`, the file's picture lines
-  replaced by the not-attached line.
+  references, so the issue opens with them shown. A picture that does
+  not go up posts nothing, and `plans gh` says why; the command is run
+  once more without `--attach`, the file's picture lines replaced by the
+  not-attached line, `Screenshots: not attached yet, kept in
+  plans/<topic>/. <The cause.>` (landing.md, "The screenshots, when
+  `--attach` fails", gives the cause), the `Check` run on the file
+  again, since the cause is new text; the upload is not tried again.
 - **The labels**, created when missing, one at a time: `status: planning` with the brief, added (`plans gh issue edit
   <n> --add-label "status: planning"`) when a brief takes the number of
   an issue that has no label; `status: planned` the planner's, on a held plan; `status: ready` the planner's on the owner's standing word, a writer's, or yours on his word; `status: building` the executor's.
@@ -184,8 +174,7 @@ names none. A failed run it answers is a line of "What was asked".
 
 A plan with an `Issue` line goes behind its issue, as the project's
 app ("A topic the people discuss is a GitHub issue"). No body is
-written: the issue's was written once, when it was made (set once more
-as it was made, when its pictures' upload was refused), and a
+written: the issue's was written once, when it was made, and a
 hand-opened issue keeps its own.
 
 1. Write `plans/<topic>/plan-comment.md`:
@@ -216,9 +205,9 @@ hand-opened issue keeps its own.
    `plans gh issue comment <n> --body-file
    plans/<topic>/plan-comment.md --attach plans/<topic>/<file>`, one
    `--attach` per picture the file references, so the comment shows
-   them; a refused `--attach` falls back as the issue's does ("GitHub
-   issues"), the lookup above run first: a comment the refused command
-   posted anyway is patched once as below, not posted twice. With one,
+   them; a picture that does not go up posts nothing, and the command
+   is run once more without `--attach`, as the issue's is ("GitHub
+   issues"). With one,
    `plans gh api -X PATCH
    "repos/{owner}/{repo}/issues/comments/<id>" -F
    body=@plans/<topic>/plan-comment.md`; with several, the first is

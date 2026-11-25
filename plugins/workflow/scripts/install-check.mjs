@@ -30,6 +30,7 @@ export const FILES = [
   "scripts/codex-review.sh",
   "scripts/cost.mjs",
   "scripts/github-app.mjs",
+  "scripts/github-attach.mjs",
   "scripts/github-webhook.mjs",
   "scripts/install-check.mjs",
   "scripts/plain-words.mjs",

@@ -17,7 +17,6 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   agentLine,
   appLine,
-  attachLine,
   canStart,
   checkDeny,
   data,
@@ -2506,9 +2505,15 @@ describe("a pull request per topic", () => {
       "its screenshots attached with `gh pr edit --attach`, and nothing is posted.** (Javi, 31 October)",
     );
     expect(read("docs/workflow.md")).not.toContain("written again and one comment says");
-    // plans/screenshots-reach-github.md: as the project's app, which needs Contents.
+    // plans/screenshots-by-owners-login.md: uploaded with the owner's login, posted as the app.
     expect(read("docs/workflow.md").replace(/\s+/g, " ")).toContain(
-      "as the project's app (`plans gh pr create --attach`, `plans gh pr edit --attach`), which needs gh 2.99 or newer (from GitHub's apt repository; Debian's is 2.23) and the app's Contents read and write;",
+      "are uploaded with the owner's own gh login and written into text the project's app posts, by `plans gh pr create --attach`, `plans gh pr edit --attach` and the same for an issue: a stored image is the one thing under his name, never a post. A picture that does not go up posts nothing, and `plans gh` says why. A project with no app attaches with gh's own flag under the person's login, which needs gh 2.99 or newer (from GitHub's apt repository; Debian's is 2.23).",
+    );
+    expect(read("docs/workflow.md").replace(/\s+/g, " ")).toContain(
+      "The app has Issues, Pull requests and Actions read and write",
+    );
+    expect(read("docs/workflow.md").replace(/\s+/g, " ")).toContain(
+      "the push and a picture's upload alone are the person's token.",
     );
     expect(read("agents/assistant.md")).toContain(
       "Lands: <fix | fix, now | topic <name>, waiting | topic <name>, ready>.",
@@ -3596,10 +3601,10 @@ describe("the agent a project's chats open as", () => {
       repo: "o/r",
     };
     // A listener's record, its pid this test's, alive.
-    const record = (lacks?: object, attach?: object) =>
+    const record = (lacks?: object) =>
       writeFileSync(
         join(root, ".claude", "webhook.json"),
-        JSON.stringify({ pid: process.pid, port: 1, at: Date.now(), lastAt: 0, lacks, attach }),
+        JSON.stringify({ pid: process.pid, port: 1, at: Date.now(), lastAt: 0, lacks }),
       );
     const start = (id: string, agent = "") =>
       // No secret, from the environment or a secrets file, so no listener is armed here.
@@ -3622,16 +3627,6 @@ describe("the agent a project's chats open as", () => {
     expect(start("a3b", "workflow:executor")).toBe("");
     expect(JSON.parse(start("a4", "workflow:assistant")).systemMessage).toBe(appLine(accept));
     expect(start("a5")).toBe("");
-    // plans/screenshots-reach-github.md: what attaching lacks is said once beside it, alone when
-    // the failed run's line was said already.
-    const contents = { ...app, what: ["Contents read and write"] };
-    record(accept, contents);
-    expect(JSON.parse(start("a5b")).systemMessage).toBe(attachLine(contents));
-    expect(start("a5c")).toBe("");
-    record(app, { ...accept, what: ["Contents read and write"] });
-    expect(JSON.parse(start("a5d")).systemMessage).toBe(
-      `${appLine(app)}\n${attachLine({ ...accept, what: ["Contents read and write"] })}`,
-    );
     record();
     expect(start("a6")).toBe("");
   });
@@ -3677,14 +3672,14 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
 
   it("an issue's description is written once and its plan is one collapsed comment, edited in place", () => {
     const github = flat("docs/github.md");
-    expect(section("docs/github.md", "GitHub issues")).toContain("issue edit <n> --body-file");
+    expect(github).not.toContain("issue edit <n> --body-file");
     expect(github).not.toContain("--edit-last");
     const issues = section("docs/github.md", "GitHub issues");
     expect(issues).toContain(
       "The plan behind this: a collapsed comment below, once it is planned. Comment to poke holes or add what is missing; it is built as a draft pull request once planned, and a comment is taken in.",
     );
     expect(issues).toContain(
-      "The body is written when the issue is made and no agent edits it after, save one setting, as it is made, when its pictures' upload was refused (below); a hand-opened issue's body is never edited.",
+      "The body is written when the issue is made and no agent edits it after; a hand-opened issue's body is never edited.",
     );
     const plan = section("docs/github.md", "A plan with an `Issue` line");
     expect(plan).toContain("No body is written");
@@ -3703,39 +3698,40 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
       "For every agent: a plan or a brief quoted anywhere on GitHub, in an issue, a comment or a pull request, is inside `<details>` under a one-line summary, never open.",
     );
     expect(flat("docs/workflow.md")).toContain(
-      "its body written once, when it is made, and never edited by an agent after, save one setting, as it is made, when its pictures' upload was refused; the plan behind it is one collapsed comment, the planner's, found again by its hidden first line and edited in place on a change",
+      "its body written once, when it is made, and never edited by an agent after; the plan behind it is one collapsed comment, the planner's, found again by its hidden first line and edited in place on a change",
     );
     expect(flat("docs/decisions.md")).toContain(
       "written once; the plan behind it is one collapsed comment, edited in place.** (Javi, 25 November)",
     );
   });
 
-  // plans/issue-body-set-once-on-refused-upload.md
-  it("an issue whose pictures' upload was refused has its body set once, as it is made", () => {
+  // plans/issue-body-set-once-on-refused-upload.md, then plans/screenshots-by-owners-login.md
+  it("an issue is made without its pictures when their upload fails", () => {
     const issues = section("docs/github.md", "GitHub issues");
     expect(issues).toContain(
-      "and the not-attached line, `Screenshots: not attached yet, kept in plans/<topic>/. <The cause.>`, stands in place of the picture lines that failed.",
+      'A picture that does not go up posts nothing, and `plans gh` says why; the command is run once more without `--attach`, the file\'s picture lines replaced by the not-attached line, `Screenshots: not attached yet, kept in plans/<topic>/. <The cause.>` (landing.md, "The screenshots, when `--attach` fails", gives the cause), the `Check` run on the file again, since the cause is new text; the upload is not tried again.',
     );
-    expect(issues).toContain(
-      "An issue the refused command made anyway, its address printed, is not made twice; its body is read back (`plans gh issue view <n> --json body`), a failed read leaving it as made and the cause said where its address is.",
-    );
-    expect(issues).toContain(
-      "The failed pictures are the ones whose line still reads `./<file>` there; the file takes, in place of each uploaded picture's local reference, the address GitHub gave it in that body, matched by its alt text.",
-    );
-    expect(issues).toContain(
-      "The `Check` runs on the file again, then `plans gh issue edit <n> --body-file plans/<topic>/issue.md`, once, the failed pictures taken out and the not-attached line added; the body is not edited again.",
-    );
-    expect(issues).toContain(
-      "Else the command is run once more without `--attach`, the file's picture lines replaced by the not-attached line.",
-    );
+    expect(issues).not.toContain("made anyway");
+    expect(issues).not.toContain("read back");
     expect(section("docs/github.md", "A plan with an `Issue` line")).toContain(
-      "the issue's was written once, when it was made (set once more as it was made, when its pictures' upload was refused), and a hand-opened issue keeps its own.",
+      "the issue's was written once, when it was made, and a hand-opened issue keeps its own.",
     );
-    expect(flat("docs/landing.md")).toContain(
-      "a refused `gh issue create` that printed the issue's address made it, never a second issue, and its body is set once, as it is made, by `plans gh issue edit <n> --body-file plans/<topic>/issue.md`, the failed pictures taken out and the line added, the uploaded ones keeping the addresses the body read back gives them, and not edited again;",
+    const landing = flat("docs/landing.md");
+    expect(landing).toContain(
+      "through `plans gh`, a picture that did not go up means nothing was posted, and `plans gh` printed why (`Screenshots not uploaded, so nothing was posted: …`). Run the command once more without `--attach`, each picture's reference replaced by its alt text as a line of its own, and the line under `## To try it`: `Screenshots: not attached yet, kept in plans/<topic>/. <The cause.>`, the cause what `plans gh` printed between `nothing was posted: ` and `. Post it once more`, with a capital. The upload is tried no second time.",
+    );
+    expect(landing).toContain(
+      'On an issue or its plan comment (github.md, "GitHub issues") the same, the line in place of the picture lines.',
+    );
+    expect(landing).not.toContain("set once, as it is made");
+    expect(flat("docs/decisions.md")).toContain(
+      "An issue is never made with a picture that did not go up (`screenshots-attach`), so its body is set once and no more.",
     );
     expect(flat("docs/decisions.md")).toContain(
-      "A body whose pictures' upload was refused is set once more, as the issue is made, without them and with the not-attached line (Javi, 25 November): a broken image is worse than the one edit, and nobody has read the body yet.",
+      "~~Screenshots on a pull request or an issue go up through gh's `--attach`, as the project's app with Contents read and write.~~ (Javi, 25 November)",
+    );
+    expect(flat("agents/assistant.md")).toContain(
+      "A `Screenshots not attached` line whose cause is the login gh has (none, ended, refused) is a step only he can take, told once with the cause as written;",
     );
   });
 
@@ -3749,7 +3745,7 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
     expect(issues).toContain(
       "`Screenshots: not attached yet, kept in plans/<topic>/. <The cause.>`",
     );
-    expect(issues).toContain("Else the command is run once more without `--attach`");
+    expect(issues).toContain("the command is run once more without `--attach`");
     const plan = section("docs/github.md", "A plan with an `Issue` line");
     expect(plan).toContain("</details> ![<What it shows, in one line.>](./<file>) ```");
     expect(plan).toContain(
@@ -3759,11 +3755,13 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
       'A patch keeps the images already in the comment: the file takes, in place of its local references, the image addresses GitHub gave the posted comment, read from its body (`plans gh api "repos/{owner}/{repo}/issues/comments/<id>" --jq .body`), each picture matched by its alt text as first written; a picture with no address there, new or never attached, is not attached on a patch, since `gh api` uploads nothing, and its path is named in the comment instead, the `Screenshots: not attached yet` line kept while any is.',
     );
     expect(issues).not.toContain("left as made");
-    expect(issues).toContain("A refused `--attach` is not tried again");
-    const landing = flat("docs/landing.md");
-    expect(landing).toContain(
-      'On an issue (github.md, "GitHub issues") the upload is not tried again:',
+    expect(issues).toContain("the upload is not tried again");
+    expect(plan).toContain(
+      'a picture that does not go up posts nothing, and the command is run once more without `--attach`, as the issue\'s is ("GitHub issues").',
     );
+    const landing = flat("docs/landing.md");
+    expect(landing).toContain("The upload is tried no second time.");
+    expect(landing).not.toContain("issue edit <n> --body-file");
     expect(landing).not.toContain("left as made");
     expect(flat("docs/decisions.md")).toContain(
       "An issue attaches when it is made and when its plan comment is first posted; a patch of that comment keeps the addresses GitHub already gave its images",

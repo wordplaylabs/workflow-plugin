@@ -196,9 +196,9 @@ change to a plan or brief a live planner holds (no Building line) goes
 to that chat by "What crosses chats"; after its Building line, or with
 the chat gone, it is your follow-up, a decision taken for ${user_config.owner}
 unanswered included ("Asked once"). A `Screenshots not attached` line
-whose cause is the app's permission is a step only he can take, told
-once with the step as `plans` prints it; once `plans` no longer says the
-app cannot attach, write one short plan per topic's pull request still
+whose cause is the login gh has (none, ended, refused) is a step only he
+can take, told once with the cause as written; once he says it is done,
+write one short plan per topic's pull request still
 without them, `Lands: topic <its head branch>, waiting; lands in #<n>.`,
 whose one step is the description written again with `--attach` for the
 files its plans' "Built" sections name; a day's fixes pull request

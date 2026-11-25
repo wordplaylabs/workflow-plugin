@@ -8,7 +8,8 @@ the assistant, the planner, the executor, the maker and the reviewer
 hook, the project's tool denials and the plain-words check of every
 question to Javi (`scripts/`, run by `hooks/hooks.json`) and the
 install check (`scripts/install-check.mjs`, run from the manifest and by
-`bin/plans`), the queue's cost report (`scripts/cost.mjs`, `plans
+`bin/plans`), the upload of a picture with the owner's login
+(`scripts/github-attach.mjs`), the queue's cost report (`scripts/cost.mjs`, `plans
 cost`), the status line, the `/workflow:change` and `design-research`
 skills and the `plans` command (`bin/plans`). The rules
 the agents follow are `plugins/workflow/docs/workflow.md`, and why each

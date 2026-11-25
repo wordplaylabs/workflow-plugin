@@ -126,6 +126,17 @@ export async function appSlug({ id, key, fetch = globalThis.fetch, now = Date.no
   return app?.slug || "";
 }
 
+/**
+ * **The repository's numeric id** (`GET /repos/{owner}/{repo}`, as the app,
+ * with its installation token), which a picture's upload names
+ * (`github-attach.mjs`). Throws with GitHub's answer.
+ */
+export async function repositoryId({ owner, repo, token, fetch = globalThis.fetch }) {
+  const found = await call(fetch, "GET", `/repos/${owner}/${repo}`, token);
+  if (!found?.id) throw new Error(`GET /repos/${owner}/${repo} gave no id`);
+  return found.id;
+}
+
 /** `owner/repo` from a GitHub remote's address, https or ssh; null for another host. */
 export function repoOfRemote(url = "") {
   const m = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url.trim());
@@ -189,20 +200,5 @@ export function appLacks(standing) {
       slug: standing.slug,
       url: standing.installation.url,
     };
-  return null;
-}
-
-/**
- * **Where the app cannot attach a screenshot** (decisions.md#screenshots-attach):
- * gh's `--attach` uploads as the app, which takes Contents read and write, on
- * its registration, else on its installation, whose new permissions wait on
- * the account's owner; null when both have it.
- */
-export function attachLacks(standing) {
-  const what = ["Contents read and write"];
-  if (standing.app?.permissions?.contents !== "write")
-    return { where: "app", what, slug: standing.slug };
-  if (standing.installation?.permissions?.contents !== "write")
-    return { where: "installation", what, slug: standing.slug, url: standing.installation.url };
   return null;
 }

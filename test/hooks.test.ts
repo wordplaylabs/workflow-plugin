@@ -53,7 +53,6 @@ import {
   sweepTemp,
   ghCommand,
   appLine,
-  attachLine,
   webhookLine,
   unreadLines,
   behindOf,
@@ -150,9 +149,9 @@ import {
   appJwt,
   appLacks,
   appStanding,
-  attachLacks,
   repoOfRemote,
 } from "../plugins/workflow/scripts/github-app.mjs";
+import { withAddresses } from "../plugins/workflow/scripts/github-attach.mjs";
 import {
   WEBHOOK_EVENTS,
   githubEvents,
@@ -9032,39 +9031,6 @@ describe("github-app", () => {
     ).toEqual({ where: "app", what: ["the Workflow run event"], slug: "s" });
   });
 
-  // plans/screenshots-reach-github.md, part 1.
-  it("attachLacks names Contents where it is missing", () => {
-    const url = "https://github.com/settings/installations/7";
-    const what = ["Contents read and write"];
-    const without = { permissions: { issues: "write" }, events: [] };
-    const read = { permissions: { contents: "read" }, events: [] };
-    const write = { permissions: { contents: "write" }, events: [] };
-    expect(attachLacks({ slug: "s", app: without, installation: { ...write, url } })).toEqual({
-      where: "app",
-      what,
-      slug: "s",
-    });
-    expect(attachLacks({ slug: "s", app: write, installation: { ...without, url } })).toEqual({
-      where: "installation",
-      what,
-      slug: "s",
-      url,
-    });
-    expect(attachLacks({ slug: "s", app: write, installation: { ...write, url } })).toBeNull();
-    // Read alone uploads nothing.
-    expect(attachLacks({ slug: "s", app: read, installation: { ...write, url } })).toEqual({
-      where: "app",
-      what,
-      slug: "s",
-    });
-    expect(attachLacks({ slug: "s", app: write, installation: { ...read, url } })).toEqual({
-      where: "installation",
-      what,
-      slug: "s",
-      url,
-    });
-  });
-
   it("reads the repository from a GitHub remote, https or ssh", () => {
     expect(repoOfRemote("https://github.com/o/r.git\n")).toBe("o/r");
     expect(repoOfRemote("git@github.com:o/r")).toBe("o/r");
@@ -9111,7 +9077,7 @@ describe("plans gh", () => {
       cacheFile: cache(),
     });
     expect(done).toEqual({
-      said: "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Contents, Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
+      said: "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
       status: 1,
     });
     expect(runs).toEqual([]);
@@ -9121,7 +9087,7 @@ describe("plans gh", () => {
   it("in a container setup made, names the host's file and the rebuild", () => {
     const mounted = { WORKFLOW_SECRETS_FILE: "/run/secrets/workflow.env" };
     expect(noAppWords("o/r", mounted, "Docs")).toBe(
-      "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Contents, Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY in ~/.config/workflow/docs.env on the host, then rebuild the container.",
+      "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY in ~/.config/workflow/docs.env on the host, then rebuild the container.",
     );
     expect(noSecretWords(mounted, "Docs")).toBe(
       "The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub, subscribed to the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run, with the address routed to this container and a secret, and set WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT in ~/.config/workflow/docs.env on the host, then rebuild the container.",
@@ -9132,7 +9098,7 @@ describe("plans gh", () => {
   it("with any other secrets file, says where GH_TOKEN is set as before", () => {
     const other = { WORKFLOW_SECRETS_FILE: ".secrets/workflow.env" };
     expect(noAppWords("o/r", other, "Docs")).toBe(
-      "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Contents, Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
+      "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
     );
     expect(noSecretWords(other, "Docs")).toBe(
       "The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub, subscribed to the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run, with the address routed to this container and a secret, and set WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
@@ -9157,93 +9123,350 @@ describe("plans gh", () => {
     expect(marksReady("plans gh pr ready --undo 12")).toBe(false);
   });
 
-  // plans/screenshots-reach-github.md, part 2: an upload refused says the step.
+  // plans/screenshots-by-owners-login.md: the pictures go up with the owner's
+  // login, the text is posted as the app.
   describe("with --attach", () => {
-    const url = "https://github.com/settings/installations/7";
-    /** GitHub with the app's and the installation's Contents as given; every call counted. */
-    const standing = (app: string | null, installation: string | null) => {
-      const calls: string[] = [];
-      const fetch = async (address: string, init: { method: string }) => {
-        const path = new URL(address).pathname;
-        calls.push(`${init.method} ${path}`);
-        const permissions = (contents: string | null) => (contents ? { contents } : {});
-        const body =
-          path === "/app"
-            ? { slug: "docs-claude", permissions: permissions(app), events: [] }
-            : path.endsWith("/installation")
-              ? { id: 77, html_url: url, permissions: permissions(installation), events: [] }
-              : { token: "t", expires_at: new Date(now + 3600_000).toISOString() };
+    const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+    const address = (n: number) => `https://github.com/user-attachments/assets/u${n}`;
+    /** A folder with the pictures and a body file in it, the working directory of the call. */
+    const folder = () => {
+      const dir = mkdtempSync(join(tmpdir(), "attach-"));
+      writeFileSync(join(dir, "a.png"), PNG);
+      writeFileSync(join(dir, "b.png"), PNG);
+      writeFileSync(join(dir, "e.png"), "");
+      writeFileSync(join(dir, "a.txt"), "words");
+      writeFileSync(join(dir, "body.md"), "Look:\n\n![The bar](./a.png)\n");
+      return dir;
+    };
+    type Call = { url: string; method: string; headers: Record<string, string>; body?: unknown };
+    /** GitHub: the app's token, the repositories' ids, and the uploads as `upload` answers them. */
+    const github = (upload: (n: number) => Response | Promise<Response> = () => null as never) => {
+      const calls: Call[] = [];
+      let uploads = 0;
+      const fetch = async (url: string, init: Omit<Call, "url">) => {
+        calls.push({ url, ...init });
+        const { host, pathname } = new URL(url);
+        if (host === "uploads.github.com") {
+          uploads += 1;
+          return (
+            (await upload(uploads)) ||
+            new Response(JSON.stringify({ url: address(uploads) }), { status: 201 })
+          );
+        }
+        const body = pathname.endsWith("/installation")
+          ? { id: 77 }
+          : pathname === "/repos/o/r"
+            ? { id: 42 }
+            : pathname === "/repos/o2/r2"
+              ? { id: 43 }
+              : { token: "app-token", expires_at: new Date(now + 3600_000).toISOString() };
         return new Response(JSON.stringify(body), { status: 200 });
       };
-      return { calls, fetch };
+      const sent = () => calls.filter((call) => call.url.startsWith("https://uploads.github.com/"));
+      return { calls, fetch, sent };
     };
-    /** gh, ending with the status given. */
-    const failing = (status: number) => () => ({ status, stdout: "", stderr: "" });
+    /** gh: `auth token` answered as given, every other call ending with `status`. */
+    const gh = (
+      login: { status: number; stdout: string } = { status: 0, stdout: "owner-token\n" },
+      status = 0,
+    ) => {
+      const runs: { args: string[]; token?: string; cwd?: string; env?: Record<string, string> }[] =
+        [];
+      const run = (
+        _bin: string,
+        args: string[],
+        options: { env?: Record<string, string>; cwd?: string },
+      ) => {
+        runs.push({ args, token: options.env?.GH_TOKEN, cwd: options.cwd, env: options.env });
+        return args[0] === "auth" ? { ...login, stderr: "" } : { status, stdout: "", stderr: "" };
+      };
+      return { runs, run };
+    };
+    const options = (cwd: string, run: unknown, fetch: unknown) => ({
+      env,
+      run,
+      fetch,
+      repo: "o/r",
+      now,
+      cacheFile: cache(),
+      cwd,
+    });
+    const words = (cause: string) =>
+      `Screenshots not uploaded, so nothing was posted: ${cause}. Post it once more without --attach; the pictures stay where they are.`;
 
-    it("plans gh with --attach refused says the step", async () => {
-      const { fetch } = standing(null, null);
-      const options = { env, run: failing(1), fetch, repo: "o/r", now, cacheFile: cache() };
-      expect(await ghCommand(["pr", "create", "--attach", "a.png"], options)).toEqual({
-        said: "The project's Claude cannot attach screenshots on GitHub: its app lacks Contents read and write. Add it on GitHub (Settings, Developer settings, GitHub Apps, docs-claude, Permissions & events) and accept the new permission if GitHub asks. Until then screenshots stay in plans/.",
-        status: 1,
-      });
-      // The registration has it, the installation does not; `--attach=<file>` is the same flag.
-      const accept = standing("write", "read");
-      expect(
-        await ghCommand(["issue", "create", "--attach=a.png"], {
-          ...options,
-          run: failing(4),
-          fetch: accept.fetch,
-          cacheFile: cache(),
-        }),
-      ).toEqual({
-        said: `The project's Claude cannot attach screenshots on GitHub: its app's new permissions are not accepted on o/r yet. Accept them at ${url}. Until then screenshots stay in plans/.`,
-        status: 4,
+    it("plans gh uploads a picture with the owner's login and posts as the app", async () => {
+      const dir = folder();
+      const { calls, fetch, sent } = github();
+      const { runs, run } = gh();
+      const done = await ghCommand(
+        ["pr", "create", "--title", "T", "--body-file", "body.md", "--attach", "a.png"],
+        options(dir, run, fetch),
+      );
+      expect(done).toEqual({ said: "", status: 0 });
+      expect(sent()).toHaveLength(1);
+      const [upload] = sent();
+      expect(upload.url).toBe(
+        "https://uploads.github.com/user-attachments/assets?name=a.png&content_type=image%2Fpng&repository_id=42",
+      );
+      expect(upload.method).toBe("POST");
+      expect(upload.headers.Authorization).toBe("token owner-token");
+      expect(upload.headers["Content-Type"]).toBe("application/octet-stream");
+      expect(Buffer.from(upload.body as Buffer).equals(PNG)).toBe(true);
+      for (const call of calls.filter((call) => call !== upload))
+        expect(call.headers.Authorization).toMatch(/^Bearer /);
+      expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toContain(
+        "GET /repos/o/r",
+      );
+      // The owner's login asked of gh with the environment as it is.
+      expect(runs[0].args).toEqual(["auth", "token", "--hostname", "github.com"]);
+      expect(runs[0].token).toBeUndefined();
+      expect(runs).toHaveLength(2);
+      expect(runs[1]).toMatchObject({
+        args: ["pr", "create", "--title", "T", "--body", `Look:\n\n![The bar](${address(1)})\n`],
+        token: "app-token",
+        cwd: dir,
       });
     });
 
-    it("plans gh with --attach refused though Contents is granted says so", async () => {
-      const { fetch } = standing("write", "write");
-      const done = await ghCommand(["pr", "create", "--attach", "a.png"], {
-        env,
-        run: failing(1),
-        fetch,
-        repo: "o/r",
-        now,
-        cacheFile: cache(),
-      });
-      expect(done).toEqual({
-        said: "The upload was refused though the app has Contents read and write on o/r: gh's line above says why.",
-        status: 1,
-      });
+    it("a picture no reference names is appended with its alt text", async () => {
+      const dir = folder();
+      writeFileSync(join(dir, "my.shot.png"), PNG);
+      const { fetch, sent } = github();
+      const { runs, run } = gh();
+      await ghCommand(
+        ["issue", "comment", "3", "--body", "Text", "--attach", "b.png#Menu open"],
+        options(dir, run, fetch),
+      );
+      expect(runs[1].args).toEqual([
+        "issue",
+        "comment",
+        "3",
+        "--body",
+        `Text\n\n![Menu open](${address(1)})`,
+      ]);
+      // Without #, the alt is the base name, its dots spaces; a file named twice is sent once.
+      const again = github();
+      const second = gh();
+      await ghCommand(
+        [
+          "pr",
+          "comment",
+          "3",
+          "-b",
+          "Text",
+          "--attach",
+          "b.png",
+          "--attach=my.shot.png",
+          "--attach",
+          join(dir, "b.png"),
+        ],
+        options(dir, second.run, again.fetch),
+      );
+      expect(again.sent()).toHaveLength(2);
+      expect(sent()).toHaveLength(1);
+      expect(second.runs[1].args).toEqual([
+        "pr",
+        "comment",
+        "3",
+        "--body",
+        `Text\n\n![b](${address(1)})\n\n![my shot](${address(2)})`,
+      ]);
     });
 
-    it("a failed plans gh without --attach reads no standing", async () => {
-      const { calls, fetch } = standing(null, null);
-      const options = { env, run: failing(1), fetch, repo: "o/r", now, cacheFile: cache() };
-      expect(await ghCommand(["issue", "list"], options)).toEqual({ said: "", status: 1 });
-      // A call with --attach that gh ends well reads none either.
+    it("plans gh posts nothing when a picture does not go up", async () => {
+      const refused = words(
+        "GitHub refused a.png with the login gh has here (404: that login cannot push to o/r, or the upload does not take its token)",
+      );
+      const cases: (() => Response | Promise<Response>)[] = [
+        () => new Response(JSON.stringify({ message: "Not Found" }), { status: 404 }),
+        () => new Response(JSON.stringify({ message: "Bad credentials" }), { status: 401 }),
+        () => new Response(JSON.stringify({ message: "Bad size" }), { status: 422 }),
+        () => new Response("", { status: 500 }),
+        () => Promise.reject(new Error("socket hang up")),
+      ];
+      const said = [
+        refused,
+        words("GitHub refused a.png with the login gh has here (401: that login has ended)"),
+        words("GitHub refused a.png with the login gh has here (422: Bad size)"),
+        words("GitHub refused a.png with the login gh has here (500: no reason given)"),
+        words("a.png could not be sent (socket hang up)"),
+      ];
+      for (const [i, answer] of cases.entries()) {
+        const dir = folder();
+        const { fetch, sent } = github((n) => (n === 1 ? answer() : (null as never)));
+        const { runs, run } = gh();
+        const done = await ghCommand(
+          ["pr", "create", "--body-file", "body.md", "--attach", "a.png", "--attach", "b.png"],
+          options(dir, run, fetch),
+        );
+        expect(done).toEqual({ said: said[i], status: 1 });
+        expect(runs.map((r) => r.args[0])).toEqual(["auth"]);
+        // The second file is never sent.
+        expect(sent()).toHaveLength(1);
+      }
+    });
+
+    it("plans gh posts nothing with no login to upload with", async () => {
+      for (const login of [
+        { status: 1, stdout: "" },
+        { status: 0, stdout: "\n" },
+      ]) {
+        const dir = folder();
+        const { calls, fetch } = github();
+        const { runs, run } = gh(login);
+        expect(
+          await ghCommand(
+            ["pr", "create", "--body", "x", "--attach", "a.png"],
+            options(dir, run, fetch),
+          ),
+        ).toEqual({ said: words("gh has no login here to upload them with"), status: 1 });
+        expect(calls.filter((call) => call.url.includes("uploads.github.com"))).toEqual([]);
+        expect(runs.map((r) => r.args[0])).toEqual(["auth"]);
+      }
+    });
+
+    it("plans gh checks the files and the body before any upload", async () => {
+      const cases: [string[], string][] = [
+        [["--body", "x", "--attach", "c.png"], "c.png is not there"],
+        [["--body", "x", "--attach", "e.png"], "e.png is empty"],
+        [
+          ["--body", "x", "--attach", "a.txt"],
+          "a.txt is not an image GitHub takes (png, jpg, jpeg, gif, webp or svg)",
+        ],
+        [["--attach", "a.png"], "the command has no --body-file or --body for them to go in"],
+        [
+          ["--body-file", "-", "--attach", "a.png"],
+          "the text is read from stdin (--body-file -), which plans gh does not read: give it as a file",
+        ],
+        [["--body-file", "gone.md", "--attach", "a.png"], "gone.md is not there"],
+      ];
+      for (const [tail, cause] of cases) {
+        const dir = folder();
+        const { calls, fetch } = github();
+        const { runs, run } = gh();
+        expect(await ghCommand(["pr", "create", ...tail], options(dir, run, fetch))).toEqual({
+          said: words(cause),
+          status: 1,
+        });
+        expect(calls).toEqual([]);
+        expect(runs).toEqual([]);
+      }
+    });
+
+    it("a gh that fails after the upload says nothing more", async () => {
+      const dir = folder();
+      const { calls, fetch } = github();
+      const { run } = gh(undefined, 4);
       expect(
-        await ghCommand(["pr", "create", "--attach", "a.png"], { ...options, run: failing(0) }),
+        await ghCommand(
+          ["issue", "create", "--body-file", "body.md", "--attach=a.png"],
+          options(dir, run, fetch),
+        ),
+      ).toEqual({ said: "", status: 4 });
+      expect(calls.map((call) => new URL(call.url).pathname)).not.toContain("/app");
+    });
+
+    it("plans gh without --attach asks for no login", async () => {
+      const dir = folder();
+      const { calls, fetch } = github();
+      const { runs, run } = gh();
+      await ghCommand(["pr", "create", "--body", "x"], options(dir, run, fetch));
+      // `plans gh api` is untouched, --attach or not.
+      await ghCommand(["api", "repos/o/r", "--attach", "a.png"], options(dir, run, fetch));
+      expect(runs.map((r) => r.args[0])).toEqual(["pr", "api"]);
+      expect(runs[1].args).toEqual(["api", "repos/o/r", "--attach", "a.png"]);
+      expect(calls.filter((call) => call.url.includes("uploads.github.com"))).toEqual([]);
+    });
+
+    it("withAddresses", async () => {
+      const cwd = mkdtempSync(join(tmpdir(), "attach-cwd-"));
+      const dir = mkdtempSync(join(tmpdir(), "attach-dir-"));
+      const files = [
+        { path: join(dir, "a.png"), alt: "a", url: "u-dir" },
+        { path: join(cwd, "a.png"), alt: "a", url: "u-cwd" },
+        { path: join(cwd, "my shot.png"), alt: "my shot", url: "u-shot" },
+      ];
+      // The body file's folder wins over the working directory's.
+      expect(withAddresses("![x](./a.png)", files.slice(0, 2), dir, cwd)).toBe(
+        "![x](u-dir)\n\n![a](u-cwd)",
+      );
+      // Angle brackets off and percent signs decoded; a title kept.
+      expect(
+        withAddresses('![y](<./my shot.png>) ![z](my%20shot.png "t")', files.slice(2), dir, cwd),
+      ).toBe('![y](u-shot) ![z](u-shot "t")');
+      // One inside a fenced block stays; the file is appended, its alt escaped.
+      const fenced = "```md\n![x](./a.png)\n```\n";
+      expect(withAddresses(fenced, [{ ...files[0], alt: "a [b]\nc" }], dir, cwd)).toBe(
+        `${fenced.trimEnd()}\n\n![a \\[b\\] c](u-dir)`,
+      );
+      expect(
+        withAddresses("~~~\n![x](./a.png)\n~~~\n![x](./a.png)", files.slice(0, 1), dir, cwd),
+      ).toBe("~~~\n![x](./a.png)\n~~~\n![x](u-dir)");
+      // Codex C3: parentheses in a destination; a code span stays as written (code-review).
+      const paren = [{ path: join(dir, "chart(1).png"), alt: "chart(1)", url: "u-paren" }];
+      expect(withAddresses("![Chart](./chart(1).png)", paren, dir, cwd)).toBe("![Chart](u-paren)");
+      expect(withAddresses("![Chart](./chart\\(1\\).png)", paren, dir, cwd)).toBe(
+        "![Chart](u-paren)",
+      );
+      expect(withAddresses("`![x](./a.png)` and ![x](./a.png)", files.slice(0, 1), dir, cwd)).toBe(
+        "`![x](./a.png)` and ![x](u-dir)",
+      );
+      // -R o2/r2 sends o2/r2's id.
+      const folderOf = folder();
+      const { fetch, sent } = github();
+      const { runs, run } = gh();
+      await ghCommand(
+        ["pr", "comment", "3", "-R", "o2/r2", "--body", "x", "--attach", "a.png"],
+        options(folderOf, run, fetch),
+      );
+      expect(sent()[0].url).toContain("&repository_id=43");
+      expect(runs[1].args).toEqual([
+        "pr",
+        "comment",
+        "3",
+        "-R",
+        "o2/r2",
+        "--body",
+        `x\n\n![a](${address(1)})`,
+      ]);
+      // Codex C1: -R HOST/OWNER/REPO, an issue's address, or GH_REPO names the repository.
+      const targets: [string[], Record<string, string>, number][] = [
+        [["-R", "github.com/o2/r2"], {}, 43],
+        [["https://github.com/o2/r2/issues/3"], {}, 43],
+        [[], { GH_REPO: "o2/r2" }, 43],
+        [[], {}, 42],
+      ];
+      for (const [extra, more, id] of targets) {
+        const other = github();
+        const second = gh();
+        await ghCommand(["issue", "comment", ...extra, "--body", "x", "--attach", "a.png"], {
+          ...options(folderOf, second.run, other.fetch),
+          env: { ...env, ...more },
+        });
+        expect(other.sent()[0].url).toContain(`&repository_id=${id}`);
+      }
+    });
+
+    // Codex C5 and C6.
+    it("plans gh reads --attach only as the flag, and says a body file it cannot read", async () => {
+      const dir = folder();
+      const { calls, fetch } = github();
+      const { runs, run } = gh();
+      expect(
+        await ghCommand(["issue", "comment", "12", "--body", "--attach"], options(dir, run, fetch)),
       ).toEqual({ said: "", status: 0 });
-      expect(calls).not.toContain("GET /app");
-    });
-
-    it("says nothing more than gh when what the app has cannot be read", async () => {
-      const { fetch } = standing(null, null);
-      const broken = async (address: string, init: { method: string }) =>
-        new URL(address).pathname === "/app"
-          ? new Response(JSON.stringify({ message: "Bad credentials" }), { status: 401 })
-          : fetch(address, init);
-      const done = await ghCommand(["pr", "create", "--attach", "a.png"], {
-        env,
-        run: failing(1),
-        fetch: broken,
-        repo: "o/r",
-        now,
-        cacheFile: cache(),
-      });
-      expect(done).toEqual({ said: "", status: 1 });
+      expect(runs.map((r) => r.args[0])).toEqual(["issue"]);
+      expect(calls.filter((call) => call.url.includes("uploads.github.com"))).toEqual([]);
+      if (process.getuid?.() === 0) return;
+      chmodSync(join(dir, "body.md"), 0o000);
+      const done = await ghCommand(
+        ["pr", "create", "--body-file", "body.md", "--attach", "a.png"],
+        options(dir, run, fetch),
+      );
+      expect(done.status).toBe(1);
+      expect(done.said).toMatch(
+        /^Screenshots not uploaded, so nothing was posted: body\.md could not be read \(EACCES: .*\)\. Post it once more without --attach; the pictures stay where they are\.$/,
+      );
     });
   });
 
@@ -9400,7 +9623,7 @@ describe("secrets from a file", () => {
       repo: "o/r",
     });
     expect(done).toEqual({
-      said: "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Contents, Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
+      said: "The project's Claude has no GitHub App here: register one on GitHub (Settings, Developer settings, GitHub Apps; Issues, Pull requests and Actions read and write; the events Issues, Issue comment, Pull request, Pull request review, Pull request review comment and Workflow run), install it on o/r, and set WORKFLOW_APP_ID and WORKFLOW_APP_KEY where GH_TOKEN is set, or in the file WORKFLOW_SECRETS_FILE names.",
       status: 1,
     });
     expect(ran).toEqual([]);
@@ -11910,41 +12133,6 @@ describe("an app that sends no failed run", () => {
     );
   });
 
-  // plans/screenshots-reach-github.md, part 2.
-  it("plans names an app that cannot attach", () => {
-    const record = { pid: 1, port: 8789, at: Date.now(), lastAt: 0 };
-    const attach = {
-      where: "app" as const,
-      what: ["Contents read and write"],
-      slug: "docs-claude",
-      repo: "o/r",
-    };
-    expect(webhookLine({ ...record, attach })).toMatch(
-      /^The webhook: listening on 8789 since \d\d:\d\d; the app cannot attach screenshots \(it lacks Contents read and write\)\.$/,
-    );
-    expect(
-      webhookLine({ ...record, lacks: app, attach: { ...attach, where: "installation", url } }),
-    ).toMatch(
-      /; the app sends no failed run \(it lacks Actions read and write and the Workflow run event\), so they are read every five minutes; the app cannot attach screenshots \(its new permissions are not accepted\)\.$/,
-    );
-  });
-
-  it("attachLine says what to add and where, or where to accept", () => {
-    expect(
-      attachLine({
-        where: "app",
-        what: ["Contents read and write"],
-        slug: "docs-claude",
-        repo: "o/r",
-      }),
-    ).toBe(
-      "The project's Claude cannot attach screenshots on GitHub: its app lacks Contents read and write. Add it on GitHub (Settings, Developer settings, GitHub Apps, docs-claude, Permissions & events) and accept the new permission if GitHub asks. Until then screenshots stay in plans/.",
-    );
-    expect(attachLine({ ...installation, what: ["Contents read and write"] })).toBe(
-      "The project's Claude cannot attach screenshots on GitHub: its app's new permissions are not accepted on o/r yet. Accept them at https://github.com/settings/installations/7. Until then screenshots stay in plans/.",
-    );
-  });
-
   // plans/checks-read-with-the-app.md, parts 1 and 2.
   it("unreadLines says a list or the checks GitHub would not give, and nothing without", () => {
     expect(unreadLines({})).toEqual([]);
@@ -12090,10 +12278,7 @@ else say([]);
         const fetch = async (address: string) => {
           const path = new URL(address).pathname;
           asked.push(path);
-          const granted = {
-            permissions: { actions: "write", contents: "write" },
-            events: ["workflow_run"],
-          };
+          const granted = { permissions: { actions: "write" }, events: ["workflow_run"] };
           const body =
             path === "/app"
               ? { slug: "docs-claude", ...granted }
@@ -12115,14 +12300,8 @@ else say([]);
         try {
           await until(() => existsSync(join(dir, ".claude", "webhook.json")) && record().lacks);
           expect(record().lacks).toEqual({ ...installation, repo: "o/r" });
-          // plans/screenshots-reach-github.md: what attaching lacks, from the same read.
-          expect(record().attach).toEqual({
-            ...installation,
-            what: ["Contents read and write"],
-            repo: "o/r",
-          });
           expect(queue.webhookLine(record())).toContain(
-            "; the app sends no failed run (its new permissions are not accepted), so they are read every five minutes; the app cannot attach screenshots (its new permissions are not accepted).",
+            "; the app sends no failed run (its new permissions are not accepted), so they are read every five minutes.",
           );
           // The read at the start, then the timer's: run list asked again.
           await until(() => runLists() >= 2);
@@ -12138,76 +12317,11 @@ else say([]);
           writeFileSync(told, JSON.stringify({ told: "installation: x", at: 1 }));
           has = true;
           await until(() => !record().lacks);
-          expect(record().attach).toBeUndefined();
           expect(existsSync(told)).toBe(false);
           await pause(2000);
           const [calls, reads] = [asked.length, runLists()];
           await pause(600);
           expect([asked.length, runLists()]).toEqual([calls, reads]);
-        } finally {
-          await new Promise((done) => server!.close(done));
-        }
-      },
-    );
-
-    // plans/screenshots-reach-github.md: GitHub asked again while only attaching is lacking.
-    it(
-      "asks GitHub again while the app cannot attach, reading no run, and stops once it can",
-      { timeout: 60_000, retry: 2 },
-      async () => {
-        let contents = "";
-        const asked: string[] = [];
-        const fetch = async (address: string) => {
-          asked.push(new URL(address).pathname);
-          const body = {
-            slug: "docs-claude",
-            id: 7,
-            html_url: url,
-            permissions: { actions: "write", ...(contents ? { contents } : {}) },
-            events: ["workflow_run"],
-          };
-          return new Response(JSON.stringify(body), { status: 200 });
-        };
-        const file = join(dir, ".claude", "webhook.json");
-        const log = join(stub, "asked.log");
-        rmSync(file, { force: true });
-        rmSync(log, { force: true });
-        // Both lacks told before: the failed run's key goes, the app having what it takes.
-        const told = join(dir, ".claude", "webhook.told.json");
-        const attachKey = "app: Contents read and write";
-        writeFileSync(told, JSON.stringify({ told: "installation: x", attach: attachKey, at: 1 }));
-        const record = () => JSON.parse(readFileSync(file, "utf8"));
-        const runLists = () =>
-          (existsSync(log) ? readFileSync(log, "utf8") : "")
-            .split("\n")
-            .filter((line) => line.startsWith("run list")).length;
-        const port = await freePort();
-        const queue = await queueAt(dir);
-        const { server } = await queue.webhookCommand(["--serve"], env(port), { fetch, every: 50 });
-        try {
-          await until(() => existsSync(file) && record().attach);
-          expect(record().attach).toEqual({
-            where: "app",
-            what: ["Contents read and write"],
-            slug: "docs-claude",
-            repo: "o/r",
-          });
-          expect(record().lacks).toBeUndefined();
-          expect(JSON.parse(readFileSync(told, "utf8"))).toEqual({ attach: attachKey, at: 1 });
-          // The read at the start, and then none, while GitHub is asked again.
-          await until(() => runLists() >= 1);
-          await pause(1000);
-          const [calls, reads] = [asked.length, runLists()];
-          await until(() => asked.length >= calls + 4);
-          expect(runLists()).toBe(reads);
-          contents = "write";
-          await until(() => !record().attach);
-          expect(existsSync(told)).toBe(false);
-          await pause(2000);
-          const after = [asked.length, runLists()];
-          await pause(600);
-          expect([asked.length, runLists()]).toEqual(after);
-          expect(runLists()).toBe(reads);
         } finally {
           await new Promise((done) => server!.close(done));
         }

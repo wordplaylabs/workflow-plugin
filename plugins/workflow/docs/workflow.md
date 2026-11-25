@@ -753,8 +753,7 @@ already agreed is written in "Decided". (decisions.md#group-message)
 
 **A topic the people discuss is a GitHub issue**: one sentence of what
 should be true, the decisions under it, its body written once, when it
-is made, and never edited by an agent after, save one setting, as it is
-made, when its pictures' upload was refused; the plan behind it is one
+is made, and never edited by an agent after; the plan behind it is one
 collapsed comment, the planner's, found again by its hidden first line
 and edited in place on a change, or the project's Detail address in that
 comment; anyone opens one, the assistant writes them on the owner's
@@ -767,8 +766,8 @@ until a brief carries its number, and its topic ends as answered, with
 the issue's address. (decisions.md#issue-alone)
 
 **The queue speaks on GitHub as the project's own app**, through `plans
-gh`, pull requests included; the push alone is the person's token.
-(decisions.md#project-app)
+gh`, pull requests included; the push and a picture's upload alone are
+the person's token. (decisions.md#project-app)
 
 **A plan with an issue is built once planned**: the planner writes its
 Ready section on the owner's standing word, labels the issue `status:
@@ -927,11 +926,10 @@ expires. A project with issues carries its app's id and private key the
 same way, `WORKFLOW_APP_ID` and `WORKFLOW_APP_KEY` (the PEM's text),
 from which `plans gh` mints the app's token, and its webhook's secret
 and port, `WORKFLOW_WEBHOOK_SECRET` and `WORKFLOW_WEBHOOK_PORT` (8789
-when unset). The app has Contents, Issues, Pull requests and Actions
-read and write and is subscribed to the events the webhook reads:
-Issues, Issue comment, Pull request, Pull request review, Pull request
-review comment and Workflow run; without Contents no screenshot is
-attached, without Actions and Workflow run no failed run reaches the
+when unset). The app has Issues, Pull requests and Actions read and
+write and is subscribed to the events the webhook reads: Issues, Issue
+comment, Pull request, Pull request review, Pull request review comment
+and Workflow run; without Actions and Workflow run no failed run reaches the
 queue, and without one of the others its notes do not. The push stays
 the person's token. `plans gh`
 with no app says the same, and `plans webhook` with no secret names the
@@ -942,13 +940,14 @@ file that `WORKFLOW_SECRETS_FILE` names (a relative path from the
 checkout's root), and never put into the environment, so the key stays
 out of every other program's environment. (decisions.md#push-token)
 
-**Screenshots on a pull request** or an issue go up through `--attach`
-as the project's app (`plans gh pr create --attach`, `plans gh pr edit
---attach`), which needs gh 2.99 or newer (from GitHub's apt repository;
-Debian's is 2.23) and the app's Contents read and write; without either
-the pull request opens without them and says the step, which `plans gh`
-prints and `plans` repeats while the app lacks it.
-(decisions.md#screenshots-attach)
+**Screenshots on a pull request** or an issue are uploaded with the
+owner's own gh login and written into text the project's app posts, by
+`plans gh pr create --attach`, `plans gh pr edit --attach` and the
+same for an issue: a stored image is the one thing under his name,
+never a post. A picture that does not go up posts nothing, and `plans
+gh` says why. A project with no app attaches with gh's own flag under
+the person's login, which needs gh 2.99 or newer (from GitHub's apt
+repository; Debian's is 2.23). (decisions.md#screenshots-attach)
 
 The research-writing skills are a second plugin, `writing@workflow`, that
 a project turns on in its `.claude/settings.json`.

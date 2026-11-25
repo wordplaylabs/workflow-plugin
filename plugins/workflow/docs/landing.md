@@ -191,32 +191,31 @@ catalogue rule or a rule in the project's docs, lands as `topic <the
 plan's file name without .md>, waiting`, its "Built" and the final
 message saying why (decisions.md#fix-landing).
 
-**The screenshots, when `--attach` fails** (gh under 2.99.0, or the
-upload refused; decisions.md#screenshots-attach): look first whether a
-refused `gh pr create` opened one anyway (`gh pr view <name> --json
-number,url`), and try the upload once more, by `gh pr edit <n>` on the
-one it opened, else by the same command; then take the images that
-failed out of the body, each one's line kept as a line of its own (its
-alt text), and set it without `--attach`, one line under `## To try it`.
-A pull request a refused create opened gets its body replaced, never a
-second; a refused `gh pr edit` that set part of the body is read back
-(`gh pr view <n> --json body`) and set again. The line: `Screenshots:
-not attached yet, kept in plans/<topic>/. <The cause.>`, the cause `This
-container's gh is older than 2.99.` when gh's own line is `unknown flag:
---attach`, else the step `plans gh` printed (the app's settings, or the
-installation's address). "Built" and the `Built:` message say
-`Screenshots not attached: <the cause>`. On an issue (github.md, "GitHub
-issues") the upload is not tried again: a refused `gh issue create` that
-printed the issue's address made it, never a second issue, and its body
-is set once, as it is made, by `plans gh issue edit <n> --body-file
-plans/<topic>/issue.md`, the failed pictures taken out and the line
-added, the uploaded ones keeping the addresses the body read back gives
-them, and not edited again; a refused `gh
-issue comment` that printed one posted the plan comment, patched once as
-the plan comment is, the line in place of the picture lines that failed
-and the uploaded ones kept; else the
-command runs once more without `--attach`, the line in place of the
-picture lines. The cause is found as above.
+**The screenshots, when `--attach` fails** (decisions.md#screenshots-attach):
+through `plans gh`, a picture that did not go up means nothing was
+posted, and `plans gh` printed why (`Screenshots not uploaded, so
+nothing was posted: …`). Run the command once more without `--attach`,
+each picture's reference replaced by its alt text as a line of its own,
+and the line under `## To try it`: `Screenshots: not attached yet, kept
+in plans/<topic>/. <The cause.>`, the cause what `plans gh` printed
+between `nothing was posted: ` and `. Post it once more`, with a
+capital. The upload is tried no second time. "Built" and the `Built:`
+message say `Screenshots not attached: <the cause>`. On an issue or its
+plan comment (github.md, "GitHub issues") the same, the line in place of
+the picture lines.
+
+With plain gh, in a project whose file has no **Issues** heading (gh
+under 2.99.0, or the upload refused): look first whether a refused `gh
+pr create` opened one anyway (`gh pr view <name> --json number,url`),
+and try the upload once more, by `gh pr edit <n>` on the one it opened,
+else by the same command; then take the images that failed out of the
+body, each one's line kept as a line of its own (its alt text), and set
+it without `--attach`, with the same line under `## To try it`. A pull
+request a refused create opened gets its body replaced, never a second;
+a refused `gh pr edit` that set part of the body is read back (`gh pr
+view <n> --json body`) and set again. The cause is `This container's gh
+is older than 2.99.` when gh's own line is `unknown flag: --attach`,
+else gh's own line. "Built" and the `Built:` message say the same.
 
 **The checks are not waited on** ("A push is not waited on"): after
 the push and the pull request's create or edit, start the next plan;

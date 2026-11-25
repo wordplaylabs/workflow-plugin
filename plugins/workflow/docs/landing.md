@@ -208,7 +208,10 @@ installation's address). "Built" and the `Built:` message say
 `Screenshots not attached: <the cause>`. On an issue (github.md, "GitHub
 issues") the upload is not tried again: a refused `gh issue create` that
 printed the issue's address made it, never a second issue, and its body
-is left as made, since an issue's body is written once; a refused `gh
+is set once, as it is made, by `plans gh issue edit <n> --body-file
+plans/<topic>/issue.md`, the failed pictures taken out and the line
+added, the uploaded ones keeping the addresses the body read back gives
+them, and not edited again; a refused `gh
 issue comment` that printed one posted the plan comment, patched once as
 the plan comment is, the line in place of the picture lines that failed
 and the uploaded ones kept; else the

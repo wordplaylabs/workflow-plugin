@@ -763,8 +763,12 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   by default; a description rewritten into a "Decided" list read as
   another issue; one issue got three plan comments; the comment is found
   again by a hidden first line, as sticky comment bots do
-  (marocchino/sticky-pull-request-comment).
-  plans/plans-as-github-issues.md, plans/owner-requests-nov-25.md.
+  (marocchino/sticky-pull-request-comment). A body whose pictures'
+  upload was refused is set once more, as the issue is made, without
+  them and with the not-attached line (Javi, 25 November): a broken
+  image is worse than the one edit, and nobody has read the body yet.
+  plans/plans-as-github-issues.md, plans/owner-requests-nov-25.md,
+  plans/issue-body-set-once-on-refused-upload.md.
   - ~~A topic the people discuss is a GitHub issue, one sentence of what
     should be true with the detail under it and the plan behind it.~~
     (Javi, 3 November)

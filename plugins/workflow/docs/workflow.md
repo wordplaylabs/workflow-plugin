@@ -753,7 +753,8 @@ already agreed is written in "Decided". (decisions.md#group-message)
 
 **A topic the people discuss is a GitHub issue**: one sentence of what
 should be true, the decisions under it, its body written once, when it
-is made, and never edited by an agent after; the plan behind it is one
+is made, and never edited by an agent after, save one setting, as it is
+made, when its pictures' upload was refused; the plan behind it is one
 collapsed comment, the planner's, found again by its hidden first line
 and edited in place on a change, or the project's Detail address in that
 comment; anyone opens one, the assistant writes them on the owner's

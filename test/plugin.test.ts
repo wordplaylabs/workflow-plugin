@@ -1387,7 +1387,7 @@ describe("an idea is asked about before anything is written", () => {
       '`Make it an issue`, "Shared with the others to discuss and come back to another day; nothing is planned yet" (in a project with an Issues heading and `land: pull-request`)',
     );
     expect(first).toContain(
-      '`Brief it`, "A planner plans it now; the plan waits for your word to build, as usual"',
+      '`Brief it`, "A planner plans it now and it is built as a draft pull request; say so to keep it for your word"',
     );
     expect(first).toContain('`Not yet`, "Nothing is written; keep talking it through"');
     expect(first).toContain("Nothing is written on Not yet.");
@@ -1423,7 +1423,7 @@ describe("an idea is asked about before anything is written", () => {
       "With an **Issues** heading and `land: pull-request`, a topic the people discuss is an issue",
     );
     expect(issues).toContain(
-      'An issue alone, `Make it an issue` with no brief, leaves out the line "The plan behind this: the first comment." and takes no label until a brief carries its number; the topic ends as answered, with its address.',
+      'An issue alone, `Make it an issue` with no brief, leaves out the line "The plan behind this: a collapsed comment below, once it is planned." and takes no label until a brief carries its number; the topic ends as answered, with its address.',
     );
     expect(issues).toContain('--label "status: planning"`, the label left out for an issue alone.');
     expect(issues).toContain(
@@ -2010,7 +2010,7 @@ describe("the setup interview", () => {
       "utf8",
     ).replace(/\s+/g, " ");
     expect(text).toContain(
-      "header `Issues`: \"This is about whether the topics people talk over here live on GitHub, as issues they can comment on. The project's Claude would write each issue, and a plan is built once the issue is marked ready. Should topics here become GitHub issues that the project's Claude writes and the people comment on?\"",
+      "header `Issues`: \"This is about whether the topics people talk over here live on GitHub, as issues they can comment on. The project's Claude would write each issue, and a plan is built as a draft pull request once planned. Should topics here become GitHub issues that the project's Claude writes and the people comment on?\"",
     );
     expect(text).not.toContain('"Should topics here');
   });
@@ -3633,5 +3633,147 @@ describe("the agent a project's chats open as", () => {
 
   it("sets no agent itself", () => {
     expect(existsSync(new URL("../plugins/workflow/settings.json", import.meta.url))).toBe(false);
+  });
+});
+
+// plans/owner-requests-nov-25.md: the owner's requests of 24 and 25 November as the plugin's rules.
+describe("the agents keep an issue tidy, build a finished plan, act on named people's tasks and fix hiccups", () => {
+  const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
+  const read = (path: string) => readFileSync(join(plugin, path), "utf8");
+  const flat = (path: string) => read(path).replace(/\s+/g, " ");
+  const section = (path: string, heading: string) =>
+    new RegExp(`^## ${heading}\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, "m")
+      .exec(read(path))![1]
+      .replace(/\s+/g, " ");
+
+  it("an issue's description is written once and its plan is one collapsed comment, edited in place", () => {
+    const github = flat("docs/github.md");
+    expect(github).not.toContain("issue edit <n> --body-file");
+    expect(github).not.toContain("--edit-last");
+    const issues = section("docs/github.md", "GitHub issues");
+    expect(issues).toContain(
+      "The plan behind this: a collapsed comment below, once it is planned. Comment to poke holes or add what is missing; it is built as a draft pull request once planned, and a comment is taken in.",
+    );
+    expect(issues).toContain(
+      "The body is written when the issue is made and no agent edits it after; a hand-opened issue's body is never edited.",
+    );
+    const plan = section("docs/github.md", "A plan with an `Issue` line");
+    expect(plan).toContain("No body is written");
+    expect(plan).toContain(
+      "<!-- workflow: plan --> <details><summary>The whole plan: <the plan's title></summary>",
+    );
+    expect(plan).toContain(
+      '--jq \'.[] | select(.user.type == "Bot") | select(.body | startswith("<!-- workflow: plan -->") or startswith("<details><summary>The whole plan")) | .id\'',
+    );
+    expect(plan).toContain(
+      'plans gh api -X PATCH "repos/{owner}/{repo}/issues/comments/<id>" -F body=@plans/<topic>/plan-comment.md`; with several, the first is patched and the rest left.',
+    );
+    expect(plan).toContain("nobody else posts a plan or a brief on an issue.");
+    expect(github).toContain(
+      "For every agent: a plan or a brief quoted anywhere on GitHub, in an issue, a comment or a pull request, is inside `<details>` under a one-line summary, never open.",
+    );
+    expect(flat("docs/workflow.md")).toContain(
+      "its body written once, when it is made, and never edited by an agent after; the plan behind it is one collapsed comment, the planner's, found again by its hidden first line and edited in place on a change",
+    );
+    expect(flat("docs/decisions.md")).toContain(
+      "written once; the plan behind it is one collapsed comment, edited in place.** (Javi, 25 November)",
+    );
+  });
+
+  it("a planned plan with an issue is made ready on the owner's standing word, unless he held it", () => {
+    const plan = section("docs/github.md", "A plan with an `Issue` line");
+    expect(plan).toContain(
+      '3. `plans gh issue edit <n> --remove-label "status: planning" --add-label "status: ready"`; once it has taken, write the plan\'s Ready section, on the owner\'s standing word, and hand the plan on with `plans start` as any other plan: ``` ## Ready, <date> Ready on <the owner>\'s standing word, <d Month>. ```',
+    );
+    expect(plan).toContain(
+      'A plan whose "Decided" carries `Held on <the owner>\'s word: <until what>.` gets no Ready section',
+    );
+    expect(section("docs/github.md", "GitHub issues")).toContain(
+      "only when he said to hold that one; never ask whether to.",
+    );
+    expect(flat("agents/planner.md")).toContain(
+      "Such a plan is started like any other once its Ready section is written; a held one waits, and the message says the issue's address and what it waits for.",
+    );
+    expect(flat("agents/planner.md")).not.toContain("waits for `status: ready`");
+    expect(flat("agents/assistant.md")).not.toContain("waits for your word to build");
+    expect(flat("docs/workflow.md")).toContain(
+      "**A plan with an issue is built once planned**: the planner writes its Ready section on the owner's standing word",
+    );
+    expect(flat("docs/decisions.md")).toContain(
+      "- `ready-before-built` **A plan with an issue is built once it is planned, on the owner's standing word, unless he said to hold that one;",
+    );
+  });
+
+  it("a named person's clear task on GitHub is acted on without the owner", () => {
+    const reaches = section("docs/github.md", "What reaches you from GitHub");
+    expect(reaches).toContain(
+      "a task or a change from a person **People** names, by the GitHub login it gives them, or by name where it gives none: when it is clear and not the owner's call, act on it without him.",
+    );
+    expect(reaches).toContain("`Lands: topic <the head branch>, waiting; lands in #<n>.`");
+    expect(reaches).toContain(
+      "Reply once, as the app, only when they would otherwise not know it was taken: `On it: <what will change, in a line>.`",
+    );
+    expect(reaches).toContain(
+      "the reversal of a rule with his or a third person's name, a direction beyond the issue's or pull request's topic, a merge, a production push, money or a secret;",
+    );
+    expect(reaches).toContain("a change from a writer **People** does not name");
+    const docs = flat("docs/workflow.md");
+    expect(docs).toContain(
+      "**People** (whose calls are theirs, what each decides, and each one's GitHub login, whose clear tasks on GitHub the queue acts on)",
+    );
+    expect(docs).toContain("decisions.md#people-act-on-github)");
+    expect(flat("docs/decisions.md")).toContain(
+      "- `people-act-on-github` **A clear task from a person the project names, in an issue or a pull request, is acted on without the owner.** (Javi, 25 November)",
+    );
+  });
+
+  it("the assistant fixes a hiccup without asking or telling", () => {
+    const assistant = flat("agents/assistant.md");
+    expect(assistant).not.toContain("else ask once, saying what it holds");
+    expect(assistant).toContain(
+      '`plans end <id> --now` for a chat ${user_config.owner} names, or on your own for one that is stuck, stale or holds a plan the queue gave to another ("Hiccups")',
+    );
+    const hiccups = section("agents/assistant.md", "Hiccups");
+    expect(hiccups).toContain("ask nothing and tell him nothing.");
+    expect(hiccups).toContain(
+      "Try the same fix twice at most for one fault; one still there is a failure you tell him, with what was tried.",
+    );
+    expect(hiccups).toContain(
+      "Never this way: `plans start --owner-said`, a merge, a forced push, a production push.",
+    );
+    const order = read("agents/assistant.md");
+    expect(order.indexOf("## Hiccups")).toBeGreaterThan(order.indexOf("## Decisions taken"));
+    expect(section("agents/assistant.md", "What you tell him unasked")).toContain(
+      "a failure, one that changes the product, needs his call or needs a step only he can take",
+    );
+    expect(section("agents/assistant.md", "Staying ready")).toContain(
+      'a fault its line names you fix by "Hiccups", and tell him only when it is still there after its fixes.',
+    );
+    const docs = flat("docs/workflow.md");
+    expect(docs).toContain(
+      "the assistant runs it on the owner's word, or its own for a chat that is stuck. (decisions.md#end-now)",
+    );
+    expect(docs).toMatch(
+      /\*\*A hiccup is fixed, not asked about\*\*[^*]*\(decisions\.md#hiccups-fixed\)/,
+    );
+    expect(flat("docs/decisions.md")).toContain(
+      "- `hiccups-fixed` **A hiccup of the queue is fixed by whatever works, never asked about or reported.** (Javi, 25 November)",
+    );
+  });
+
+  it("a question names no choice by its place and never asks to hold", () => {
+    const docs = flat("docs/workflow.md");
+    expect(docs).toContain(
+      'A choice is named by what he gets, never by its place ("the first option") or by an earlier message he may not have in front of him; and no question asks whether to hold work, since work goes on unless he said to hold it.',
+    );
+    expect(docs).toContain(
+      "`scripts/plain-words.mjs` refuses a question that names code, is one sentence or names a choice by its place.",
+    );
+    expect(flat("docs/decisions.md")).toContain(
+      "A choice named by its place sent him back to a chat he did not have (Javi, 25 November).",
+    );
+    expect(read("scripts/plain-words.mjs")).toContain(
+      'refers to a choice by its place ("${placed}")',
+    );
   });
 });

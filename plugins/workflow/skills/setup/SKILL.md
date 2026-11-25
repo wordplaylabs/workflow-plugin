@@ -247,8 +247,8 @@ is stacked only on one it cannot be built without.
 In a project that lands by pull request (`land: pull-request`), one
 question more, header `Issues`: "This is about whether the topics people
 talk over here live on GitHub, as issues they can comment on. The
-project's Claude would write each issue, and a plan is built once the
-issue is marked ready. Should topics here become GitHub issues that the
+project's Claude would write each issue, and a plan is built as a draft
+pull request once planned. Should topics here become GitHub issues that the
 project's Claude writes and the people comment on?", with the
 options `Yes, topics become issues` (Writes an Issues heading in the
 project file and mounts your private secrets file, read only; you

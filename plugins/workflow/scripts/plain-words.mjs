@@ -2,12 +2,14 @@
 // Claude Code hook (docs/workflow.md, "The agents", "Asked in plain
 // words"): the owner reads a question on his phone, in the question tool's
 // dialog, with none of the chat in front of him, so a question that names
-// code, or is a single sentence, is sent back to be rewritten.
+// code, is a single sentence or names a choice by its place ("the first
+// option") is sent back to be rewritten.
 //
 //   plain-words.mjs prompt     on UserPromptSubmit: the turn's count of
 //                              refusals back to none
 //   plain-words.mjs question   on PreToolUse (AskUserQuestion): refuses a
-//                              question that names code or is one sentence,
+//                              question that names code, is one sentence
+//                              or names a choice by its place,
 //                              with the rule as its reason, at most twice in
 //                              a turn; the third call passes
 //
@@ -47,6 +49,17 @@ const SIGNALS = [
 
 const ADDRESS = /https?:\/\/\S+/g;
 
+/**
+ * A choice named by its place, not by what he gets: "the first option", "the 2nd choice",
+ * "option #2". An ordinal needs "the" before it and a number word is two to four, so "your
+ * first choice" and "an option one could take" pass; the letters are capitals only, so "the
+ * choice a reader makes" passes too.
+ */
+const PLACED = [
+  /\bthe (?:first|second|third|fourth|last|former|latter|1st|2nd|3rd|4th) (?:option|choice)\b|\b(?:option|choice) #?(?:[1-4]|two|three|four)\b/i,
+  /\b(?:[Oo]ption|[Cc]hoice) #?[A-D]\b/,
+];
+
 /** The code names in a text, once each; a name inside another found (the file of a path) is the longer one's. */
 function codeNames(text) {
   const plain = String(text || "").replace(ADDRESS, " ");
@@ -67,10 +80,11 @@ function singleSentence(text) {
   return (plain.match(/[.!?]["'\u201d\u2019)\]]*(?=\s|$)/g) || []).length < 2;
 }
 
-/** What the call's questions name and whether one is a single sentence. */
+/** What the call's questions name, whether one is a single sentence, and the first choice named by its place. */
 export function judge(questions = []) {
   const found = [];
   let single = false;
+  let placed = "";
   for (const q of Array.isArray(questions) ? questions : []) {
     const fields = [
       q?.question,
@@ -79,21 +93,36 @@ export function judge(questions = []) {
     ];
     for (const field of fields)
       for (const one of codeNames(field)) if (!found.includes(one)) found.push(one);
+    if (!placed)
+      for (const field of fields) {
+        const text = String(field || "").replace(ADDRESS, " ");
+        const m = PLACED.map((one) => one.exec(text)).find(Boolean);
+        if (m) {
+          placed = m[0];
+          break;
+        }
+      }
     if (singleSentence(q?.question)) single = true;
   }
-  return { found, single };
+  return { found, single, placed };
 }
 
 /** The reason the model reads, word for word; null when nothing is found. */
-export function reasonFor({ found = [], single = false }, name = owner()) {
-  if (!found.length && !single) return null;
+export function reasonFor({ found = [], single = false, placed = "" }, name = owner()) {
+  if (!found.length && !single && !placed) return null;
   const names = found
     .slice(0, 3)
     .map((one) => `"${one}"`)
     .join(", ");
-  const why = [found.length ? `names code (${names})` : "", single ? "is a single sentence" : ""]
-    .filter(Boolean)
-    .join(" and ");
+  const reasons = [
+    found.length ? `names code (${names})` : "",
+    single ? "is a single sentence" : "",
+    placed ? `refers to a choice by its place ("${placed}")` : "",
+  ].filter(Boolean);
+  const why =
+    reasons.length > 2
+      ? `${reasons.slice(0, -1).join(", ")} and ${reasons.at(-1)}`
+      : reasons.join(" and ");
   return `The question ${why}: ${name} reads it on his phone with none of this chat in front of him. Rewrite it by "Asked in plain words" (the workflow's docs): say what it is about in the words he used when he asked for it, the situation from the start in two or three sentences, and what each choice means to him and costs him; call things by what they do for him, not by their names in the code, and keep the names for the plan. Options are what he gets, a few words each, the recommended one first.`;
 }
 

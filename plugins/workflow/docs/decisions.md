@@ -160,7 +160,9 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   October) Apple's alerts (a title that says what it is about, buttons
   that name the result); Nielsen Norman's confirmation dialogs; GOV.UK's
   question pages and clear language; Anthropic's note that the dialog may
-  be all that is on the screen. plans/owner-questions-plain-and-once.md.
+  be all that is on the screen. A choice named by its place sent him back
+  to a chat he did not have (Javi, 25 November).
+  plans/owner-questions-plain-and-once.md, plans/owner-requests-nov-25.md.
 
 ## The project file
 
@@ -608,10 +610,20 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   hour by its docs and eight by this machine's log, so idle chats
   lingered. plans/idle-chats-end.md.
 - `end-now` **`plans end <id> --now` ends a named chat whatever it is
-  doing.** (Javi, 31 October) A stuck turn or a question no one will
+  doing, on the owner's word or the assistant's own.** (Javi, 25
+  November) A stuck turn or a question no one will
   answer otherwise holds its executor's lock for good. The fresh
   executor starts in the ended one's number, and the hand-over names
-  its worktree. plans/end-a-stuck-chat.md, plans/parallel-executors.md.
+  its worktree. The assistant's own came with `hiccups-fixed`; the rule
+  was the owner's word alone from 31 October.
+  plans/end-a-stuck-chat.md, plans/parallel-executors.md,
+  plans/owner-requests-nov-25.md.
+- `hiccups-fixed` **A hiccup of the queue is fixed by whatever works,
+  never asked about or reported.** (Javi, 25 November) He was asked
+  whether to close an idle executor holding a lease; such faults change
+  nothing in the product, and each fix is one the queue can undo.
+  Bounded at two tries for one fault, as every loop here is.
+  plans/owner-requests-nov-25.md.
 - `archiving` **Archiving a chat in the Claude app does not stop it.**
   (observed in Claude Code 2.1.113, 27 October) The app is a window into
   the session; the process's exit is what archives the chat.
@@ -742,12 +754,20 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   - ~~A change to another person's part is built as any plan, with a
     message for the group the owner sends.~~ (Javi, 28 October)
 - `issue-is-the-overview` **A topic the people discuss is a GitHub
-  issue, one sentence of what should be true with the detail under it
-  and the plan behind it.** (Javi, 3 November) People comment where
-  they already read; GitHub's bug template leads with one line, Shape
-  Up's pitch is posted for comments with the detail kept out, and
-  Linear keeps a document apart from the description.
-  plans/plans-as-github-issues.md.
+  issue, one sentence of what should be true with the detail under it,
+  written once; the plan behind it is one collapsed comment, edited in
+  place.** (Javi, 25 November) People comment where they already read;
+  GitHub's bug template leads with one line, Shape Up's pitch is posted
+  for comments with the detail kept out, and Linear keeps a document
+  apart from the description. Plans are large and too low level to read
+  by default; a description rewritten into a "Decided" list read as
+  another issue; one issue got three plan comments; the comment is found
+  again by a hidden first line, as sticky comment bots do
+  (marocchino/sticky-pull-request-comment).
+  plans/plans-as-github-issues.md, plans/owner-requests-nov-25.md.
+  - ~~A topic the people discuss is a GitHub issue, one sentence of what
+    should be true with the detail under it and the plan behind it.~~
+    (Javi, 3 November)
 - `issue-alone` **An issue nobody plans yet carries no status label and
   no plan line until a brief carries its number.** (Javi, 4 November) An
   idea made an issue to discuss would otherwise read on GitHub as being
@@ -759,14 +779,22 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   `[bot]`, its token is minted on the machine, so no workflow and no
   runner; who opened a pull request need not be told apart, since the
   checkout's plans name the queue's own. plans/plans-as-github-issues.md.
-- `ready-before-built` **A plan with an issue is built once the issue
-  is labelled ready, or the owner says so, its comments folded by whose
-  call each is; the issue's stage is one `status:` label.** (Javi, 3
-  November) Shape Up's bet is taken at the table after the comments; a
-  person's comment on their own part is their call already
-  (`decision-has-a-name`), and the rest is his; a `status:` group is
-  how projects label stages on GitHub, which has no standard of its
-  own, and the words are the queue's. plans/plans-as-github-issues.md.
+- `ready-before-built` **A plan with an issue is built once it is
+  planned, on the owner's standing word, unless he said to hold that
+  one; the issue's stage is one `status:` label.** (Javi, 25 November)
+  "Unless I explicitly say otherwise, go ahead": a draft pull request is
+  where the people read it, and nothing lands until a person merges. A
+  held plan is built once the issue is labelled ready, or he says so,
+  its comments folded by whose call each is: a person's comment on their
+  own part is their call already (`decision-has-a-name`), and the rest
+  is his; a `status:` group is how projects label stages on GitHub,
+  which has no standard of its own, and the words are the queue's. The
+  hold is his word on one plan, in its "Decided", not a setting.
+  plans/plans-as-github-issues.md, plans/owner-requests-nov-25.md.
+  - ~~A plan with an issue is built once the issue is labelled ready, or
+    the owner says so, its comments folded by whose call each is; the
+    issue's stage is one `status:` label.~~ (Javi, 3 November) Shape
+    Up's bet is taken at the table after the comments.
 - `github-webhook` **What people write on GitHub reaches the queue by
   the app's webhook to the container, and the assistant acts on it in
   Remote Control.** (Javi, 3 November) He wants the work on his own
@@ -791,6 +819,13 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/app-old-registration-said.md, plans/checks-read-with-the-app.md,
   plans/merged-pr-refreshes-the-rest.md,
   plans/open-assistant-reads-github-notes.md.
+- `people-act-on-github` **A clear task from a person the project
+  names, in an issue or a pull request, is acted on without the
+  owner.** (Javi, 25 November) They have write access and the webhook
+  already takes only writers; a small low-level comment waited on him
+  for nothing; what is plainly his is still asked: a rule with a name
+  reversed, a direction beyond the topic, a merge, a production push,
+  money or a secret. plans/owner-requests-nov-25.md.
 - `note-sent-to-open-chat` **A note from GitHub reaches an open
   assistant chat by a message the queue sends itself, within a
   minute.** (Javi, 24 November) A failed run sat forty minutes in a

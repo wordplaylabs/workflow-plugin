@@ -129,6 +129,40 @@ describe("the plain-words check", () => {
     ).toBe(refusal('names code ("hooks.json")'));
   });
 
+  // plans/owner-requests-nov-25.md, part 6: a choice is named by what he gets, never by its place.
+  it("refuses a question that names a choice by its place, with the new clause", () => {
+    expect(
+      run(lab, "question", call(session(), question("Should it close, as in the first option?"))),
+    ).toBe(refusal('refers to a choice by its place ("the first option")'));
+    expect(
+      run(lab, "question", call(session(), question("Should it close, as option 2 says?"))),
+    ).toBe(refusal('refers to a choice by its place ("option 2")'));
+    for (const [asked, placed] of [
+      ["Should it close, as the 2nd option says?", "the 2nd option"],
+      ["Should it close, as option #2 says?", "option #2"],
+    ])
+      expect(run(lab, "question", call(session(), question(asked)))).toBe(
+        refusal(`refers to a choice by its place ("${placed}")`),
+      );
+    expect(
+      run(lab, "question", call(session(), { ...question(""), question: "Is `x` option B?" })),
+    ).toBe(
+      refusal(
+        'names code ("`"), is a single sentence and refers to a choice by its place ("option B")',
+      ),
+    );
+  });
+
+  it("passes the first time you open it and the choice a reader makes, which name no choice by its place", () => {
+    for (const asked of [
+      "Should it close the first time you open it?",
+      "Should it keep the choice a reader makes?",
+      "Is closing it your first choice?",
+      "Is there an option one could take without losing the draft?",
+    ])
+      expect(run(lab, "question", call(session(), question(asked)))).toBe("");
+  });
+
   it("names three things found at most", () => {
     const out = run(lab, "question", call(session(), question("Should a_b, c_d, e_f and g_h go?")));
     expect(out).toContain('names code (\\"a_b\\", \\"c_d\\", \\"e_f\\")');

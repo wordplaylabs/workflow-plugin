@@ -182,7 +182,9 @@ Sources as its "Where to look".
 
 **A plan with an `Issue` line** goes behind its issue: read "A plan with
 an `Issue` line" in `${CLAUDE_PLUGIN_ROOT}/docs/github.md` and follow it.
-Such a plan waits for `status: ready`; say the issue's address.
+Such a plan is started like any other once its Ready section is written;
+a held one waits, and the message says the issue's address and what it
+waits for.
 
 **Any other plan** is handed to the executor ("The queue"): run `plans
 start plans/<topic>.md` and do what its line says: send the message it

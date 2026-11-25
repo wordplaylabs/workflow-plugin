@@ -38,8 +38,9 @@ part of building software is the decisions.
 - **The maker**, for a project whose changes are small and many: one chat
   that decides, builds and records, with no queue.
 - **Issues**, where a project turns them on: a topic the people discuss
-  is a GitHub issue the project's own app writes, the plan behind it, and
-  it is built once the issue is labelled `status: ready`. The app's
+  is a GitHub issue the project's own app writes, the plan behind it a
+  collapsed comment, and it is built as a draft pull request once
+  planned, unless the owner holds it. The app's
   webhook brings what people with write access write there to the
   assistant, in a chat on the owner's machine.
 

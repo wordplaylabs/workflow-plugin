@@ -198,8 +198,11 @@ then what each choice means to him and costs him. Nothing is called by its
 name in the code, nothing in backticks; the header is the topic in a word
 or two; each label is what he gets, each description what it costs; the
 recommended option first and marked; one decision per question, up to four
-a call. `scripts/plain-words.mjs` refuses a question that names code or is
-one sentence. Not this: header `Connect`,
+a call. A choice is named by what he gets, never by its place ("the
+first option") or by an earlier message he may not have in front of him;
+and no question asks whether to hold work, since work goes on unless he
+said to hold it. `scripts/plain-words.mjs` refuses a question that names
+code, is one sentence or names a choice by its place. Not this: header `Connect`,
 question `Should the connect script keep the terminal open after the
 hand-over, or exit on Ctrl+C?`, options `Keep open` / `Exit`. But this:
 header `Hand-over`, question `This is about what a reader sees after they
@@ -357,7 +360,8 @@ takes a slot written as `plans hold`), **After the
 push** (what to watch), **Reading** (which tools read code and docs),
 **Products** (the product people know for each kind of thing, which
 `design-research` follows first), **People** (whose calls are theirs,
-and what each decides) and **Issues** (`Detail:`, a skill or command that
+what each decides, and each one's GitHub login, whose clear tasks on
+GitHub the queue acts on) and **Issues** (`Detail:`, a skill or command that
 turns a plan into an address an issue links, and `Check:`, a command that
 fails on what may not leave the repository; its presence turns issues on
 with `land: pull-request`, since issues need pull requests)
@@ -640,7 +644,16 @@ process `not running`. (decisions.md#waiting-is-an-open-prompt)
 **`plans end <id> --now` ends a named chat whatever it is doing**, writes
 its plan a "Handing over, <date>, ended by <owner>" section, releases
 the lock and starts a fresh session on it; the assistant runs it on the
-owner's word. (decisions.md#end-now)
+owner's word, or its own for a chat that is stuck. (decisions.md#end-now)
+
+**A hiccup is fixed, not asked about**: a stuck or stale executor, a
+plan the queue leased wrongly, a run that fails on what the diff does
+not explain or a refused upload is fixed by the assistant by whatever
+works, `plans end <id> --now`, `plans start`, a rerun or the command
+again, and the owner is neither asked nor told. The same fix is tried
+twice at most for one fault, and one still there is told as a failure,
+with what was tried; never a merge, a forced or production push, or a
+start past the owner's word this way. (decisions.md#hiccups-fixed)
 
 **Archiving a chat in the Claude app does not stop it**; `claude stop` or
 `plans end` does. (decisions.md#archiving)
@@ -738,11 +751,14 @@ conversation; asked, it is in his words, ready to paste. A group that has
 already agreed is written in "Decided". (decisions.md#group-message)
 
 **A topic the people discuss is a GitHub issue**: one sentence of what
-should be true, the decisions and what is left out under it, the plan
-behind it as a collapsed comment or the project's Detail address, never
-the body; anyone opens one, the assistant writes them on the owner's
-word, the planner adds the plan's overview, the executor writes `For
-#<n>` on the pull request. (decisions.md#issue-is-the-overview)
+should be true, the decisions under it, its body written once, when it
+is made, and never edited by an agent after; the plan behind it is one
+collapsed comment, the planner's, found again by its hidden first line
+and edited in place on a change, or the project's Detail address in that
+comment; anyone opens one, the assistant writes them on the owner's
+word, the executor writes `For #<n>` on the pull request. A plan or a
+brief quoted anywhere on GitHub is collapsed under a one-line summary.
+(decisions.md#issue-is-the-overview)
 
 **An issue nobody plans yet carries no status label and no plan line**
 until a brief carries its number, and its topic ends as answered, with
@@ -752,10 +768,12 @@ the issue's address. (decisions.md#issue-alone)
 gh`, pull requests included; the push alone is the person's token.
 (decisions.md#project-app)
 
-**A plan with an issue waits for Ready**: `plans` lists it as planned,
-nobody starts it, and the label `status: ready` or the owner's word
-writes the section, comments folded by whose call each is; the issue's
-stage is one `status:` label, `planning`, `planned`, `ready`, `building`.
+**A plan with an issue is built once planned**: the planner writes its
+Ready section on the owner's standing word, labels the issue `status:
+ready` and starts it, unless he said to hold that one, which `plans`
+lists as planned until the label `status: ready` or his word writes the
+section, comments folded by whose call each is; the issue's stage is one
+`status:` label, `planning`, `planned`, `ready`, `building`.
 (decisions.md#ready-before-built)
 
 **What people with write access write on GitHub reaches the queue by the
@@ -771,7 +789,10 @@ not move its line past what it missed; `plans` says when it last heard
 GitHub and when none listened; a listener an older copy of the
 plugin started is replaced by the first start that finds it; the assistant
 answers as the app, writes the brief, or writes Ready and starts the
-build. (decisions.md#github-webhook, decisions.md#note-sent-to-open-chat)
+build, and acts on a clear task from a person **People** names without
+the owner, asking him only what is plainly his.
+(decisions.md#github-webhook, decisions.md#note-sent-to-open-chat,
+decisions.md#people-act-on-github)
 
 **The day's fixes.** With `land: pull-request`, the day's `Lands: fix.`
 plans are one pull request, `Small fixes, <d Month yyyy>`, from

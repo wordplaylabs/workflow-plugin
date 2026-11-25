@@ -4,6 +4,10 @@ The assistant and the planner read this in a project with `land:
 pull-request`, at the step their agent file names. `<the owner>` in a
 template is the owner's name as the agent file gives it.
 
+For every agent: a plan or a brief quoted anywhere on GitHub, in an
+issue, a comment or a pull request, is inside `<details>` under a
+one-line summary, never open.
+
 ## GitHub issues
 
 With an **Issues** heading and `land: pull-request`, a topic the people
@@ -22,22 +26,29 @@ say what it says.
   ## Decided
   - <A thing already settled, one line, its reason.>
 
-  The plan behind this: the first comment.
-  Comment to poke holes or add what is missing; it is built as a draft pull request once the issue is labelled status: ready.
+  The plan behind this: a collapsed comment below, once it is planned.
+  Comment to poke holes or add what is missing; it is built as a draft pull request once planned, and a comment is taken in.
   ```
 
-  `## Decided` only when the brief has one. An issue alone, `Make it an
-  issue` with no brief, leaves out the line "The plan behind this: the
-  first comment." and takes no label until a brief carries its number;
-  the topic ends as answered, with its address. Run the Issues heading's
+  `## Decided` only when the brief has one. A held brief (its "Decided"
+  has `Held on <the owner>'s word: <until what>.`) ends its second line
+  `Comment to poke holes or add what is missing; a comment is taken in.`
+  An issue alone, `Make it an
+  issue` with no brief, leaves out the line "The plan behind this: a
+  collapsed comment below, once it is planned." and takes no label until
+  a brief carries its number; the topic ends as answered, with its
+  address. The body is written when the issue is made and no agent edits
+  it after; a hand-opened issue's body is never edited. Run the Issues heading's
   `Check` on the file (with none, read it for a host address, a secret
   or a personal email), then `plans gh issue create --title "<the
   sentence>" --body-file plans/<topic>/issue.md --label "status:
   planning"`, the label left out for an issue alone.
 - **The labels**, created when missing, one at a time: `status: planning` with the brief, added (`plans gh issue edit
   <n> --add-label "status: planning"`) when a brief takes the number of
-  an issue that has no label; `status: planned` the planner's; `status: ready` a writer's, or yours on his word; `status: building` the executor's.
-- **Ready on his word**: read the issue's comments (`plans gh issue view
+  an issue that has no label; `status: planned` the planner's, on a held plan; `status: ready` the planner's on the owner's standing word, a writer's, or yours on his word; `status: building` the executor's.
+- **Held**: a brief's "Decided" gets `Held on <the owner>'s word: <until
+  what>.` only when he said to hold that one; never ask whether to.
+- **Ready on his word**, for a held plan: read the issue's comments (`plans gh issue view
   <n> --comments`); a change to the commenter's own part goes in under
   their name, anything else to him with the question tool. Then:
 
@@ -66,9 +77,25 @@ once:
 - a question, one comment as the app from the plan or docs, never a guess,
   saying so when they do not say (`plans gh issue comment <n>
   --body-file`);
-- a change, a brief with its `Issue` line, or a "Decided" line when the
-  plan is planned and it is the commenter's call, else the question tool
-  to the owner;
+- a task or a change from a person **People** names, by the GitHub
+  login it gives them, or by name where it gives none: when it is clear
+  and not the owner's call, act on it without him. One that fits a short
+  plan ("Which session a topic goes to") is written and started at once,
+  landing in that pull request when it was said on one of the queue's
+  own (`Lands: topic <the head branch>, waiting; lands in #<n>.`), or is
+  a "Decided" line with their name when the plan is planned and has no
+  Building line; anything bigger is a brief, with its `Issue` line when
+  it was said on an issue, or that `Lands` line when on one of the
+  queue's own pull requests. Said on another person's pull request, its
+  plan takes a topic of its own. Reply once, as the app, only when they would otherwise
+  not know it was taken: `On it: <what will change, in a line>.` An
+  unclear one is asked back in one plain comment. The owner's call,
+  asked with the question tool as today: the reversal of a rule with his
+  or a third person's name, a direction beyond the issue's or pull
+  request's topic, a merge, a production push, money or a secret;
+- a change from a writer **People** does not name, a brief with its
+  `Issue` line, or a "Decided" line when the plan is planned and it is
+  the commenter's call, else the question tool to the owner;
 - `plan`, a brief started as exit 4;
 - `ready`, the Ready step, first line `Ready on GitHub, <d Month>.`;
 - `review`, a short plan for a fix or an answer on the pull request;
@@ -126,31 +153,49 @@ names none. A failed run it answers is a line of "What was asked".
 ## A plan with an `Issue` line
 
 A plan with an `Issue` line goes behind its issue, as the project's
-app ("A topic the people discuss is a GitHub issue"): the body written to
-`plans/<topic>/issue.md`, a hand-opened issue keeping its title and its
-words above the headings, nothing else:
+app ("A topic the people discuss is a GitHub issue"). No body is
+written: the issue's was written once, when it was made, and a
+hand-opened issue keeps its own.
 
-```
-## Decided
-- <A thing already settled, one line, its reason; the plan's Decided.>
+1. Write `plans/<topic>/plan-comment.md`:
 
-## What will be built
-- <A decision, one line, with the product or rule it rests on; The short version.>
+   ```
+   <!-- workflow: plan -->
+   <details><summary>The whole plan: <the plan's title></summary>
 
-## Not in this
-- <The plan's Not in this plan, one line each.>
+   <the plan, its status sections cut>
+   </details>
+   ```
 
-The plan behind this: <the Detail address, or "the first comment">.
-Comment to poke holes or add what is missing; it is built as a draft pull request once the issue is labelled status: ready.
-```
+   With a `Detail` step, run it, and its address replaces the details
+   block, after the first line. The file passes the **Issues** heading's
+   `Check` command first (with none, read it for a host address, a
+   secret or a personal email).
+2. Find the plan comment among the app's own:
 
-Both files pass the **Issues** heading's `Check` command first (with
-none, read them for a host address, a secret or a personal email). Then
-`plans gh issue edit <n> --body-file plans/<topic>/issue.md
---remove-label "status: planning" --add-label "status: planned"`, and
-the plan, status sections cut, in `<details><summary>The whole
-plan</summary>` … `</details>`, written to
-`plans/<topic>/plan-comment.md` and posted with `plans gh issue comment
-<n> --body-file` (`--edit-last` when it changes), or the `Detail` step
-run and its address in the body. Such a plan waits for `status: ready`;
-say the issue's address.
+   ```
+   plans gh api "repos/{owner}/{repo}/issues/<n>/comments" --paginate --jq '.[] | select(.user.type == "Bot") | select(.body | startswith("<!-- workflow: plan -->") or startswith("<details><summary>The whole plan")) | .id'
+   ```
+
+   With none,
+   `plans gh issue comment <n> --body-file
+   plans/<topic>/plan-comment.md`. With one, `plans gh api -X PATCH
+   "repos/{owner}/{repo}/issues/comments/<id>" -F
+   body=@plans/<topic>/plan-comment.md`; with several, the first is
+   patched and the rest left. Whoever changes a plan with an `Issue`
+   line that no executor holds runs steps 1 and 2 again; nobody else
+   posts a plan or a brief on an issue.
+3. `plans gh issue edit <n> --remove-label "status: planning"
+   --add-label "status: ready"`; once it has taken, write the plan's
+   Ready section, on the owner's standing word, and hand the plan on
+   with `plans start` as any other plan:
+
+   ```
+   ## Ready, <date>
+
+   Ready on <the owner>'s standing word, <d Month>.
+   ```
+4. A plan whose "Decided" carries `Held on <the owner>'s word: <until
+   what>.` gets no Ready section: `plans gh issue edit <n> --remove-label
+   "status: planning" --add-label "status: planned"`, and it waits for
+   "Ready on his word"; say the issue's address and what it waits for.

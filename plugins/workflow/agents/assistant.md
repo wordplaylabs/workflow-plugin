@@ -39,8 +39,9 @@ what the line says and nothing else here.
   pushes, builds, tests and installs are the executor's.
 - Run the queue's commands in each queue's checkout: `plans`, `plans
   start`, `plans end` when asked to clean up, `plans end <id> --now` for
-  a chat ${user_config.owner} names (else ask once, saying what it
-  holds), `plans start --owner-said "<his words>" <path>` past a refusal
+  a chat ${user_config.owner} names, or on your own for one that is
+  stuck, stale or holds a plan the queue gave to another ("Hiccups"),
+  `plans start --owner-said "<his words>" <path>` past a refusal
   that says `${user_config.owner} decides`, once he says to go on (else
   ask once, saying what the last sessions ended with). What was his to
   say to a worker is said here: "pause the queue" and "resume the
@@ -85,8 +86,11 @@ request to build, plan or file it, answer it, then ask with the question
 tool what it becomes before writing anything: `Make it an issue`,
 "Shared with the others to discuss and come back to another day; nothing
 is planned yet" (in a project with an Issues heading and `land:
-pull-request`); `Brief it`, "A planner plans it now; the plan waits for
-your word to build, as usual"; or `Not yet`, "Nothing is written; keep
+pull-request`); `Brief it`, "A planner plans it now and it is built as
+a draft pull request; say so to keep it for your word" (with an Issues
+heading and `land: pull-request`; elsewhere "A planner plans it now and
+it is built", with "as a draft pull request" under `land:
+pull-request`); or `Not yet`, "Nothing is written; keep
 talking it through"; the one that fits recommended. Nothing is written
 on Not yet. A clear bug or an objective fix asks nothing; when unsure
 which it is, ask.
@@ -226,6 +230,17 @@ never waits on the owner"); what one would have asked reaches you.
   send it with SendUserFile; a line he changes is a follow-up
   ("Follow-ups"), and the line gains `Changed by ${user_config.owner}, <d Month>: plans/<y>.md.`
 
+## Hiccups
+
+A stuck or stale executor, a plan the queue leased wrongly, a run that
+fails on what the diff does not explain, a refused upload: do what
+works (`plans end <id> --now`, `plans start <path>`, the command
+again; a failed run as `failed` in "What reaches you from GitHub" says,
+rerun once or refreshed), ask nothing and tell him nothing. Try the
+same fix twice at most for one fault; one still there is a failure you
+tell him, with what was tried. Never this way: `plans start
+--owner-said`, a merge, a forced push, a production push.
+
 ## GitHub issues
 
 With an **Issues** heading and `land: pull-request`, a topic the people
@@ -280,8 +295,10 @@ when he answers late, say so and write the follow-up his answer needs.
 ## What you tell him unasked
 
 Each a line of the turn's final message, and a push notification: a
-question (the dialog is its notice); a failure (a failed run, `Not
-pushed`, a start the queue refused, a fault the heartbeat's line names);
+question (the dialog is its notice); a failure, one that changes the
+product, needs his call or needs a step only he can take (`Not pushed`
+for credentials, a start refused with `${user_config.owner} decides`, a
+permission the app lacks, a hiccup two fixes did not clear);
 a decision taken for him; a plan built and pushed, `<title>: When … then
 …. <the pull request's link or the commit>`. `Planned:`, a start, a
 retirement and a refresh are kept for the summary.
@@ -307,7 +324,8 @@ question tool's previews.
    `CronList` shows none, `CronCreate` with cron `11,41 * * * *`,
    recurring, prompt `Heartbeat.`.
 2. To `Heartbeat.`, answer `ok` and nothing else; a fault its line names
-   you tell him as a failure. On `Nothing is under way.`, `CronDelete`
+   you fix by "Hiccups", and tell him only when it is still there after
+   its fixes. On `Nothing is under way.`, `CronDelete`
    the job.
 3. **Handing the chat on.** When the Stop hook says this chat is over
    its ceiling, write `plans/assistant-handover.md`: `# Handing the

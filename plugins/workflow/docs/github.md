@@ -26,11 +26,17 @@ say what it says.
   ## Decided
   - <A thing already settled, one line, its reason.>
 
+  ![<What it shows, in one line.>](./<file>)
+
   The plan behind this: a collapsed comment below, once it is planned.
   Comment to poke holes or add what is missing; it is built as a draft pull request once planned, and a comment is taken in.
   ```
 
-  `## Decided` only when the brief has one. A held brief (its "Decided"
+  `## Decided` only when the brief has one; a picture line for each
+  screenshot or sketch the topic has in `plans/<topic>/` then, none when
+  it has none. Each picture is looked at before it goes up, and one that
+  shows a host address, a secret or a personal email is left out: the
+  `Check` reads only the text. A held brief (its "Decided"
   has `Held on <the owner>'s word: <until what>.`) ends its second line
   `Comment to poke holes or add what is missing; a comment is taken in.`
   An issue alone, `Make it an
@@ -42,7 +48,15 @@ say what it says.
   `Check` on the file (with none, read it for a host address, a secret
   or a personal email), then `plans gh issue create --title "<the
   sentence>" --body-file plans/<topic>/issue.md --label "status:
-  planning"`, the label left out for an issue alone.
+  planning" --attach plans/<topic>/<file>`, the label left out for an
+  issue alone, one `--attach` per picture the body references, so the
+  issue opens with them shown. A refused `--attach` is not tried again
+  (landing.md, "The screenshots, when `--attach` fails", finds the
+  cause): an issue the refused command made anyway, its address
+  printed, is not made twice and its body is left as made, the cause
+  said where its address is; else the command is run once more without
+  `--attach`, the body saying `Screenshots: not attached yet, kept in
+  plans/<topic>/. <The cause.>` in place of the picture lines.
 - **The labels**, created when missing, one at a time: `status: planning` with the brief, added (`plans gh issue edit
   <n> --add-label "status: planning"`) when a brief takes the number of
   an issue that has no label; `status: planned` the planner's, on a held plan; `status: ready` the planner's on the owner's standing word, a writer's, or yours on his word; `status: building` the executor's.
@@ -171,10 +185,14 @@ hand-opened issue keeps its own.
 
    <the plan, its status sections cut>
    </details>
+
+   ![<What it shows, in one line.>](./<file>)
    ```
 
-   With a `Detail` step, run it, and its address replaces the details
-   block, after the first line. The file passes the **Issues** heading's
+   A picture line for each screenshot or sketch the plan names in
+   `plans/<topic>/`, none when it names none, each looked at first as
+   the issue's are. With a `Detail` step, run
+   it, and its address replaces the details block, after the first line. The file passes the **Issues** heading's
    `Check` command first (with none, read it for a host address, a
    secret or a personal email).
 2. Find the plan comment among the app's own:
@@ -185,10 +203,23 @@ hand-opened issue keeps its own.
 
    With none,
    `plans gh issue comment <n> --body-file
-   plans/<topic>/plan-comment.md`. With one, `plans gh api -X PATCH
+   plans/<topic>/plan-comment.md --attach plans/<topic>/<file>`, one
+   `--attach` per picture the file references, so the comment shows
+   them; a refused `--attach` falls back as the issue's does ("GitHub
+   issues"), the lookup above run first: a comment the refused command
+   posted anyway is patched once as below, not posted twice. With one,
+   `plans gh api -X PATCH
    "repos/{owner}/{repo}/issues/comments/<id>" -F
    body=@plans/<topic>/plan-comment.md`; with several, the first is
-   patched and the rest left. Whoever changes a plan with an `Issue`
+   patched and the rest left. A patch keeps the images already in the
+   comment: the file takes, in place of its local references, the image
+   addresses GitHub gave the posted comment, read from its body
+   (`plans gh api "repos/{owner}/{repo}/issues/comments/<id>" --jq
+   .body`), each picture matched by its alt text as first written; a
+   picture with no address there, new or never attached, is not attached
+   on a patch, since `gh api` uploads nothing, and its path is named in
+   the comment instead, the `Screenshots: not attached yet` line kept
+   while any is. Whoever changes a plan with an `Issue`
    line that no executor holds runs steps 1 and 2 again; nobody else
    posts a plan or a brief on an issue.
 3. `plans gh issue edit <n> --remove-label "status: planning"

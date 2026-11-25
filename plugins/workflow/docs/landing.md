@@ -205,7 +205,15 @@ not attached yet, kept in plans/<topic>/. <The cause.>`, the cause `This
 container's gh is older than 2.99.` when gh's own line is `unknown flag:
 --attach`, else the step `plans gh` printed (the app's settings, or the
 installation's address). "Built" and the `Built:` message say
-`Screenshots not attached: <the cause>`.
+`Screenshots not attached: <the cause>`. On an issue (github.md, "GitHub
+issues") the upload is not tried again: a refused `gh issue create` that
+printed the issue's address made it, never a second issue, and its body
+is left as made, since an issue's body is written once; a refused `gh
+issue comment` that printed one posted the plan comment, patched once as
+the plan comment is, the line in place of the picture lines that failed
+and the uploaded ones kept; else the
+command runs once more without `--attach`, the line in place of the
+picture lines. The cause is found as above.
 
 **The checks are not waited on** ("A push is not waited on"): after
 the push and the pull request's create or edit, start the next plan;

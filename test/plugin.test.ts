@@ -1441,7 +1441,9 @@ describe("an idea is asked about before anything is written", () => {
     expect(issues).toContain(
       'An issue alone, `Make it an issue` with no brief, leaves out the line "The plan behind this: a collapsed comment below, once it is planned." and takes no label until a brief carries its number; the topic ends as answered, with its address.',
     );
-    expect(issues).toContain('--label "status: planning"`, the label left out for an issue alone.');
+    expect(issues).toContain(
+      '--label "status: planning" --attach plans/<topic>/<file>`, the label left out for an issue alone,',
+    );
     expect(issues).toContain(
       '`status: planning` with the brief, added (`plans gh issue edit <n> --add-label "status: planning"`) when a brief takes the number of an issue that has no label',
     );
@@ -3704,6 +3706,37 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
     );
     expect(flat("docs/decisions.md")).toContain(
       "written once; the plan behind it is one collapsed comment, edited in place.** (Javi, 25 November)",
+    );
+  });
+
+  // plans/screenshots-reach-github-follow-up.md
+  it("an issue attaches its topic's pictures when made and when its plan comment is first posted", () => {
+    const issues = section("docs/github.md", "GitHub issues");
+    expect(issues).toContain("![<What it shows, in one line.>](./<file>)");
+    expect(issues).toContain(
+      'plans gh issue create --title "<the sentence>" --body-file plans/<topic>/issue.md --label "status: planning" --attach plans/<topic>/<file>`, the label left out for an issue alone, one `--attach` per picture the body references, so the issue opens with them shown.',
+    );
+    expect(issues).toContain(
+      "`Screenshots: not attached yet, kept in plans/<topic>/. <The cause.>`",
+    );
+    expect(issues).toContain("else the command is run once more without `--attach`");
+    const plan = section("docs/github.md", "A plan with an `Issue` line");
+    expect(plan).toContain("</details> ![<What it shows, in one line.>](./<file>) ```");
+    expect(plan).toContain(
+      "plans gh issue comment <n> --body-file plans/<topic>/plan-comment.md --attach plans/<topic>/<file>`, one `--attach` per picture the file references, so the comment shows them;",
+    );
+    expect(plan).toContain(
+      'A patch keeps the images already in the comment: the file takes, in place of its local references, the image addresses GitHub gave the posted comment, read from its body (`plans gh api "repos/{owner}/{repo}/issues/comments/<id>" --jq .body`), each picture matched by its alt text as first written; a picture with no address there, new or never attached, is not attached on a patch, since `gh api` uploads nothing, and its path is named in the comment instead, the `Screenshots: not attached yet` line kept while any is.',
+    );
+    expect(issues).toContain("not made twice and its body is left as made");
+    expect(issues).toContain("A refused `--attach` is not tried again");
+    const landing = flat("docs/landing.md");
+    expect(landing).toContain(
+      'On an issue (github.md, "GitHub issues") the upload is not tried again:',
+    );
+    expect(landing).not.toContain("issue edit <n> --body-file");
+    expect(flat("docs/decisions.md")).toContain(
+      "An issue attaches when it is made and when its plan comment is first posted; a patch of that comment keeps the addresses GitHub already gave its images",
     );
   });
 

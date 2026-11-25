@@ -1010,6 +1010,9 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   refused, "attaching files requires write access to the repository", and
   GitHub named `contents=write` (observed in the project that asked); a
   side branch of images was weighed and left as complicated, kept for the
-  case the permission does not clear it.
+  case the permission does not clear it. An issue attaches when it is made
+  and when its plan comment is first posted; a patch of that comment keeps
+  the addresses GitHub already gave its images, since `gh api` uploads
+  nothing.
   plans/land-by-pull-request.md, plans/joined-pull-request-no-comment.md,
-  plans/screenshots-reach-github.md.
+  plans/screenshots-reach-github.md, plans/screenshots-reach-github-follow-up.md.

@@ -490,7 +490,8 @@ paragraph that is no session id, seven digits or more, and a `Pull request #<n>`
 written by the plan's author on the owner's word with one line of why, is
 dropped: never ready, never started, refused by path, out of the asking
 deferral; `## Building, <date>, session <id>`, the executor's while that
-session lives; `## Handing over`, resumed first; an `Issue: #<n>.` line
+session lives, named by its id or a unique start of it, eight characters
+or more; `## Handing over`, resumed first; an `Issue: #<n>.` line
 with no `## Ready, <date>` is planned, waiting on GitHub; else a `Plan
 only` or `Short plan` header dated 24 October 2026 or later is ready. In pull
 request mode `plans` names what each brief and plan looks related to, and

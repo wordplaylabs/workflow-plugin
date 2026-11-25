@@ -114,6 +114,9 @@ import {
   plannerContext,
   askingIn,
   buildingAdded,
+  buildingBy,
+  liveId,
+  sameSession,
   editedText,
   ANSWER_WINDOW,
   describeSession,
@@ -792,6 +795,72 @@ describe("plan-queue", () => {
       expect(stateOf(text, { live: ["abc"] })).toMatchObject({ state: "building", session: "abc" });
       expect(stateOf(text, { live: null })).toMatchObject({ state: "building" });
       expect(stateOf(text, { live: ["xyz"] })).toMatchObject({ state: "ready", stale: true });
+    });
+
+    // plans/short-session-id-is-live.md: a line may name its session by a
+    // unique start of eight characters or more, as git reads a short hash.
+    const full = "abcd1234-0000-4000-8000-000000000001";
+    const twin = "abcd1234-ffff-4000-8000-000000000002";
+    const shortLine = (id: string) =>
+      `${header("25 November 2026")}## Building, 25 November 2026, session ${id}\n`;
+
+    it("a Building line naming a live session by its first eight characters is live", () => {
+      expect(stateOf(shortLine("abcd1234"), { live: ["other", full] })).toMatchObject({
+        state: "building",
+        session: full,
+      });
+      expect(stateOf(shortLine("abcd1234-0000"), { live: [full] })).toMatchObject({
+        state: "building",
+        session: full,
+      });
+      expect(liveId("abcd1234", [full])).toBe(full);
+    });
+
+    it("a short id two live sessions begin with is nobody's", () => {
+      expect(stateOf(shortLine("abcd1234"), { live: [full, twin] })).toMatchObject({
+        state: "ready",
+        stale: true,
+      });
+      expect(liveId("abcd1234", [full, twin])).toBe("");
+      // The whole id stays its own, whatever else begins like it.
+      expect(liveId(full, [full, twin])).toBe(full);
+    });
+
+    it("an id under eight characters is never matched", () => {
+      expect(stateOf(shortLine("abcd123"), { live: [full] })).toMatchObject({
+        state: "ready",
+        stale: true,
+      });
+      expect(liveId("abcd123", [full])).toBe("");
+    });
+
+    it("a Planning line naming a live session by a short id is live", () => {
+      const brief =
+        "# B\n\n## Planning, 25 November 2026, session abcd1234\n\nBrief for the planner, 25 November 2026.\n";
+      expect(stateOf(brief, { live: [full] })).toMatchObject({ state: "planning", session: full });
+      expect(stateOf(brief, { live: [full, twin] })).toMatchObject({ state: "brief", stale: true });
+    });
+
+    it("with the sessions unread, a short id reads as live", () => {
+      expect(stateOf(shortLine("abcd1234"), { live: null })).toMatchObject({
+        state: "building",
+        session: "abcd1234",
+      });
+      // And is its session's, where the callers compare it with a whole id.
+      expect(sameSession("abcd1234", full)).toBe(true);
+      expect(sameSession(full, full)).toBe(true);
+      expect(sameSession("abcd123", full)).toBe(false);
+      expect(sameSession("abcd1234", twin.slice(0, 7))).toBe(false);
+    });
+
+    it("a session's own short Building line is its own", () => {
+      for (const written of ["abcd1234", "abcd1234-00", full])
+        expect(buildingBy(full).test(shortLine(written))).toBe(true);
+      for (const written of ["abcd123", "abcd1234-ffff", `${full}9`, "abcd1234x"])
+        expect(buildingBy(full).test(shortLine(written))).toBe(false);
+      // A session whose id is under eight characters is matched whole only.
+      expect(buildingBy("abc").test(shortLine("abc"))).toBe(true);
+      expect(buildingBy("abc").test(shortLine("ab"))).toBe(false);
     });
 
     // plans/dropped-plan-state.md: a plan or a brief dropped on Javi's word.
@@ -3374,6 +3443,9 @@ describe("the planner queue", () => {
     const live = [{ sessionId: "b92bfc2b-9684", name: "Executor 5" }];
     expect(whoTook(building, live)).toBe("Executor 5 [b92bfc2b] on 26 October 2026");
     expect(whoTook(building, [])).toBe("session b92bfc2b on 26 October 2026");
+    // plans/short-session-id-is-live.md: a short line names the live executor too.
+    const short = "# X\n\n## Building, 26 October 2026, session b92bfc2b\n";
+    expect(whoTook(short, live)).toBe("Executor 5 [b92bfc2b] on 26 October 2026");
     expect(
       whoTook(
         "# X\n\nPlan only, 26 October 2026, for Javi.\n\n## Built, 26 October 2026\n\nBranch x, commit 1234abcd on `test`.\n",
@@ -4993,6 +5065,10 @@ describe("the queue's faults, closed", () => {
       expect(ownRows(rows, { paths: ["/w/a"], lockIds: ["lock-holder"] })).toEqual(rows);
       expect(ownRows(rows, { paths: ["/w/b"] })).toEqual([]);
       expect(ownRows(rows, { paths: ["/w/b"], named: ["lock-holder"] })).toEqual(rows);
+      // plans/short-session-id-is-live.md: named by a start of eight or more.
+      const held = [{ sessionId: "abcd1234-0000", name: "A Executor 2" }];
+      expect(ownRows(held, { paths: ["/w/b"], named: ["abcd1234"] })).toEqual(held);
+      expect(ownRows(held, { paths: ["/w/b"], named: ["abcd123"] })).toEqual([]);
     });
     it("stops nothing of A's from B's rows", () => {
       const rows = [
@@ -7251,6 +7327,25 @@ describe("a finished chat ends", () => {
     expect(stateOf(back)).toMatchObject({ kind: "Brief", state: "brief" });
     // Another session's line, or none (it wrote Built while it was stopped), is left as it is.
     expect(endedEdit(plan, { sessionId: "other", by: "Javi" })).toBe(plan);
+  });
+
+  // plans/short-session-id-is-live.md: `plans end --now` finds a plan by a
+  // short line, so the line it ends is the short one too.
+  it("endedEdit hands over a plan and frees a brief whose line names the session by a short id", () => {
+    const id = "abcd1234-0000-4000-8000-000000000001";
+    const plan = `# A plan\n\n## Building, 25 November 2026, session abcd1234\n\nShort plan, 25 November 2026, by the assistant.\n`;
+    const out = endedEdit(plan, { sessionId: id, by: "Javi", day: "25 November 2026" });
+    expect(out).not.toContain("## Building");
+    expect(stateOf(out)).toMatchObject({ state: "handed" });
+    const brief = `# A brief\n\n## Planning, 25 November 2026, session abcd1234-00\n\nBrief for the planner, 25 November 2026.\n`;
+    expect(endedEdit(brief, { sessionId: id, by: "Javi" })).toBe(
+      "# A brief\n\nBrief for the planner, 25 November 2026.\n",
+    );
+    // Another session's start, or one under eight, is left as it is.
+    const other = plan.replace("abcd1234", "abcd1239");
+    expect(endedEdit(other, { sessionId: id, by: "Javi" })).toBe(other);
+    const under = plan.replace("abcd1234", "abcd123");
+    expect(endedEdit(under, { sessionId: id, by: "Javi" })).toBe(under);
   });
 
   // plans/waiting-means-a-question.md
@@ -13232,6 +13327,71 @@ describe("several executors build at once", () => {
       ).toContain("on branch `x` in worktree `executor-2` in the middle of its work");
     },
   );
+
+  // plans/short-session-id-is-live.md: when two executors would take one
+  // plan, the live one keeps it.
+  it("a second executor's Building line is refused on a plan a live session holds by a short id", () => {
+    const one = pool("Short", { "a.md": plan("A", "Change src/a.js.") });
+    const holder = "abcd1234-0000-4000-8000-000000000001";
+    const other = "ef015678-0000-4000-8000-000000000002";
+    one.write(
+      [
+        [holder, "Short Executor 1 (lab)"],
+        [other, "Short Executor 2 (lab)"],
+      ].map(([sessionId, name]) => ({
+        sessionId,
+        name,
+        kind: "background",
+        status: "busy",
+        cwd: one.dir,
+      })),
+    );
+    one.building("a.md", holder.slice(0, 8));
+    const file = join(one.dir, "plans", "a.md");
+    const at = new Date(statSync(file).mtimeMs).toTimeString().slice(0, 5);
+    const edit = (session: string, old_string: string, new_string: string) =>
+      JSON.parse(
+        one.queue(["tool"], {
+          session_id: session,
+          agent_type: "workflow:executor",
+          cwd: one.dir,
+          tool_name: "Edit",
+          tool_input: { file_path: file, old_string, new_string },
+        }) || "{}",
+      );
+    const theirs = edit(
+      other,
+      "\n\nPlan only",
+      `\n\n## Building, 25 November 2026, session ${other}\n\nPlan only`,
+    );
+    expect(theirs.hookSpecificOutput?.permissionDecisionReason).toBe(
+      `plans/a.md is Short Executor 1 (lab)'s [abcd1234], taken at ${at}: leave it.`,
+    );
+    const dry = one.queue(["start", "--dry"]);
+    expect(dry.trim()).toBe("Nothing is waiting in the queue.");
+    // The short line is read as the holder's: its Building line on a second
+    // plan is refused as one too many, not let through as on a plan nobody holds.
+    writeFileSync(join(one.dir, "plans", "b.md"), plan("B", "Change src/b.js."));
+    const second = JSON.parse(
+      one.queue(["tool"], {
+        session_id: holder,
+        agent_type: "workflow:executor",
+        cwd: one.dir,
+        tool_name: "Edit",
+        tool_input: {
+          file_path: join(one.dir, "plans", "b.md"),
+          old_string: "\n\nPlan only",
+          new_string: `\n\n## Building, 25 November 2026, session ${holder}\n\nPlan only`,
+        },
+      }) || "{}",
+    );
+    expect(second.hookSpecificOutput?.permissionDecisionReason).toBe(
+      "plans/b.md is not taken: this session is building plans/a.md, and an executor builds one plan at a time.",
+    );
+    // The session the line shortens corrects its own line, and nothing is refused.
+    const own = edit(holder, `session ${holder.slice(0, 8)}\n`, `session ${holder}\n`);
+    expect(own.hookSpecificOutput?.permissionDecision).not.toBe("deny");
+  });
 
   it("refuses a Building line on a built plan and lists it once, under Built", () => {
     const one = pool("Built", {

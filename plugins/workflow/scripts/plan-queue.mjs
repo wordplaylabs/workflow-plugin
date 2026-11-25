@@ -591,6 +591,41 @@ const BUILT_DAY = /^## Built(?:, ([^\n]+))?/m;
 const BUILT_SECTION = /^## Built(?:,|\s*$)/m;
 
 /**
+ * **A Building or Planning line names its session by its id or a unique
+ * start of it** (decisions.md#plan-state-in-file), as git reads a short
+ * hash: `plans` prints ids at eight characters, so an agent copies them. The
+ * live id `written` names: itself when the sessions are unread (`live` null)
+ * or when it is one of them; else the one live id it begins, when it is
+ * eight characters or more and begins no other; else "".
+ */
+export function liveId(written, live) {
+  if (live === null || live.includes(written)) return written;
+  if (written.length < 8) return "";
+  const starts = live.filter((id) => id.startsWith(written));
+  return starts.length === 1 ? starts[0] : "";
+}
+
+/**
+ * Whether the id a line wrote, read with the sessions unread, is
+ * `sessionId`'s: the same, or a start of it of eight characters or more.
+ * With the sessions read, `stateOf` has made it whole already.
+ */
+export function sameSession(written = "", sessionId = "") {
+  return written === sessionId || (written.length >= 8 && sessionId.startsWith(written));
+}
+
+/**
+ * A regular expression's source for `sessionId` as a line writes it, whole or
+ * by a start of eight characters or more (`liveId`): its first eight, then
+ * any run of the rest, up to where `stateOf` ends the id it reads.
+ */
+function sessionIdSource(sessionId) {
+  const escape = (part) => part.replace(/[^\w-]/g, "\\$&");
+  const rest = [...sessionId.slice(8)].reduceRight((tail, c) => `(?:${escape(c)}${tail})?`, "");
+  return `${escape(sessionId.slice(0, 8))}${rest}(?![^\\s,])`;
+}
+
+/**
  * A plan's place in the queue, read from its text. `live` is the live
  * sessions' ids, or null when they could not be listed, which counts every
  * Building line as live: the safe side.
@@ -625,8 +660,8 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
     // while the brief waits or is planned, and the planner carries it on.
     const first = firstOf(text);
     const planning = /^## Planning, ([^,\n]+), session ([^\s,]+)/m.exec(text);
-    if (planning && (live === null || live.includes(planning[2])))
-      return { ...base, state: "planning", session: planning[2], since: planning[1], first };
+    const id = planning && liveId(planning[2], live);
+    if (id) return { ...base, state: "planning", session: id, since: planning[1], first };
     return { ...base, state: "brief", stale: Boolean(planning), first };
   }
   if (!header) return null;
@@ -701,9 +736,8 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
   const stuck =
     resumed.length >= MAX_HANDOVERS || (resumed.length >= 2 && resumed.at(-1) === resumed.at(-2));
   const building = /^## Building, ([^,\n]+), session ([^\s,]+)/m.exec(text);
-  if (building && (live === null || live.includes(building[2]))) {
-    return { ...plan, state: "building", session: building[2], since: building[1], resumed, stuck };
-  }
+  const id = building && liveId(building[2], live);
+  if (id) return { ...plan, state: "building", session: id, since: building[1], resumed, stuck };
   const stale = Boolean(building);
   const handed = /^## Handing over/m.test(text);
   if (handed) {
@@ -858,7 +892,10 @@ export function ownRows(rows, { paths = [], lockIds = [], named = [] } = {}) {
   return rows.filter(
     (row) =>
       inThisRepo(row.cwd, paths) ||
-      Boolean(row.sessionId && (lockIds.includes(row.sessionId) || named.includes(row.sessionId))),
+      Boolean(
+        row.sessionId &&
+        (lockIds.includes(row.sessionId) || named.some((id) => sameSession(id, row.sessionId))),
+      ),
   );
 }
 
@@ -1180,7 +1217,8 @@ export function sessionsOf(
         retired: Boolean(state?.retired),
         on:
           (working &&
-            plans.find((plan) => plan.state === working && plan.session === row.sessionId)?.path) ||
+            plans.find((plan) => plan.state === working && sameSession(plan.session, row.sessionId))
+              ?.path) ||
           "",
         // When its end timer fires, if it is left quiet.
         endsAt: state?.end?.at || 0,
@@ -2060,9 +2098,10 @@ export function editedText(toolName, toolInput = {}, before = "") {
 const BUILDING_LINE = /^## Building, [^\n]*/gm;
 /** A Building line with its line end, to take it out. */
 const BUILDING_WHOLE = /^## Building, [^\n]*\n?/gm;
-/** The Building line `sessionId` wrote. */
-const buildingBy = (sessionId) =>
-  new RegExp(`^## Building, [^,\\n]+, session ${sessionId}\\b`, "m");
+/** The Building line `sessionId` wrote, naming it whole or by a start of eight or more. */
+export function buildingBy(sessionId) {
+  return new RegExp(`^## Building, [^,\\n]+, session ${sessionIdSource(sessionId)}`, "m");
+}
 
 /** The Building lines `after` has that `before` has not. */
 export function buildingAdded(before = "", after = "") {
@@ -2709,11 +2748,12 @@ export function cutoffEdit(text, { sessionId, branch, tree = "", day = today() }
  */
 export function endedEdit(text, { sessionId, by, branch = "", tree = "", day = today() }) {
   const planning = new RegExp(
-    `^## Planning, [^\\n]*session ${sessionId}[^\\n]*(?:\\n[ \\t]*(?=\\n))?\\n?`,
+    `^## Planning, [^\\n]*session ${sessionIdSource(sessionId)}[^\\n]*(?:\\n[ \\t]*(?=\\n))?\\n?`,
     "m",
   );
   if (planning.test(text)) return text.replace(planning, "");
-  if (!new RegExp(`^## Building, [^\\n]*session ${sessionId}`, "m").test(text)) return text;
+  if (!new RegExp(`^## Building, [^\\n]*session ${sessionIdSource(sessionId)}`, "m").test(text))
+    return text;
   const where = branch ? ` on branch \`${branch}\`${treeWords(tree)}` : "";
   return handOverEdit(
     text,
@@ -3232,7 +3272,8 @@ function endSession(
   }
   const plans = readPlans(join(root, "plans"), liveIds(live));
   const plan = plans.find(
-    (one) => (one.state === "building" || one.state === "planning") && one.session === sessionId,
+    (one) =>
+      (one.state === "building" || one.state === "planning") && sameSession(one.session, sessionId),
   );
   const on = plan?.path || "";
   const usage = sessionUsage(transcriptOf(row));
@@ -6213,7 +6254,8 @@ export function whoTook(text = "", live = null) {
   );
   if (!line) return planTaken(text) ? "an executor" : "";
   const [, date, id = ""] = line;
-  const row = id ? live?.find((r) => r.sessionId === id) : null;
+  const full = id && live ? liveId(id, liveIds(live)) : id;
+  const row = full ? live?.find((r) => r.sessionId === full) : null;
   const who = row?.name
     ? `${row.name} [${id.slice(0, 8)}]`
     : id
@@ -6584,7 +6626,7 @@ function plannerHook(mode, input, sessionId, statePath) {
     const queued = named ? readPlans(join(root, "plans"), liveIds(live)) : [];
     // A brief named mid-plan does not replace the one in hand.
     const inHand = queued.some(
-      (p) => p.state === "planning" && p.session === sessionId && p.path !== named,
+      (p) => p.state === "planning" && sameSession(p.session, sessionId) && p.path !== named,
     );
     const taking = Boolean(named && !tired && !inHand);
     // **What the brief looks related to**, once per brief.
@@ -6611,7 +6653,8 @@ function plannerHook(mode, input, sessionId, statePath) {
   }
   const plans = readPlans(join(root, "plans"), liveIds(live));
   // The brief in hand is the one whose live Planning line names this session.
-  const current = plans.find((p) => p.state === "planning" && p.session === sessionId) || null;
+  const current =
+    plans.find((p) => p.state === "planning" && sameSession(p.session, sessionId)) || null;
   if (current) state.brief = current.path;
   state = noteFinished(state, plans);
   if (mode === "cutoff") {
@@ -6815,10 +6858,10 @@ function takenWords(path, plans, live, sessionId) {
   if (!plan) return "";
   if (plan.state === "built") return `${path} is built already: its "Built" section stands.`;
   const mine = plans.find(
-    (p) => p.state === "building" && p.session === sessionId && p.path !== path,
+    (p) => p.state === "building" && sameSession(p.session, sessionId) && p.path !== path,
   );
   if (mine) return oneAtATime(path, mine.path);
-  if (live && plan.state === "building" && plan.session !== sessionId) {
+  if (live && plan.state === "building" && !sameSession(plan.session, sessionId)) {
     const name = live?.find((row) => row.sessionId === plan.session)?.name;
     return claimedWords(path, { holder: plan.session, name, at: plan.mtime || Date.now() });
   }
@@ -7371,7 +7414,7 @@ function hook(mode, input) {
     writeJson(statePath, state);
     armEnd(sessionId, live);
     const plans = readPlans(join(root, "plans"), liveIds(live));
-    const plan = plans.find((p) => p.state === "building" && p.session === sessionId);
+    const plan = plans.find((p) => p.state === "building" && sameSession(p.session, sessionId));
     if (!plan) return;
     writeFileSync(
       plan.file,
@@ -7412,7 +7455,8 @@ function hook(mode, input) {
       (p) => !p.waitsOn && !claims[p.path],
     );
     // Claimed before it is named, so two stops at one moment name it once.
-    const current = plans.find((p) => p.state === "building" && p.session === sessionId) || null;
+    const current =
+      plans.find((p) => p.state === "building" && sameSession(p.session, sessionId)) || null;
     const name = live?.find((row) => row.sessionId === sessionId)?.name || "";
     const mayName = !current && !state.retired && !pausedSince();
     const waiting = (

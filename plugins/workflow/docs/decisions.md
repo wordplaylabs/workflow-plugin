@@ -447,8 +447,13 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   its `## ` sections.** (Javi, 27 October) No agent and no daemon of the
   queue's own; any session reads the state where any session wrote it.
   A dropped plan is kept as the record of why, as GitHub closes an issue
-  as not planned with the reason and MADR keeps a rejected record.
-  plans/handed-plan-stays-in-queue.md, plans/dropped-plan-state.md.
+  as not planned with the reason and MADR keeps a rejected record. A
+  Building or Planning line may name its session by a unique start of
+  eight characters or more, as git reads a short hash, since `plans`
+  prints ids at eight and a line written so started a second executor
+  on a plan being built.
+  plans/handed-plan-stays-in-queue.md, plans/dropped-plan-state.md,
+  plans/short-session-id-is-live.md.
 - `plan-put-first` **A plan or a brief the owner puts first is taken
   next, at the point between two plans, and the mark is a line in its
   file, above its first `## ` section.** (Javi, 13 November) In a

@@ -99,6 +99,12 @@ export function today(now?: number): string;
 export function withoutStatus(text: string): string;
 /** Issues are on with an Issues heading and `land: pull-request`, the project file's by default. */
 export function hasIssues(body?: string, land?: string): boolean;
+/** The live id a Building or Planning line's `written` id names: itself, the one live id it begins at eight or more, or "". */
+export function liveId(written: string, live: string[] | null): string;
+/** Whether the id a line wrote, read with the sessions unread, is `sessionId`'s: the same, or a start of eight or more. */
+export function sameSession(written?: string, sessionId?: string): boolean;
+/** The Building line `sessionId` wrote, naming it whole or by a start of eight or more. */
+export function buildingBy(sessionId: string): RegExp;
 export function stateOf(
   text: string,
   options?: { mtime?: number; live?: string[] | null },

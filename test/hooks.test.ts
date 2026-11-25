@@ -13395,7 +13395,7 @@ describe("several executors build at once", () => {
 
   it("refuses a Building line on a built plan and lists it once, under Built", () => {
     const one = pool("Built", {
-      "a.md": `${plan("A", "Change src/a.js.")}\n## Built, 24 November 2026\n\nCommit \`0123abcd\` on test.\n`,
+      "a.md": `${plan("A", "Change src/a.js.")}\n## Built, ${today()}\n\nCommit \`0123abcd\` on test.\n`,
     });
     const id = "built-exec-0000";
     one.write([

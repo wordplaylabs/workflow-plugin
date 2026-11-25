@@ -9742,6 +9742,116 @@ describe("github webhook", () => {
     ).toEqual([]);
   });
 
+  // plans/catch-up-read-misses-no-comment.md, parts 1 and 2: what was seen is kept by GitHub's id
+  // of each comment and review, so a comment the webhook missed is found by a read whatever was
+  // heard on its thread since.
+  it("itemsOfDelivery gives a comment, a review and an inline comment GitHub's id of it", () => {
+    const comment = itemsOfDelivery(
+      "issue_comment",
+      { action: "created", issue: { number: 30 }, comment: { node_id: "IC_a", body: "b" } },
+      "i1",
+    );
+    const review = itemsOfDelivery(
+      "pull_request_review",
+      { action: "submitted", pull_request: theirPull, review: { node_id: "PRR_a", body: "b" } },
+      "i2",
+    );
+    const inline = itemsOfDelivery(
+      "pull_request_review_comment",
+      { action: "created", pull_request: theirPull, comment: { node_id: "PRRC_a", body: "b" } },
+      "i3",
+    );
+    expect([comment, review, inline].map((one) => one[0].id)).toEqual(["IC_a", "PRR_a", "PRRC_a"]);
+  });
+
+  // A read's item: no deliveryId, GitHub's id in `id`.
+  const readItem = (id: string, kind: string, number: number, login: string, minute: number) => ({
+    number,
+    title: "Loose",
+    labels: [],
+    url: `u${number}`,
+    pull: number === 50,
+    kind,
+    id,
+    author: login,
+    at: at(minute),
+    text: "Could the list sort by date?",
+  });
+  const heard = (delivery: string, id: string, number: number, login: string, minute: number) =>
+    itemsOfDelivery(
+      "issue_comment",
+      {
+        action: "created",
+        issue: {
+          number,
+          title: "Loose",
+          labels: [],
+          ...(number === 50 ? { pull_request: {} } : {}),
+        },
+        comment: { node_id: id, body: "Thanks.", user: user(login), created_at: at(minute) },
+      },
+      delivery,
+    );
+
+  it("githubEvents sees an item once by its id, whatever was heard on its thread since", () => {
+    // The webhook missed henry's comment on #30 and his review on #50, then heard anton on both.
+    const later = githubEvents(
+      seen,
+      [...heard("h1", "IC_b", 30, "anton", 10), ...heard("h2", "IC_c", 50, "anton", 10)],
+      named,
+    );
+    expect(later.events).toEqual([]);
+    const read = [
+      readItem("IC_a", "comment", 30, "henry", 9),
+      readItem("PRR_a", "review", 50, "henry", 9),
+      readItem("IC_b", "comment", 30, "anton", 10),
+      readItem("IC_c", "comment", 50, "anton", 10),
+    ];
+    const caught = githubEvents(later.seen, read, named);
+    expect(caught.events.map((one) => [one.kind, one.number, one.by])).toEqual([
+      ["comment", 30, "henry"],
+      ["review", 50, "henry"],
+    ]);
+    expect(caught.seen.items).toEqual(["IC_b", "IC_c", "IC_a", "PRR_a"]);
+    // A delivery of what the read told is no second note.
+    expect(githubEvents(caught.seen, heard("h3", "IC_a", 30, "henry", 9), named).events).toEqual(
+      [],
+    );
+    // A second pass over the same items makes none.
+    expect(githubEvents(caught.seen, read, named).events).toEqual([]);
+  });
+
+  it("an issue's opening is seen once by its number, a delivery's or a read's", () => {
+    const issue = { number: 31, title: "New", labels: [], created_at: at(8), updated_at: at(8) };
+    const delivered = itemsOfDelivery(
+      "issues",
+      { action: "opened", issue: { ...issue, user: user("henry") } },
+      "n1",
+    );
+    const read = { ...delivered[0], deliveryId: "" };
+    const first = githubEvents(seen, delivered, context);
+    expect(first.events.map((one) => [one.kind, one.number])).toEqual([["issue", 31]]);
+    expect(first.seen.items).toEqual(["opened:31"]);
+    expect(githubEvents(first.seen, [read], context).events).toEqual([]);
+    // The other way round: the read first, then the delivery.
+    const readFirst = githubEvents(seen, [read], context);
+    expect(readFirst.events).toHaveLength(1);
+    expect(githubEvents(readFirst.seen, delivered, context).events).toEqual([]);
+  });
+
+  it("a time per thread from an older seen file still hides what was told before ids were kept", () => {
+    const older = { ...seen, issues: { 30: at(11) } };
+    expect(
+      githubEvents(older, [readItem("IC_d", "comment", 30, "henry", 9)], named).events,
+    ).toEqual([]);
+    const newer = githubEvents(older, [readItem("IC_e", "comment", 30, "henry", 12)], named);
+    expect(newer.events.map((one) => [one.kind, one.number, one.by])).toEqual([
+      ["comment", 30, "henry"],
+    ]);
+    // The old time rides along unchanged until a read whose line moved drops it.
+    expect(newer.seen.issues).toEqual({ 30: at(11) });
+  });
+
   it("notesWaiting lists the notes with an event after their last Handled line, oldest first", () => {
     const dir = mkdtempSync(join(tmpdir(), "notes-"));
     writeFileSync(
@@ -10525,7 +10635,7 @@ if (args.join(" ").includes("statusCheckRollup")) process.exit(1);
 if (args[0] === "pr" && args.includes("open"))
   say([{ number: 40, title: "Series keep their order", url: "https://github.com/o/r/pull/40",
     headRefName: "series-order", headRefOid: "${sha}",
-    comments: [{ author: { login: "anton" }, createdAt: "2026-11-14T21:00:00Z", body: "Rename this." }],
+    comments: [{ id: "IC_1", author: { login: "anton" }, createdAt: "2026-11-14T21:00:00Z", body: "Rename this." }],
     reviews: [] }]);
 else if (args[0] === "run" && args[1] === "list") {
   if (process.env.RUNS_FAIL) process.exit(1);
@@ -10554,14 +10664,15 @@ else say([]);
                   ...extra,
                 },
               }).stdout;
-            // Its review comments unread, the pull request's comment waits with them, so the
-            // next read does not pass a review comment older than it (/code-review).
+            // Its review comments unread, the pull request's comment is told at once: seen by its
+            // id, the next read, its line held, does not tell it again
+            // (plans/catch-up-read-misses-no-comment.md, part 3).
             const notes = github({ NOTES_FAIL: "1", RUNS_FAIL: "1" });
-            expect(notes).not.toContain("by anton");
+            expect(notes).toMatch(/GitHub: #40 \w+ by anton, noted/);
             expect(notes).toContain("GitHub: could not read the review comments of #40 (");
-            // A run list that fails reads the comment and does not pass the run it missed (Codex).
+            // A run list that fails does not pass the run it missed (Codex).
             const unread = github({ RUNS_FAIL: "1" });
-            expect(unread).toMatch(/GitHub: #40 \w+ by anton, noted/);
+            expect(unread).not.toContain("by anton");
             expect(unread).not.toContain("run failed");
             const said = github();
             expect(said).toContain("GitHub: #40 Checks run failed, noted");
@@ -10570,7 +10681,7 @@ else say([]);
             expect(note).toContain(
               "Checks run 5 on 4f1c2b9a: https://github.com/o/r/actions/runs/5",
             );
-            expect(note).toContain("Rename this.");
+            expect(note.match(/Rename this\./g)).toHaveLength(1);
             const calls = readFileSync(asked, "utf8");
             expect(calls).toContain(`run list --branch series-order --commit ${sha}`);
             expect(calls).not.toContain("statusCheckRollup");
@@ -10650,6 +10761,156 @@ else say([]);
             expect(calls).not.toContain("run list");
             expect(calls.match(/pulls\/50\/comments/g)).toHaveLength(1);
             expect(calls).not.toMatch(/pulls\/5[12]\/comments/);
+          } finally {
+            rmSync(read, { recursive: true, force: true });
+          }
+        },
+      );
+
+      // plans/catch-up-read-misses-no-comment.md, part 4: when the listener missed a named
+      // person's comment or review and then heard another writer on the same thread, then plans
+      // github notes the missed one, once. The later comment goes in by plans github --inbox, as
+      // the listener handles it.
+      const missedRead = (answers: { issues: object[]; pulls: object[] }, heard: object) => {
+        const read = mkdtempSync(join(tmpdir(), "missed-read-"));
+        execFileSync("git", ["init", "-q"], { cwd: read });
+        execFileSync("git", ["remote", "add", "origin", "https://github.com/o/r.git"], {
+          cwd: read,
+        });
+        mkdirSync(join(read, ".claude", "github-inbox"), { recursive: true });
+        mkdirSync(join(read, "plans"));
+        writeFileSync(
+          join(read, ".claude", "workflow.md"),
+          "---\nname: Runs\nbranch: test\nland: pull-request\n---\n\n# Runs\n\n## Issues\n\nTopics here are GitHub issues.\n\n## People\n\nHenry (`@Henry`) decides the copy.\n",
+        );
+        writeFileSync(
+          join(read, ".claude", "github-seen.json"),
+          JSON.stringify({ readAt: "2026-11-14T00:00:00.000Z" }),
+        );
+        writeFileSync(
+          join(read, ".claude", "github-inbox", "h1.json"),
+          JSON.stringify({ id: "h1", event: "issue_comment", body: JSON.stringify(heard) }),
+        );
+        const gh = join(read, "gh");
+        writeFileSync(
+          gh,
+          `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const say = (value) => process.stdout.write(JSON.stringify(value));
+if (args[0] === "issue" && args[1] === "list") say(${JSON.stringify(answers.issues)});
+else if (args[0] === "pr" && args.includes("open")) say(${JSON.stringify(answers.pulls)});
+else if (args[0] === "api" && /collaborators/.test(args[1])) process.stdout.write("write");
+else say([]);
+`,
+        );
+        chmodSync(gh, 0o755);
+        writeFileSync(rows, "[]");
+        const github = (...args: string[]) =>
+          spawnSync("node", [join(here, "plan-queue.mjs"), "github", ...args], {
+            encoding: "utf8",
+            env: {
+              ...env(),
+              WORKFLOW_ROOT: read,
+              CLAUDE_PROJECT_DIR: read,
+              WORKFLOW_GH: gh,
+              WORKFLOW_WEBHOOK_SECRET: "",
+              WORKFLOW_SECRETS_FILE: "",
+            },
+          }).stdout;
+        return { read, github };
+      };
+      const antonSaid = (number: number, id: string, pull: boolean) => ({
+        action: "created",
+        issue: { number, title: "Loose", labels: [], ...(pull ? { pull_request: {} } : {}) },
+        comment: {
+          node_id: id,
+          body: "I would keep it.",
+          user: user("anton"),
+          created_at: "2026-11-14T21:10:00Z",
+        },
+      });
+
+      it(
+        "plans github finds a comment the listener missed on an issue it heard from since",
+        { timeout: 30_000 },
+        () => {
+          const issue = {
+            number: 30,
+            title: "Loose",
+            labels: [],
+            url: "https://github.com/o/r/issues/30",
+            author: { login: "henry" },
+            createdAt: "2026-11-10T09:00:00Z",
+            updatedAt: "2026-11-14T21:10:00Z",
+            body: "",
+            comments: [
+              {
+                id: "IC_1",
+                author: { login: "henry" },
+                createdAt: "2026-11-14T21:00:00Z",
+                body: "Could the list sort by date?",
+              },
+              {
+                id: "IC_2",
+                author: { login: "anton" },
+                createdAt: "2026-11-14T21:10:00Z",
+                body: "I would keep it.",
+              },
+            ],
+          };
+          const { read, github } = missedRead(
+            { issues: [issue], pulls: [] },
+            antonSaid(30, "IC_2", false),
+          );
+          try {
+            expect(github("--inbox")).toBe("GitHub: nothing new.\n");
+            const said = github();
+            expect(said).toMatch(/GitHub: #30 comment by henry, noted/);
+            const note = readFileSync(join(read, "plans", "github", "30.md"), "utf8");
+            expect(note.match(/Could the list sort by date\?/g)).toHaveLength(1);
+            expect(note).not.toContain("I would keep it.");
+          } finally {
+            rmSync(read, { recursive: true, force: true });
+          }
+        },
+      );
+
+      it(
+        "plans github finds a review the listener missed on a pull request it heard from since",
+        { timeout: 30_000 },
+        () => {
+          const pull = {
+            number: 50,
+            title: "Theirs",
+            url: "https://github.com/o/r/pull/50",
+            headRefName: "b50",
+            headRefOid: "abc50",
+            comments: [
+              {
+                id: "IC_3",
+                author: { login: "anton" },
+                createdAt: "2026-11-14T21:10:00Z",
+                body: "I would keep it.",
+              },
+            ],
+            reviews: [
+              {
+                id: "PRR_1",
+                author: { login: "henry" },
+                submittedAt: "2026-11-14T21:00:00Z",
+                body: "Rename the helper.",
+              },
+            ],
+          };
+          const { read, github } = missedRead(
+            { issues: [], pulls: [pull] },
+            antonSaid(50, "IC_3", true),
+          );
+          try {
+            expect(github("--inbox")).toBe("GitHub: nothing new.\n");
+            expect(github()).toMatch(/GitHub: #50 review by henry, noted/);
+            const note = readFileSync(join(read, "plans", "github", "50.md"), "utf8");
+            expect(note).toContain("    Rename the helper.");
           } finally {
             rmSync(read, { recursive: true, force: true });
           }

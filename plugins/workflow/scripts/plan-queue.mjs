@@ -8787,6 +8787,7 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
         items.push({
           ...base,
           kind: "comment",
+          id: comment.id || "",
           author: comment.author?.login || "",
           at: comment.createdAt,
           text: comment.body || "",
@@ -8861,6 +8862,7 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
         items.push({
           ...base,
           kind: "comment",
+          id: comment.id || "",
           author: comment.author?.login || "",
           at: comment.createdAt,
           text: comment.body || "",
@@ -8870,6 +8872,7 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
         items.push({
           ...base,
           kind: "review",
+          id: review.id || "",
           author: review.author?.login || "",
           at: review.submittedAt,
           text: review.body || "",
@@ -8880,20 +8883,13 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
       ["api", `repos/{owner}/{repo}/pulls/${pull.number}/comments`],
       5000,
     );
-    // Unread, the pull request's comments and reviews wait for the next read
-    // too: one told now would move its last seen past the review comment
-    // missed, and `githubEvents` would pass that.
-    if (!notes) {
-      for (let at = items.length - 1; at >= 0; at--)
-        if (items[at].number === pull.number && items[at].pull && items[at].kind !== "failed")
-          items.splice(at, 1);
-      continue;
-    }
+    if (!notes) continue;
     for (const note of notes)
       if (newer(note.created_at))
         items.push({
           ...base,
           kind: "review",
+          id: note.node_id || "",
           author: note.user?.login || "",
           at: note.created_at,
           text: note.body || "",
@@ -8952,6 +8948,12 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
       unread: { at: began, said: groups },
     };
     if (!groups.length) delete next.unread;
+    // Past a read whose line moved, the times an older seen file kept hide
+    // nothing more.
+    if (readOk) {
+      delete next.issues;
+      delete next.pulls;
+    }
     writeSeen(next);
   }
   const all = [...said, ...groups.map((group) => `GitHub: could not read ${group}.`)];

@@ -47,7 +47,8 @@ export const WEBHOOK_EVENTS = Object.freeze([
 /**
  * **A delivery as the queue's items**, one shape for a delivery and for
  * `plans github`'s read: `{ deliveryId, kind, number, title, labels,
- * author, at, text, url, merged, pull, label, head }`, `kind` one of `opened`
+ * author, at, text, url, merged, pull, label, head, id }`, `id` GitHub's
+ * `node_id` of a comment, a review or an inline comment, `kind` one of `opened`
  * (an issue), `labeled`, `comment`, `review`, `closed` (a pull request) and
  * `failed` (a run that failed on a pull request, with `workflow`, `run` and
  * `sha`), `pull` true on a pull request; a `closed` one has `base` too. An event the queue takes nothing
@@ -93,6 +94,7 @@ export function itemsOfDelivery(event, payload = {}, deliveryId = "") {
       {
         ...base(issue, Boolean(issue.pull_request)),
         kind: "comment",
+        id: payload.comment?.node_id || "",
         author: payload.comment?.user?.login || "",
         at: payload.comment?.created_at || "",
         text: payload.comment?.body || "",
@@ -109,6 +111,7 @@ export function itemsOfDelivery(event, payload = {}, deliveryId = "") {
         ...base(pr, true),
         head: pr?.head?.ref || "",
         kind: "review",
+        id: said.node_id || "",
         author: said.user?.login || "",
         at: said.submitted_at || said.created_at || "",
         text: said.body || "",
@@ -199,11 +202,13 @@ function forOf(text = "") {
   return Number(/^For #(\d+)\.?[ \t]*$/m.exec(text)?.[1] || 0);
 }
 
-/** An empty seen file. */
+/**
+ * An empty seen file; `items` holds GitHub's ids of the comments and reviews
+ * seen, and `opened:<n>` for an issue's opening, newest last.
+ */
 export const NOTHING_SEEN = Object.freeze({
   deliveries: [],
-  issues: {},
-  pulls: {},
+  items: [],
   permissions: {},
   labeled: [],
   runs: [],
@@ -213,6 +218,13 @@ export const NOTHING_SEEN = Object.freeze({
 
 /** Deliveries kept to tell a redelivery, newest last. */
 const DELIVERIES_KEPT = 500;
+
+/**
+ * Comments, reviews and openings kept by id, newest last: every one seen
+ * since the last read's line, which can be weeks old; past that, a read may
+ * note the oldest again.
+ */
+const ITEMS_KEPT = 5000;
 
 /**
  * **The queue's events from GitHub's items** (decisions.md#github-webhook),
@@ -236,8 +248,9 @@ const DELIVERIES_KEPT = 500;
  * own pull request, `by` its workflow, with `run` and `sha`). A reader's item,
  * one whose author's permission is not write or admin in `seen.permissions`,
  * and the app's own are never events, but a failed run is nobody's writing and
- * is judged by its pull request alone; a delivery seen is skipped, and so is an
- * item from a read no newer than what was seen of its issue.
+ * is judged by its pull request alone; a delivery seen is skipped, and so is a
+ * comment, a review or an issue's opening seen before, by GitHub's id of it
+ * (`seen.items`), whichever of a delivery and a read brought it first.
  */
 export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
   const carried = new Set(context.carried || []);
@@ -249,13 +262,13 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
     ...NOTHING_SEEN,
     ...seen,
     deliveries: [...(seen.deliveries || [])],
-    issues: { ...(seen.issues || {}) },
-    pulls: { ...(seen.pulls || {}) },
+    items: [...(seen.items || [])],
     permissions: { ...(seen.permissions || {}) },
     labeled: [...(seen.labeled || [])],
     runs: [...(seen.runs || [])],
     merges: [...(seen.merges || [])],
   };
+  const known = new Set(next.items);
   const events = [];
   for (const item of items) {
     if (item.deliveryId) {
@@ -269,10 +282,8 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
     if (context.issuesOff && item.kind !== "failed" && !merge) continue;
     if (item.kind === "failed") {
       // **A run is told once, by its id and attempt**, whether a delivery or
-      // a read brought it, and touches no pull request's time, so no comment
-      // and no other run of the same second is hidden by it. The app's own
-      // pull request is set off by the app: no author gate; one whose number
-      // is unknown is nobody's.
+      // a read brought it. The app's own pull request is set off by the app:
+      // no author gate; one whose number is unknown is nobody's.
       const key = `${item.run}:${item.attempt || 1}`;
       if (next.runs.includes(key) || !item.number) continue;
       if (!own.has(item.number) && !(item.head && own.has(item.head))) continue;
@@ -292,10 +303,7 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
     }
     if (merge) {
       // **A merge is told once, by its number**, whether a delivery or a read
-      // brought it, and passes no author gate; before the read's time gate, so
-      // a comment seen after it does not hide a merge the webhook missed.
-      if (item.at && (!next.pulls[item.number] || item.at > next.pulls[item.number]))
-        next.pulls[item.number] = item.at;
+      // brought it, and passes no author gate.
       if (next.merges.includes(item.number)) continue;
       next.merges.push(item.number);
       events.push({
@@ -312,14 +320,19 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
       });
       continue;
     }
-    if (!item.deliveryId) {
-      // A read's item: only what is newer than this issue's last item seen.
-      const map = item.pull ? next.pulls : next.issues;
-      const last = map[item.number];
-      if (last && item.at && item.at <= last) continue;
+    // A seen file from before items were kept by id holds a time per issue
+    // and pull request: what a read brings from no later than it was told then.
+    const before = (item.pull ? seen.pulls : seen.issues)?.[item.number];
+    if (!item.deliveryId && before && item.at && item.at <= before) continue;
+    // **An item is seen once, by GitHub's id of it**, whichever of a delivery
+    // and a read brought it first, before the author gates, so one that was no
+    // event when heard is not judged again; an issue's opening by its number.
+    const key = item.kind === "opened" ? `opened:${item.number}` : item.id || "";
+    if (key) {
+      if (known.has(key)) continue;
+      known.add(key);
+      next.items.push(key);
     }
-    const map = item.pull ? next.pulls : next.issues;
-    if (item.at && (!map[item.number] || item.at > map[item.number])) map[item.number] = item.at;
     const author = item.author || "";
     if (!author || (slug && author === `${slug}[bot]`)) continue;
     const permission = next.permissions[author];
@@ -366,6 +379,7 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
   next.deliveries = next.deliveries.slice(-DELIVERIES_KEPT);
   next.runs = next.runs.slice(-DELIVERIES_KEPT);
   next.merges = next.merges.slice(-DELIVERIES_KEPT);
+  next.items = next.items.slice(-ITEMS_KEPT);
   return { events, seen: next };
 }
 

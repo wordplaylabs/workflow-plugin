@@ -812,13 +812,19 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   its line held, where it was read as empty and passed; a listener an
   older copy started is replaced by a newer one's start, as Bazel's
   client stops a server of another version, since one alive since
-  before an update ran the old code for nine hours.
+  before an update ran the old code for nine hours. A comment, a review
+  and an issue's opening are each seen once by GitHub's own id of them,
+  not by a time per issue: a time passed over a comment the webhook
+  missed once anything later was heard on its thread, and Stripe's
+  webhook guide says to track ids and never a timestamp to tell what was
+  handled.
   plans/github-watched.md, plans/webhook-stale-record.md,
   plans/executor-never-watches-ci.md,
   plans/failed-runs-the-webhook-misses.md,
   plans/app-old-registration-said.md, plans/checks-read-with-the-app.md,
   plans/merged-pr-refreshes-the-rest.md,
-  plans/open-assistant-reads-github-notes.md.
+  plans/open-assistant-reads-github-notes.md,
+  plans/catch-up-read-misses-no-comment.md.
 - `people-act-on-github` **A clear task from a person the project
   names, in an issue or a pull request, is acted on without the
   owner.** (Javi, 25 November) They have write access and the webhook

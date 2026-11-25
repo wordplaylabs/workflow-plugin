@@ -821,14 +821,21 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   not by a time per issue: a time passed over a comment the webhook
   missed once anything later was heard on its thread, and Stripe's
   webhook guide says to track ids and never a timestamp to tell what was
-  handled.
+  handled. The read asks for every page, a list `gh` embeds being its
+  first hundred, and for the repository's inline comments in one list, so
+  a named person's inline comment on another person's pull request is
+  found. An item whose author's permission could not be read is left
+  unseen and said as a list not read. A label is read again when it was
+  put on after it was last told. One read runs at a time, behind a guard
+  its process owns, so two never judge the same delivery.
   plans/github-watched.md, plans/webhook-stale-record.md,
   plans/executor-never-watches-ci.md,
   plans/failed-runs-the-webhook-misses.md,
   plans/app-old-registration-said.md, plans/checks-read-with-the-app.md,
   plans/merged-pr-refreshes-the-rest.md,
   plans/open-assistant-reads-github-notes.md,
-  plans/catch-up-read-misses-no-comment.md.
+  plans/catch-up-read-misses-no-comment.md,
+  plans/catch-up-read-complete.md.
 - `people-act-on-github` **A clear task from a person the project
   names, in an issue or a pull request, is acted on without the
   owner.** (Javi, 25 November) They have write access and the webhook

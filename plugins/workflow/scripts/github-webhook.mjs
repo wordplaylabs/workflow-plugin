@@ -204,13 +204,15 @@ function forOf(text = "") {
 
 /**
  * An empty seen file; `items` holds GitHub's ids of the comments and reviews
- * seen, and `opened:<n>` for an issue's opening, newest last.
+ * seen, and `opened:<n>` for an issue's opening, newest last; `labeledAt` the
+ * time each `labeled` key was last told.
  */
 export const NOTHING_SEEN = Object.freeze({
   deliveries: [],
   items: [],
   permissions: {},
   labeled: [],
+  labeledAt: {},
   runs: [],
   merges: [],
   readAt: "",
@@ -228,7 +230,7 @@ const ITEMS_KEPT = 5000;
 
 /**
  * **The queue's events from GitHub's items** (decisions.md#github-webhook),
- * pure: `{ events, seen }`, each event `{ kind, number, by, at, text, url,
+ * pure: `{ events, seen, unjudged }`, each event `{ kind, number, by, at, text, url,
  * title, permission, pull }`, in the items' order. `context` says what the
  * checkout's plans hold: `carried` (the issues a plan or a brief carries),
  * `planned` (a planned plan's issues), `own` (the queue's own pull requests),
@@ -250,7 +252,12 @@ const ITEMS_KEPT = 5000;
  * and the app's own are never events, but a failed run is nobody's writing and
  * is judged by its pull request alone; a delivery seen is skipped, and so is a
  * comment, a review or an issue's opening seen before, by GitHub's id of it
- * (`seen.items`), whichever of a delivery and a read brought it first.
+ * (`seen.items`), whichever of a delivery and a read brought it first. An
+ * item whose author's permission is unknown, not a key of
+ * `seen.permissions` and not a bot's, is left unseen, its delivery too, so
+ * the next read judges it: `unjudged` names those authors, once each. A
+ * label is told again when put on after it was last told: `seen.labeledAt`
+ * keeps when.
  */
 export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
   const carried = new Set(context.carried || []);
@@ -265,11 +272,13 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
     items: [...(seen.items || [])],
     permissions: { ...(seen.permissions || {}) },
     labeled: [...(seen.labeled || [])],
+    labeledAt: { ...(seen.labeledAt || {}) },
     runs: [...(seen.runs || [])],
     merges: [...(seen.merges || [])],
   };
   const known = new Set(next.items);
   const events = [];
+  const unjudged = new Set();
   for (const item of items) {
     if (item.deliveryId) {
       if (next.deliveries.includes(item.deliveryId)) continue;
@@ -328,12 +337,25 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
     // and a read brought it first, before the author gates, so one that was no
     // event when heard is not judged again; an issue's opening by its number.
     const key = item.kind === "opened" ? `opened:${item.number}` : item.id || "";
+    if (key && known.has(key)) continue;
+    const author = item.author || "";
+    // **An author whose permission is unknown is not judged**
+    // (decisions.md#github-webhook): the item stays unseen, its delivery
+    // too, for the next read; a bot is no person and is judged as a reader.
+    if (
+      author &&
+      !(slug && author === `${slug}[bot]`) &&
+      !author.endsWith("[bot]") &&
+      !Object.hasOwn(next.permissions, author)
+    ) {
+      if (item.deliveryId) next.deliveries = next.deliveries.filter((id) => id !== item.deliveryId);
+      unjudged.add(author);
+      continue;
+    }
     if (key) {
-      if (known.has(key)) continue;
       known.add(key);
       next.items.push(key);
     }
-    const author = item.author || "";
     if (!author || (slug && author === `${slug}[bot]`)) continue;
     const permission = next.permissions[author];
     if (permission !== "write" && permission !== "admin") continue;
@@ -357,8 +379,12 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
       if (!item.labels?.length) event("issue");
     } else if (item.kind === "labeled") {
       const key = `${item.number}:${item.label}`;
+      // Told already at or after this time: a read's and a delivery's of one
+      // putting on are told once.
+      if (item.at && next.labeledAt[key] && item.at <= next.labeledAt[key]) continue;
       const once = () => {
         if (!next.labeled.includes(key)) next.labeled.push(key);
+        if (item.at && !(next.labeledAt[key] >= item.at)) next.labeledAt[key] = item.at;
       };
       if (item.label === "status: planning" && !carried.has(item.number)) {
         once();
@@ -380,7 +406,7 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
   next.runs = next.runs.slice(-DELIVERIES_KEPT);
   next.merges = next.merges.slice(-DELIVERIES_KEPT);
   next.items = next.items.slice(-ITEMS_KEPT);
-  return { events, seen: next };
+  return { events, seen: next, unjudged: [...unjudged] };
 }
 
 const MONTHS =

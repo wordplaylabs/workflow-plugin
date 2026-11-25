@@ -9852,6 +9852,74 @@ describe("github webhook", () => {
     expect(newer.seen.issues).toEqual({ 30: at(11) });
   });
 
+  // plans/catch-up-read-complete.md, part 1: an item whose author's permission could not be read
+  // is not judged, so the next read judges it.
+  it("githubEvents leaves an item whose author's permission is unknown unseen, and names the author", () => {
+    const unknown = { ...seen, permissions: { anton: "write" } };
+    const left = githubEvents(unknown, heard("u1", "IC_u", 30, "henry", 9), named);
+    expect(left.events).toEqual([]);
+    expect(left.seen.items).not.toContain("IC_u");
+    expect(left.seen.deliveries).not.toContain("u1");
+    expect(left.unjudged).toEqual(["henry"]);
+    // A second item of the same author names them once.
+    const twice = githubEvents(
+      unknown,
+      [readItem("IC_v", "comment", 30, "henry", 9), readItem("IC_w", "comment", 30, "henry", 10)],
+      named,
+    );
+    expect(twice.unjudged).toEqual(["henry"]);
+    // Once known, the same delivery is judged and told.
+    const known = githubEvents(
+      { ...left.seen, permissions: { ...left.seen.permissions, henry: "write" } },
+      heard("u1", "IC_u", 30, "henry", 9),
+      named,
+    );
+    expect(known.events.map((one) => [one.kind, one.number, one.by])).toEqual([
+      ["comment", 30, "henry"],
+    ]);
+    // A bot is no person: seen, and named nowhere.
+    const bot = githubEvents(unknown, heard("u2", "IC_x", 30, "github-actions[bot]", 9), named);
+    expect(bot.events).toEqual([]);
+    expect(bot.seen.items).toEqual(["IC_x"]);
+    expect(bot.seen.deliveries).toEqual(["u2"]);
+    expect(bot.unjudged).toEqual([]);
+  });
+
+  // plans/catch-up-read-complete.md, part 3: a label is told again when put on after it was last
+  // told, so the seen file keeps when.
+  it("githubEvents keeps when a label was told", () => {
+    const label = (delivery: string, minute: number) =>
+      itemsOfDelivery(
+        "issues",
+        {
+          action: "labeled",
+          label: { name: "status: ready" },
+          issue: {
+            number: 12,
+            title: "Series",
+            labels: [{ name: "status: ready" }],
+            updated_at: at(minute),
+          },
+          sender: user("anton"),
+        },
+        delivery,
+      );
+    const first = githubEvents(seen, label("r1", 5), context);
+    expect(first.events.map((one) => one.kind)).toEqual(["ready"]);
+    expect(first.seen.labeled).toEqual(["12:status: ready"]);
+    expect(first.seen.labeledAt).toEqual({ "12:status: ready": at(5) });
+    // Put back later: told again, and the time moves.
+    const again = githubEvents(first.seen, label("r2", 9), context);
+    expect(again.events.map((one) => one.kind)).toEqual(["ready"]);
+    expect(again.seen.labeledAt).toEqual({ "12:status: ready": at(9) });
+    // One putting on, brought again by a read or a delivery, is told once, and an older time
+    // never moves the kept one back (/code-review).
+    const older = githubEvents(again.seen, label("r3", 7), context);
+    expect(older.events).toEqual([]);
+    expect(older.seen.labeledAt).toEqual({ "12:status: ready": at(9) });
+    expect(githubEvents(again.seen, label("r4", 9), context).events).toEqual([]);
+  });
+
   it("notesWaiting lists the notes with an event after their last Handled line, oldest first", () => {
     const dir = mkdtempSync(join(tmpdir(), "notes-"));
     writeFileSync(
@@ -10717,7 +10785,8 @@ else say([]);
             const asked = join(read, "asked.log");
             const gh = join(stubDir, "gh-people");
             // #50 is another person's, henry wrote on it since the read's line; #51 has anton's
-            // comment alone; #52 henry's from before the line.
+            // comment alone; #52 henry's from before the line; #53 henry's inline comment alone
+            // (plans/catch-up-read-complete.md, part 2). The inline comments are one list.
             writeFileSync(
               gh,
               `#!/usr/bin/env node
@@ -10728,13 +10797,15 @@ const say = (value) => process.stdout.write(JSON.stringify(value));
 const pull = (number, login, at) => ({ number, title: "Theirs " + number,
   url: "https://github.com/o/r/pull/" + number, headRefName: "b" + number, headRefOid: "abc" + number,
   comments: [{ author: { login }, createdAt: at, body: "Could this sort by date?" }], reviews: [] });
+const inline = (number, id, body) => ({ node_id: id, user: { login: "henry" },
+  created_at: "2026-11-14T21:05:00Z", body, html_url: "https://github.com/o/r/pull/" + number + "#r1",
+  pull_request_url: "https://api.github.com/repos/o/r/pulls/" + number });
 if (args[0] === "pr" && args.includes("open"))
   say([pull(50, "henry", "2026-11-14T21:00:00Z"), pull(51, "anton", "2026-11-14T21:00:00Z"),
-    pull(52, "henry", "2026-11-13T21:00:00Z")]);
+    pull(52, "henry", "2026-11-13T21:00:00Z"), { ...pull(53, "", ""), comments: [] }]);
 else if (args[0] === "api" && /collaborators/.test(args[1])) process.stdout.write("write");
-else if (args[0] === "api" && args[1].endsWith("pulls/50/comments"))
-  say([{ user: { login: "henry" }, created_at: "2026-11-14T21:05:00Z", body: "And rename this.",
-    html_url: "https://github.com/o/r/pull/50#r1" }]);
+else if (args[0] === "api" && args[1].includes("pulls/comments?since="))
+  say([inline(50, "PRRC_50", "And rename this."), inline(53, "PRRC_53", "Name the constant.")]);
 else say([]);
 `,
             );
@@ -10752,15 +10823,19 @@ else say([]);
               },
             }).stdout;
             expect(said).toMatch(/GitHub: #50 review by henry, noted/);
+            expect(said).toMatch(/GitHub: #53 review by henry, noted/);
             expect(said).not.toMatch(/#51|#52/);
             const note = readFileSync(join(read, "plans", "github", "50.md"), "utf8");
             expect(note).toContain("    Could this sort by date?");
             expect(note).toContain("    And rename this.");
+            expect(readFileSync(join(read, "plans", "github", "53.md"), "utf8")).toContain(
+              "    Name the constant.",
+            );
             expect(existsSync(join(read, "plans", "github", "51.md"))).toBe(false);
             const calls = readFileSync(asked, "utf8");
             expect(calls).not.toContain("run list");
-            expect(calls.match(/pulls\/50\/comments/g)).toHaveLength(1);
-            expect(calls).not.toMatch(/pulls\/5[12]\/comments/);
+            expect(calls.match(/pulls\/comments\?since=/g)).toHaveLength(1);
+            expect(calls).not.toMatch(/pulls\/\d+\/comments/);
           } finally {
             rmSync(read, { recursive: true, force: true });
           }
@@ -10771,7 +10846,13 @@ else say([]);
       // person's comment or review and then heard another writer on the same thread, then plans
       // github notes the missed one, once. The later comment goes in by plans github --inbox, as
       // the listener handles it.
-      const missedRead = (answers: { issues: object[]; pulls: object[] }, heard: object) => {
+      // `more`, lines of the fake gh's run before its usual answers, for the cases of
+      // plans/catch-up-read-complete.md; empty, the fake is the one these cases were written with.
+      const missedRead = (
+        answers: { issues: object[]; pulls: object[] },
+        heard: object,
+        more = "",
+      ) => {
         const read = mkdtempSync(join(tmpdir(), "missed-read-"));
         execFileSync("git", ["init", "-q"], { cwd: read });
         execFileSync("git", ["remote", "add", "origin", "https://github.com/o/r.git"], {
@@ -10797,7 +10878,7 @@ else say([]);
           `#!/usr/bin/env node
 const args = process.argv.slice(2);
 const say = (value) => process.stdout.write(JSON.stringify(value));
-if (args[0] === "issue" && args[1] === "list") say(${JSON.stringify(answers.issues)});
+${more}if (args[0] === "issue" && args[1] === "list") say(${JSON.stringify(answers.issues)});
 else if (args[0] === "pr" && args.includes("open")) say(${JSON.stringify(answers.pulls)});
 else if (args[0] === "api" && /collaborators/.test(args[1])) process.stdout.write("write");
 else say([]);
@@ -10805,19 +10886,22 @@ else say([]);
         );
         chmodSync(gh, 0o755);
         writeFileSync(rows, "[]");
-        const github = (...args: string[]) =>
+        const envOf = (extra: Record<string, string> = {}) => ({
+          ...env(),
+          WORKFLOW_ROOT: read,
+          CLAUDE_PROJECT_DIR: read,
+          WORKFLOW_GH: gh,
+          WORKFLOW_WEBHOOK_SECRET: "",
+          WORKFLOW_SECRETS_FILE: "",
+          ...extra,
+        });
+        const githubWith = (extra: Record<string, string>, ...args: string[]) =>
           spawnSync("node", [join(here, "plan-queue.mjs"), "github", ...args], {
             encoding: "utf8",
-            env: {
-              ...env(),
-              WORKFLOW_ROOT: read,
-              CLAUDE_PROJECT_DIR: read,
-              WORKFLOW_GH: gh,
-              WORKFLOW_WEBHOOK_SECRET: "",
-              WORKFLOW_SECRETS_FILE: "",
-            },
+            env: envOf(extra),
           }).stdout;
-        return { read, github };
+        const github = (...args: string[]) => githubWith({}, ...args);
+        return { read, github, githubWith, envOf };
       };
       const antonSaid = (number: number, id: string, pull: boolean) => ({
         action: "created",
@@ -10916,6 +11000,260 @@ else say([]);
           }
         },
       );
+
+      // plans/catch-up-read-complete.md, part 1: when a named person's comment is read and their
+      // permission cannot be, then nothing is noted and the line holds; the next read that can
+      // read it notes it once. A login GitHub says is no user holds nothing.
+      const loose = (comments: object[]) => ({
+        number: 30,
+        title: "Loose",
+        labels: [],
+        url: "https://github.com/o/r/issues/30",
+        author: { login: "henry" },
+        createdAt: "2026-11-10T09:00:00Z",
+        updatedAt: "2026-11-14T21:10:00Z",
+        body: "",
+        comments,
+      });
+      it(
+        "plans github leaves a comment unseen while its author's permission cannot be read",
+        { timeout: 30_000 },
+        () => {
+          const issue = loose([
+            {
+              id: "IC_1",
+              author: { login: "henry" },
+              createdAt: "2026-11-14T21:00:00Z",
+              body: "Could the list sort by date?",
+            },
+            {
+              id: "IC_4",
+              author: { login: "triage" },
+              createdAt: "2026-11-14T21:05:00Z",
+              body: "Bump.",
+            },
+          ]);
+          const { read, githubWith } = missedRead(
+            { issues: [issue], pulls: [] },
+            antonSaid(30, "IC_2", false),
+            `if (args[0] === "api" && args[1].endsWith("collaborators/henry/permission") && process.env.HENRY_FAILS) {
+  process.stderr.write("gh: Bad gateway (HTTP 502)\\n");
+  process.exit(1);
+} else if (args[0] === "api" && args[1].endsWith("collaborators/triage/permission")) {
+  process.stderr.write("gh: triage is not a user (HTTP 404)\\n");
+  process.exit(1);
+} else `,
+          );
+          const seenFile = join(read, ".claude", "github-seen.json");
+          try {
+            const first = githubWith({ HENRY_FAILS: "1" });
+            expect(first).toContain(
+              "GitHub: could not read the permission of henry (gh: Bad gateway).",
+            );
+            expect(first).not.toContain("triage");
+            expect(first).not.toContain("noted");
+            expect(existsSync(join(read, "plans", "github", "30.md"))).toBe(false);
+            expect(JSON.parse(readFileSync(seenFile, "utf8")).readAt).toBe(
+              "2026-11-14T00:00:00.000Z",
+            );
+            const second = githubWith({});
+            expect(second).toMatch(/GitHub: #30 comment by henry, noted/);
+            expect(second).not.toContain("could not read the permission");
+            expect(second).not.toContain("triage");
+            const note = readFileSync(join(read, "plans", "github", "30.md"), "utf8");
+            expect(note.match(/Could the list sort by date\?/g)).toHaveLength(1);
+            expect(note).not.toContain("Bump.");
+            expect(JSON.parse(readFileSync(seenFile, "utf8")).permissions.triage).toBe("none");
+          } finally {
+            rmSync(read, { recursive: true, force: true });
+          }
+        },
+      );
+
+      // plans/catch-up-read-complete.md, part 2: when a thread has more comments than gh embeds,
+      // or the inline comments more than a page, then the one past them is noted.
+      it("plans github reads every page", { timeout: 30_000 }, () => {
+        const older = Array.from({ length: 100 }, (_, i) => ({
+          id: `IC_old${i}`,
+          author: { login: "anton" },
+          createdAt: "2026-11-13T09:00:00Z",
+          body: "Older.",
+        }));
+        const notes = Array.from({ length: 31 }, (_, i) => ({
+          node_id: `PRRC_${i}`,
+          user: { login: i === 30 ? "henry" : "anton" },
+          created_at: i === 30 ? "2026-11-14T21:05:00Z" : "2026-11-13T09:00:00Z",
+          body: i === 30 ? "Rename the helper." : "Older.",
+          html_url: `https://github.com/o/r/pull/40#r${i}`,
+          pull_request_url: "https://api.github.com/repos/o/r/pulls/40",
+        }));
+        const missed = {
+          node_id: "IC_new",
+          user: { login: "henry" },
+          created_at: "2026-11-14T21:00:00Z",
+          body: "Could the list sort by date?",
+          html_url: "https://github.com/o/r/issues/30#issuecomment-1",
+        };
+        const pull = {
+          number: 40,
+          title: "Series",
+          url: "https://github.com/o/r/pull/40",
+          headRefName: "series-order",
+          headRefOid: "4f1c2b9a",
+          comments: [],
+          reviews: [],
+        };
+        // Another person's pull request whose embedded comments are full: henry's past them
+        // makes it read (Codex C1).
+        const theirs = {
+          ...pull,
+          number: 54,
+          url: "https://github.com/o/r/pull/54",
+          headRefName: "b54",
+          comments: older,
+        };
+        const { read, githubWith } = missedRead(
+          { issues: [loose(older)], pulls: [pull, theirs] },
+          antonSaid(30, "IC_2", false),
+          `require("node:fs").appendFileSync(process.env.ASKED_LOG, args.join(" ") + "\\n");
+if (args[0] === "api" && args[1].includes("issues/30/comments")) say([${JSON.stringify(missed)}]);
+else if (args[0] === "api" && args[1].includes("issues/54/comments"))
+  say([${JSON.stringify({ ...missed, node_id: "IC_54", body: "Split this pull request." })}]);
+else if (args[0] === "api" && args[1].includes("pulls/comments?since=")) say(${JSON.stringify(notes)});
+else `,
+        );
+        writeFileSync(
+          join(read, "plans", "series-order.md"),
+          "# Series\n\nPlan only, 14 November 2026, for Javi.\n\n## Built, 14 November 2026\n\nPull request #40 (https://github.com/o/r/pull/40) to test from branch series-order, commit 4f1c2b9a; draft.\n",
+        );
+        const asked = join(read, "asked.log");
+        try {
+          const said = githubWith({ ASKED_LOG: asked });
+          expect(said).toMatch(/GitHub: #30 comment by henry, noted/);
+          expect(said).toMatch(/GitHub: #40 review by henry, noted/);
+          expect(said).toMatch(/GitHub: #54 review by henry, noted/);
+          expect(readFileSync(join(read, "plans", "github", "54.md"), "utf8")).toContain(
+            "    Split this pull request.",
+          );
+          const issueNote = readFileSync(join(read, "plans", "github", "30.md"), "utf8");
+          expect(issueNote).toContain("    Could the list sort by date?");
+          expect(issueNote).not.toContain("Older.");
+          const pullNote = readFileSync(join(read, "plans", "github", "40.md"), "utf8");
+          expect(pullNote).toContain("    Rename the helper.");
+          expect(pullNote).not.toContain("Older.");
+          const calls = readFileSync(asked, "utf8").split("\n");
+          const thread = calls.filter((line) => line.includes("issues/30/comments"));
+          const inline = calls.filter((line) => line.includes("pulls/comments?since="));
+          expect(thread).toHaveLength(1);
+          expect(inline).toHaveLength(1);
+          expect([...thread, ...inline].every((line) => line.endsWith("--paginate"))).toBe(true);
+          expect(calls.some((line) => /pulls\/40\/comments/.test(line))).toBe(false);
+        } finally {
+          rmSync(read, { recursive: true, force: true });
+        }
+      });
+
+      // plans/catch-up-read-complete.md, part 4: when two reads run at once over one delivery,
+      // then its note holds the comment once, a guard a dead process left taken over.
+      it("two reads at once write a delivery's note once", { timeout: 30_000 }, async () => {
+        const henrySaid = {
+          action: "created",
+          issue: { number: 30, title: "Loose", labels: [] },
+          comment: {
+            node_id: "IC_9",
+            body: "Could the list sort by date?",
+            user: user("henry"),
+            created_at: "2026-11-14T21:00:00Z",
+          },
+        };
+        const { read, envOf } = missedRead(
+          { issues: [], pulls: [] },
+          henrySaid,
+          `if (args[0] === "api" && /collaborators/.test(args[1]))
+  setTimeout(() => process.stdout.write("write"), 1500);
+else `,
+        );
+        const guard = join(read, ".claude", "github-seen.guard");
+        writeFileSync(guard, "2147483646");
+        const run = () =>
+          new Promise<string>((done) => {
+            const child = spawn("node", [join(here, "plan-queue.mjs"), "github", "--inbox"], {
+              env: envOf(),
+            });
+            let out = "";
+            child.stdout.on("data", (chunk) => (out += chunk));
+            child.on("close", () => done(out));
+          });
+        try {
+          const said = await Promise.all([run(), run()]);
+          expect(said.filter((one) => /#30 comment by henry, noted/.test(one))).toHaveLength(1);
+          const note = readFileSync(join(read, "plans", "github", "30.md"), "utf8");
+          expect(note.match(/Could the list sort by date\?/g)).toHaveLength(1);
+          expect(existsSync(guard)).toBe(false);
+        } finally {
+          rmSync(read, { recursive: true, force: true });
+        }
+      });
+
+      // plans/catch-up-read-complete.md, part 3: when status: ready was told, taken off and put
+      // back, then the next read tells it again; not put back, nothing.
+      it("plans github reads a ready label put back after it was told", { timeout: 30_000 }, () => {
+        const issue = {
+          ...loose([]),
+          number: 12,
+          title: "Series",
+          labels: [{ name: "status: ready" }],
+          url: "https://github.com/o/r/issues/12",
+        };
+        const labeled = (created_at: string) => ({
+          event: "labeled",
+          label: { name: "status: ready" },
+          actor: { login: "anton" },
+          created_at,
+        });
+        const events = [
+          labeled("2026-11-14T09:00:00Z"),
+          {
+            event: "unlabeled",
+            label: { name: "status: ready" },
+            actor: { login: "anton" },
+            created_at: "2026-11-14T10:00:00Z",
+          },
+          labeled("2026-11-14T21:10:00Z"),
+        ];
+        const { read, githubWith } = missedRead(
+          { issues: [issue], pulls: [] },
+          antonSaid(30, "IC_2", false),
+          `if (args[0] === "api" && args[1].includes("issues/12/events"))
+  say(process.env.PUT_BACK ? ${JSON.stringify(events)} : ${JSON.stringify(events.slice(0, 1))});
+else `,
+        );
+        writeFileSync(
+          join(read, "plans", "series.md"),
+          "# Series\n\nPlan only, 14 November 2026, for Javi.\n\nIssue: #12.\n\n## What was asked\n",
+        );
+        const seenFile = join(read, ".claude", "github-seen.json");
+        const told = () =>
+          writeFileSync(
+            seenFile,
+            JSON.stringify({
+              readAt: "2026-11-14T00:00:00.000Z",
+              labeled: ["12:status: ready"],
+              labeledAt: { "12:status: ready": "2026-11-14T09:00:00Z" },
+            }),
+          );
+        try {
+          told();
+          expect(githubWith({})).toBe("GitHub: nothing new.\n");
+          told();
+          expect(githubWith({ PUT_BACK: "1" })).toMatch(/GitHub: #12 ready by anton, noted/);
+          expect(JSON.parse(readFileSync(seenFile, "utf8")).labeledAt).toEqual({
+            "12:status: ready": "2026-11-14T21:10:00Z",
+          });
+        } finally {
+          rmSync(read, { recursive: true, force: true });
+        }
+      });
 
       // plans/checks-read-with-the-app.md, part 2: when a read of plans github fails, then plans
       // github and plans say which list and why, and the read's lines hold.

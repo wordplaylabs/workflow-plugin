@@ -201,6 +201,8 @@ const files = {
   // What GitHub's webhook brought, and what was made of it
   // (decisions.md#github-webhook).
   githubSeen: () => join(root, ".claude", "github-seen.json"),
+  // One read of GitHub at a time: its process's pid.
+  githubGuard: () => join(root, ".claude", "github-seen.guard"),
   githubInbox: () => join(root, ".claude", "github-inbox"),
   webhook: () => join(root, ".claude", "webhook.json"),
   // When the listener last heard GitHub and was last alive, which no start
@@ -5751,12 +5753,24 @@ function checksRead(args) {
 function noteChecksUnread(why) {
   const seen = readJson(files.githubSeen()) || {};
   if (why === null ? !seen.checksUnread : seen.checksUnread?.why === why) return;
-  const next = { ...seen, checksUnread: { at: Date.now(), why } };
-  if (why === null) delete next.checksUnread;
+  // Inside the read's guard, so a read's write does not undo it; taken by a
+  // read, the next stop sets it.
+  const guard = files.githubGuard();
   try {
+    mkdirSync(dirname(guard), { recursive: true });
+    if (!takeHoldGuard(guard)) return;
+  } catch {
+    return;
+  }
+  try {
+    const now = readJson(files.githubSeen()) || {};
+    const next = { ...now, checksUnread: { at: Date.now(), why } };
+    if (why === null) delete next.checksUnread;
     writeJson(files.githubSeen(), next);
   } catch {
     // A checkout it cannot write: the stderr line stands.
+  } finally {
+    dropGuard(guard);
   }
 }
 
@@ -8046,8 +8060,9 @@ function ghRead(args, timeout) {
 }
 
 /**
- * `gh` for a read that is said when it fails: `{ out, why }`, `out` null
- * and `why` GitHub's reason (`whyOf`) when the call fails.
+ * `gh` for a read that is said when it fails: `{ out, why, status }`, `out`
+ * null, `why` GitHub's reason (`whyOf`) and `status` the number in `(HTTP
+ * <n>)` on `gh`'s stderr, 0 with none, when the call fails.
  */
 function ghAsk(args, timeout) {
   try {
@@ -8057,9 +8072,10 @@ function ghAsk(args, timeout) {
       timeout,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    return { out, why: "" };
+    return { out, why: "", status: 0 };
   } catch (error) {
-    return { out: null, why: whyOf(error, timeout) };
+    const status = Number(/\(HTTP (\d+)\)/.exec(String(error?.stderr || ""))?.[1] || 0);
+    return { out: null, why: whyOf(error, timeout), status };
   }
 }
 
@@ -8084,29 +8100,41 @@ function whyOf(error, timeout = 0) {
 
 /**
  * The permission of each author not in the seen file yet, `gh api
- * .../collaborators/<login>/permission`, cached there; a login it cannot
- * read is left out, so its item is no event and it is asked again.
+ * .../collaborators/<login>/permission`, cached there: `{ seen, unread }`.
+ * A login GitHub answers 404 for, saying it is not a user (every bot as
+ * `gh`'s lists name it), has permission `none`; an old answer, over a day,
+ * is asked again and, with no time left, is unknown. A login it cannot read is left out, so its
+ * item is left unseen (`githubEvents`) and it is asked again; `unread` maps
+ * it to GitHub's reason, or "out of time" when the deadline passed first.
  */
 function withPermissions(seen, items, repo, deadline) {
   const permissions = { ...seen.permissions };
   const checked = { ...(seen.checked || {}) };
+  const unread = new Map();
   for (const login of new Set(items.map((item) => item.author).filter(Boolean))) {
     // Read again after a day, so a person whose access was taken away stops
     // counting.
     const fresh = Date.now() - (checked[login] || 0) < 24 * 60 * MINUTE;
-    if ((permissions[login] && fresh) || login.endsWith("[bot]") || Date.now() >= deadline)
-      continue;
+    if ((permissions[login] && fresh) || login.endsWith("[bot]")) continue;
+    // An old answer is no answer: its item waits for one.
     delete permissions[login];
-    const out = ghRead(
+    if (Date.now() >= deadline) {
+      unread.set(login, "out of time");
+      continue;
+    }
+    const { out, why, status } = ghAsk(
       ["api", `repos/${repo}/collaborators/${login}/permission`, "--jq", ".permission"],
       left(deadline, 5000),
     );
-    if (out?.trim()) {
-      permissions[login] = out.trim();
+    // A 404 is an answer only when GitHub says the login is no user; a
+    // repository the token cannot see answers 404 too.
+    const permission = status === 404 && /is not a user/.test(why) ? "none" : out?.trim();
+    if (permission) {
+      permissions[login] = permission;
       checked[login] = Date.now();
-    }
+    } else unread.set(login, why || "no answer");
   }
-  return { ...seen, permissions, checked };
+  return { seen: { ...seen, permissions, checked }, unread };
 }
 
 /** The app's slug, read once and kept in the seen file; "" with no app. */
@@ -8595,9 +8623,11 @@ function writeSeen(next) {
 
 /**
  * Items and the seen file through `githubEvents`, the permissions read first,
- * then handled. With issues off only failed runs and merges make events
- * (`issuesOff`); a failed run whose pull request GitHub left out is given the
- * open one of its head branch (decisions.md#github-webhook).
+ * then handled: `{ said, unread }`, `unread` a list not read per author whose
+ * permission is unknown, `listOf`'s shape, so the read's line holds. With
+ * issues off only failed runs and merges make events (`issuesOff`); a failed
+ * run whose pull request GitHub left out is given the open one of its head
+ * branch (decisions.md#github-webhook).
  */
 async function act(items, { deadline = Date.now() + 25_000, dry = false } = {}) {
   const issues = hasIssues();
@@ -8620,19 +8650,31 @@ async function act(items, { deadline = Date.now() + 25_000, dry = false } = {}) 
   const repo = repoHere(spawnSync, process.env, false);
   // A run is nobody's writing, and with issues off nothing else is acted on:
   // no permission is read for either.
+  let whys = new Map();
   if (repo && issues)
-    seen = withPermissions(
+    ({ seen, unread: whys } = withPermissions(
       seen,
-      items.filter((item) => item.kind !== "failed"),
+      items.filter((item) => item.kind !== "failed" && !seenBefore(seen, item)),
       repo,
       deadline,
-    );
+    ));
   const context = { ...githubContext(), slug: seen.slug, issuesOff: !issues };
-  const { events, seen: next } = githubEvents(seen, items, context);
+  const { events, seen: next, unjudged } = githubEvents(seen, items, context);
   const { said, seen: kept } = await handleEvents(events, next, { dry });
   // A dry run changes nothing on disk, so the real one still sees it all.
   if (!dry) writeSeen(kept);
-  return said;
+  const unread = unjudged.map((login) => ({
+    name: `the permission of ${login}`,
+    line: "read",
+    why: whys.get(login) || "not asked",
+  }));
+  return { said, unread };
+}
+
+/** Whether a comment, review or issue's opening was seen by its id (`githubEvents`'s key). */
+function seenBefore(seen, item) {
+  const key = item.kind === "opened" ? `opened:${item.number}` : item.id;
+  return Boolean(key && (seen.items || []).includes(key));
 }
 
 /** The inbox's deliveries not seen yet, oldest first, as items. */
@@ -8677,13 +8719,53 @@ function inboxItems(seen) {
 }
 
 /**
- * **`plans github`**: what the inbox may have missed since the last read,
- * from `gh`, under `relatedReaders`'s budget: the open issues updated
- * since, with their comments and labels, the queue's own open pull
- * requests' comments and reviews, and the pull requests merged since;
- * then the inbox's own deliveries; all through `githubEvents`.
+ * **`plans github`, one at a time** (decisions.md#github-webhook): a read
+ * runs behind `files.githubGuard()`, the pid-owned guard `plans hold` uses,
+ * waiting up to a minute for another to end, so two never judge the same
+ * delivery; one that cannot take it reads nothing and its inbox waits for
+ * the next. A dry run changes nothing and takes no guard.
  */
-async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {}) {
+async function githubCommand(options = {}) {
+  if (options.dry) return githubRead(options);
+  const guard = files.githubGuard();
+  let held = false;
+  try {
+    mkdirSync(dirname(guard), { recursive: true });
+    held = takeHoldGuard(guard, 60_000);
+  } catch {
+    // A folder it cannot write: the read runs unguarded, and its own write
+    // of the seen file says what is wrong.
+    return githubRead(options);
+  }
+  if (!held) return ["GitHub: another read is running here, so this one read nothing."];
+  const release = () => dropGuard(guard);
+  process.on("exit", release);
+  try {
+    return await githubRead(options);
+  } finally {
+    release();
+    process.off("exit", release);
+  }
+}
+
+/** Removes a guard file while it holds this process's pid. */
+function dropGuard(guard) {
+  try {
+    if (readFileSync(guard, "utf8") === String(process.pid)) unlinkSync(guard);
+  } catch {
+    // Gone already.
+  }
+}
+
+/**
+ * **`plans github`'s read**: what the inbox may have missed since the last
+ * read, from `gh`, under `relatedReaders`'s budget: the open issues updated
+ * since, with their comments and labels, every open pull request's inline
+ * comments, the queue's own open pull requests' comments and reviews, and
+ * the pull requests merged since; then the inbox's own deliveries; all
+ * through `githubEvents`.
+ */
+async function githubRead({ budget = 25_000, dry = false, inbox = false } = {}) {
   const deadline = Date.now() + budget;
   // The read's own start is the next one's line, so nothing made while it runs
   // is lost.
@@ -8697,8 +8779,9 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
   // (decisions.md#github-webhook).
   if (inbox && proj().land !== "pull-request") return ["GitHub: nothing new."];
   if (inbox) {
-    const said = await act(inboxItems(seen), { deadline, dry });
-    return said.length ? said : ["GitHub: nothing new."];
+    const { said, unread } = await act(inboxItems(seen), { deadline, dry });
+    const all = [...said, ...unreadSaid(unread).map((group) => `GitHub: could not read ${group}.`)];
+    return all.length ? all : ["GitHub: nothing new."];
   }
   const newer = (at) => !since || (at && at > since);
   // The runs' own line, moved only when every run list was read, so a read
@@ -8729,6 +8812,18 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
     unread.push({ name, line, why: "an answer that is not JSON" });
     return null;
   };
+  // A thread's whole list of comments, every page, since the line.
+  const threadComments = (number) =>
+    listOf(
+      `the comments of #${number}`,
+      "read",
+      [
+        "api",
+        `repos/{owner}/{repo}/issues/${number}/comments?per_page=100${since ? `&since=${since}` : ""}`,
+        "--paginate",
+      ],
+      10_000,
+    )?.map(restItem);
   // What changed since the last read, not the newest fifty.
   const searched = (what) => (since ? ["--search", `${what}:>=${since.slice(0, 19)}Z`] : []);
   // With issues off, the queue's own pull requests' failed runs alone
@@ -8772,27 +8867,46 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
         text: issue.body || "",
       });
     // A label read is no event of its own time: the issue's update stands in.
-    for (const label of ["status: planning", "status: ready"])
-      if (base.labels.includes(label) && !(seen.labeled || []).includes(`${issue.number}:${label}`))
-        items.push({
-          ...base,
-          kind: "labeled",
-          label,
-          author: labeller(issue.number, label, deadline),
-          at: issue.updatedAt,
-          text: "",
-        });
-    for (const comment of issue.comments || [])
-      if (newer(comment.createdAt))
-        items.push({
-          ...base,
-          kind: "comment",
-          id: comment.id || "",
-          author: comment.author?.login || "",
-          at: comment.createdAt,
-          text: comment.body || "",
-          url: comment.url || issue.url,
-        });
+    // **A label put back is read again**: one told is read when the issue
+    // was updated since, and told when put on after it was last told
+    // (decisions.md#github-webhook).
+    let labelEvents;
+    for (const label of ["status: planning", "status: ready"]) {
+      if (!base.labels.includes(label)) continue;
+      const key = `${issue.number}:${label}`;
+      const told = (seen.labeled || []).includes(key);
+      const toldAt = seen.labeledAt?.[key];
+      // An older file's key with no time: the final write gives it one.
+      if (told && (!toldAt || issue.updatedAt <= toldAt)) continue;
+      // Once per issue, a failed read too.
+      if (labelEvents === undefined)
+        labelEvents = listOf(
+          `the label events of #${issue.number}`,
+          "read",
+          ["api", `repos/{owner}/{repo}/issues/${issue.number}/events`, "--paginate"],
+          5000,
+        );
+      if (!labelEvents) continue;
+      const last = labeller(labelEvents, label);
+      if (told && !(last.at > toldAt)) continue;
+      items.push({
+        ...base,
+        kind: "labeled",
+        label,
+        author: last.login,
+        at: issue.updatedAt,
+        text: "",
+      });
+    }
+    // A list `gh` embeds is its first hundred, the oldest: a full one is read
+    // again whole.
+    const comments =
+      (issue.comments || []).length < EMBEDDED
+        ? (issue.comments || []).map(embeddedItem)
+        : threadComments(issue.number);
+    for (const comment of comments || [])
+      if (newer(comment.at))
+        items.push({ ...base, kind: "comment", ...comment, url: comment.url || issue.url });
   }
   const pulls =
     listOf(
@@ -8814,18 +8928,55 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
     ) || [];
   const own = new Set(context.own);
   const people = new Set(context.people);
+  // **The inline comments of every open pull request, in one list**, with a
+  // line: one call for the repository, so a named person's inline comment on
+  // another person's pull request is found (decisions.md#github-webhook).
+  // Unread, every pull request's are skipped and the line holds.
+  const inline =
+    !issuesOn || !since || !pulls.length
+      ? null
+      : listOf(
+          "the review comments",
+          "read",
+          ["api", `repos/{owner}/{repo}/pulls/comments?since=${since}&per_page=100`, "--paginate"],
+          10_000,
+        );
+  const inlineOf = new Map();
+  for (const note of inline || []) {
+    const number = Number(/\/pulls\/(\d+)$/.exec(note?.pull_request_url || "")?.[1] || 0);
+    if (!number) continue;
+    if (!inlineOf.has(number)) inlineOf.set(number, []);
+    inlineOf.get(number).push(note);
+  }
   // **Another person's pull request is read when a named person wrote on it
-  // since the last read** (decisions.md#people-act-on-github): its comments
-  // and reviews as the queue's own, no run list, a failed run being told
-  // for the queue's own alone; none on a first read, which has no line.
-  const namedSince = (pull) =>
-    [
-      ...(pull.comments || []).map((one) => [one.author?.login, one.createdAt]),
-      ...(pull.reviews || []).map((one) => [one.author?.login, one.submittedAt]),
-    ].some(([login, at]) => login && people.has(login.toLowerCase()) && newer(at));
+  // since the last read** (decisions.md#people-act-on-github): its comments,
+  // reviews and inline comments as the queue's own, no run list, a failed
+  // run being told for the queue's own alone; none on a first read, which
+  // has no line.
+  // A list `gh` embeds is its first hundred, the oldest: a full one is read
+  // again whole, before a named person's words are looked for in it.
+  const commentsOf = (pull) =>
+    (pull.comments || []).length < EMBEDDED
+      ? (pull.comments || []).map(embeddedItem)
+      : threadComments(pull.number);
+  const reviewsOf = (pull) =>
+    (pull.reviews || []).length < EMBEDDED
+      ? (pull.reviews || []).map(embeddedItem)
+      : listOf(
+          `the reviews of #${pull.number}`,
+          "read",
+          ["api", `repos/{owner}/{repo}/pulls/${pull.number}/reviews?per_page=100`, "--paginate"],
+          10_000,
+        )?.map(restItem);
+  const namedSince = (said) =>
+    said.some(({ author, at }) => author && people.has(author.toLowerCase()) && newer(at));
   for (const pull of pulls) {
     const ours = own.has(pull.number) || own.has(pull.headRefName);
-    if (!ours && !(issuesOn && since && namedSince(pull))) continue;
+    if (!ours && !(issuesOn && since)) continue;
+    const comments = issuesOn ? commentsOf(pull) : null;
+    const reviews = issuesOn ? reviewsOf(pull) : null;
+    const inlineSaid = (inlineOf.get(pull.number) || []).map(restItem);
+    if (!ours && !namedSince([...(comments || []), ...(reviews || []), ...inlineSaid])) continue;
     const base = {
       number: pull.number,
       title: pull.title,
@@ -8857,44 +9008,22 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
         );
     if (runs) items.push(...failedRunsOf(pull, base, runs, newerRun));
     if (!issuesOn) continue;
-    for (const comment of pull.comments || [])
-      if (newer(comment.createdAt))
-        items.push({
-          ...base,
-          kind: "comment",
-          id: comment.id || "",
-          author: comment.author?.login || "",
-          at: comment.createdAt,
-          text: comment.body || "",
-        });
-    for (const review of pull.reviews || [])
-      if (newer(review.submittedAt))
-        items.push({
-          ...base,
-          kind: "review",
-          id: review.id || "",
-          author: review.author?.login || "",
-          at: review.submittedAt,
-          text: review.body || "",
-        });
-    const notes = listOf(
-      `the review comments of #${pull.number}`,
-      "read",
-      ["api", `repos/{owner}/{repo}/pulls/${pull.number}/comments`],
-      5000,
-    );
-    if (!notes) continue;
-    for (const note of notes)
-      if (newer(note.created_at))
-        items.push({
-          ...base,
-          kind: "review",
-          id: note.node_id || "",
-          author: note.user?.login || "",
-          at: note.created_at,
-          text: note.body || "",
-          url: note.html_url || pull.url,
-        });
+    for (const comment of comments || [])
+      if (newer(comment.at)) items.push({ ...base, kind: "comment", ...comment, url: pull.url });
+    for (const review of reviews || [])
+      if (newer(review.at)) items.push({ ...base, kind: "review", ...review, url: pull.url });
+    // With no line, a first read, the queue's own pull request's own list.
+    const notes = since
+      ? inline && (inlineOf.get(pull.number) || [])
+      : listOf(
+          `the review comments of #${pull.number}`,
+          "read",
+          ["api", `repos/{owner}/{repo}/pulls/${pull.number}/comments`, "--paginate"],
+          5000,
+        );
+    for (const note of since ? inline && inlineSaid : (notes || []).map(restItem))
+      if (newer(note.at))
+        items.push({ ...base, kind: "review", ...note, url: note.url || pull.url });
   }
   // **The merges since the last read**, issues on or off, with their base
   // (decisions.md#merge-refreshes-the-rest); none on a first read, which
@@ -8934,7 +9063,9 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
         text: pull.body || "",
       });
   items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-  const said = await act([...items, ...inboxItems(seen)], { deadline, dry });
+  const acted = await act([...items, ...inboxItems(seen)], { deadline, dry });
+  const said = acted.said;
+  unread.push(...acted.unread);
   // Unmoved, `runsReadAt` keeps the line it read from, so a `readAt` that
   // moves does not carry the runs past what they missed.
   const readOk = !unread.some((one) => one.line !== "runs");
@@ -8948,6 +9079,11 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
       unread: { at: began, said: groups },
     };
     if (!groups.length) delete next.unread;
+    // A label told before its time was kept is read again only when put on
+    // after this read.
+    next.labeledAt = { ...next.labeledAt };
+    // To the second, as GitHub writes its times.
+    for (const key of next.labeled || []) next.labeledAt[key] ||= `${began.slice(0, 19)}Z`;
     // Past a read whose line moved, the times an older seen file kept hide
     // nothing more.
     if (readOk) {
@@ -8958,6 +9094,31 @@ async function githubCommand({ budget = 25_000, dry = false, inbox = false } = {
   }
   const all = [...said, ...groups.map((group) => `GitHub: could not read ${group}.`)];
   return all.length ? all : ["GitHub: nothing new."];
+}
+
+/** A list `gh` embeds (an issue's comments, a pull request's reviews) holds its first hundred, the oldest. */
+const EMBEDDED = 100;
+
+/** An item's fields from a comment or review `gh` embeds in a list. */
+function embeddedItem(one) {
+  return {
+    id: one?.id || "",
+    author: one?.author?.login || "",
+    at: one?.submittedAt || one?.createdAt || "",
+    text: one?.body || "",
+    url: one?.url || "",
+  };
+}
+
+/** An item's fields from a comment, review or inline comment of GitHub's REST lists. */
+function restItem(one) {
+  return {
+    id: one?.node_id || "",
+    author: one?.user?.login || "",
+    at: one?.submitted_at || one?.created_at || "",
+    text: one?.body || "",
+    url: one?.html_url || "",
+  };
 }
 
 /**
@@ -9040,24 +9201,13 @@ export function failedRunsOf(pull, base, runs = [], newer = () => true) {
 }
 
 /**
- * **Who put a label on an issue**, from its events (`gh api
- * .../issues/<n>/events`), the last `labeled` one with that label; "" when
- * it cannot be read, so the item is no event.
+ * **Who put a label on an issue, and when**, from its events (`gh api
+ * .../issues/<n>/events`): the last `labeled` one with that label, `{ login,
+ * at }`, both "" with none.
  */
-function labeller(number, label, deadline) {
-  if (Date.now() >= deadline) return "";
-  let events = [];
-  try {
-    events = JSON.parse(
-      ghRead(["api", `repos/{owner}/{repo}/issues/${number}/events`], left(deadline, 5000)) || "[]",
-    );
-  } catch {
-    return "";
-  }
-  return (
-    events.findLast((one) => one.event === "labeled" && one.label?.name === label)?.actor?.login ||
-    ""
-  );
+function labeller(events, label) {
+  const last = events.findLast((one) => one?.event === "labeled" && one.label?.name === label);
+  return { login: last?.actor?.login || "", at: last?.created_at || "" };
 }
 
 /**
@@ -9514,11 +9664,12 @@ function takeSlot(name, me) {
 
 /**
  * A resource's guard, created exclusively with this process's pid; waits up to
- * three seconds. Unlike the lock's guard it never goes stale by age, only when
- * the process that wrote it is gone, so a waiter paused inside it keeps it.
+ * `wait` milliseconds, three seconds by default. Unlike the lock's guard it
+ * never goes stale by age, only when the process that wrote it is gone, so a
+ * waiter paused inside it keeps it.
  */
-function takeHoldGuard(guard) {
-  const deadline = Date.now() + 3000;
+function takeHoldGuard(guard, wait = 3000) {
+  const deadline = Date.now() + wait;
   for (;;) {
     try {
       writeFileSync(guard, String(process.pid), { flag: "wx" });

@@ -247,8 +247,7 @@ const fixture = (name: string, front = "", body = "") => {
  * JSON map) gives the name of the folder it runs in, else 1234abcd. With
  * `STUB_ROW_AFTER=<ms>` a `--bg` start adds its row that many milliseconds
  * later, its id the one `STUB_BG_IDS` gives the folder when set, quietly
- * when the folder is gone by then; with `STUB=silent` a start prints
- * nothing and adds no row. `calls` logs each call.
+ * when the folder is gone by then. `calls` logs each call.
  */
 const fakeClaude = (
   dir: string,
@@ -273,8 +272,6 @@ if (args[0] === "agents") process.stdout.write(fs.readFileSync(rows, "utf8"));
 else if (process.env.STUB === "untrusted") {
   console.error("Workspace not trusted. Run claude in " + process.cwd() + " once and accept the trust prompt, then retry.");
   process.exit(1);
-} else if (process.env.STUB === "silent") {
-  // Started, says nothing and is listed by nobody yet.
 } else if (process.env.STUB === "backgrounded") {
   if (process.env.STUB_WARNING) console.error(process.env.STUB_WARNING);
   const name = process.env.STUB_BG_NAME || args[args.indexOf("--name") + 1];
@@ -15435,22 +15432,6 @@ describe("several executors build at once", () => {
     expect(existsSync(names)).toBe(false);
     expect(one.queue(["start", "plans/a.md"])).toContain(
       "Overlap Executor 1 (lab) was started on: plans/a.md, in executor-1.",
-    );
-  });
-
-  it("a start not seen yet keeps its name held", { timeout: 60_000 }, () => {
-    const one = pool("Overlap", { "a.md": plan("A", "Change src/a.js.") });
-    const names = join(one.dir, ".claude", "starts.log.names.json");
-    const unseen = one.queue(["start", "plans/a.md"], {}, { STUB: "silent" });
-    expect(unseen).toContain(
-      "Overlap Executor 1 (lab) was started, but has not appeared in claude agents after ten seconds",
-    );
-    // Its session may still come up as Executor 1: the next start numbers past it.
-    expect(Object.keys(JSON.parse(readFileSync(names, "utf8")))).toEqual([
-      "Overlap Executor 1 (lab)",
-    ]);
-    expect(one.queue(["start", "plans/a.md"])).toContain(
-      "Overlap Executor 2 (lab) was started on: plans/a.md, in executor-1.",
     );
   });
 

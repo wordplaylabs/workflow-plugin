@@ -4999,11 +4999,7 @@ function startHere(
   if (kind === "assistant") unclaim("slot:assistant", starter);
   // A launch that failed keeps the deferral, and with it the timer's pid.
   if (typeof seen === "string" && seen !== "unread") {
-    // A start that said nothing and is not listed yet may still come up under
-    // its name: the name stays held until its span lapses, so no start numbers
-    // it again meanwhile (Codex C2, checked with the planner). A start that
-    // said why it failed lets it go.
-    if (!seen.startsWith(`${name} was started, but has not appeared`)) dropName(name);
+    dropName(name);
     if (tree) unclaim(paths[0], starter);
     for (const { old, state, lock } of replaced) {
       writeJson(files.state(old.sessionId), state);

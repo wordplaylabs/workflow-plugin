@@ -10433,6 +10433,67 @@ describe("github webhook", () => {
       expect(closesOf("Closes #5.\rCloses #7.\r")).toEqual([5, 7]);
     });
 
+    // plans/closes-reads-comments-as-github.md: each answer is what GitHub's renderer shows.
+    it("closesOf reads a comment and a fence as GitHub's page shows them", () => {
+      const cases: [string, number[]][] = [
+        // A sentence that mentions `<!--` hides nothing below it.
+        ["The template uses <!-- for notes.\n\nCloses #6.", [6]],
+        ["Fixes it <!-- see\n## Changes\n-->\nCloses #8.", []],
+        ["Some paragraph\n    <!-- x\nCloses #3.\n-->\n", []],
+        ["- item\n\n    <!-- x\nCloses #3.\n-->\n", []],
+        ["- item\n\n    <!-- x\n    Closes #3.\n    -->\nCloses #4.", [4]],
+        ["<!-- x -->## Changes\nCloses #4.", [4]],
+        ["> text <!-- a\n\nCloses #5.", [5]],
+        ["> <!-- a\n\nCloses #5.", []],
+        ["```js\ncode\n```js\nCloses #9.\n```\nCloses #5.", [5]],
+        ["Fixes it <!-- see\nCloses #7.\n-->\nCloses #8.", [8]],
+        ["Fixes it <!-- see\n\nCloses #7.\n\n-->\n\nCloses #8.", [7, 8]],
+        ["a <!-- b --> c <!-- d\nCloses #5.\n\nCloses #6.", [5, 6]],
+        ["text <!-- a\n```\n-->\n```\nCloses #2.", [2]],
+        ["```a`b\nCloses #1.\n```\nCloses #2.\n```\nCloses #3.", [1, 3]],
+        ["<!-- which issue -->Closes #5.\n<!-- and --> Closes #6.", [5, 6]],
+        ["text <!-- ` --> b ` c\nCloses #5.\n` Closes", []],
+        ["Closes #1.\n   ## Changes\nCloses #5.", [1]],
+        ["Clo<!-- a\nb -->ses #5.\nCloses #6.", [5, 6]],
+        ["Closes #5. <!--->\nCloses #6. <!-->\ntext <!---> <!-- a\n\nCloses #7.", [5, 6, 7]],
+        // Codex C1 to C6 and /code-review, each checked on GitHub's renderer: what ends a
+        // paragraph, a quote's paragraph, a fence a container holds, and backslash escapes.
+        ["Notes <!--\n2. Example\nCloses #5.\n-->\nCloses #6.", [6]],
+        ["Notes <!--\n01. x\nCloses #5.\n-->", [5]],
+        ["> Notes <!--\nCloses #5.\n> -->\nCloses #6.", [6]],
+        ["Notes <!--\n\u00a0\nCloses #5.\n-->\nCloses #6.", [6]],
+        ["Notes <!--\n***\nCloses #5.\n-->", [5]],
+        ["Note <!-- x\n<details>\nCloses #5.\n-->", [5]],
+        ["10. Example\n    ```\n    <!--\n    ```\n\nCloses #5.", [5]],
+        ["- item\n\n    ```\n    <!-- x\n    ```\n\nCloses #5.", [5]],
+        ["- ```\n  <!-- x\n- b\n\nCloses #5.", [5]],
+        ["> ```\n> <!-- x\n> ```\n\nCloses #5.", [5]],
+        ["> ```\n> <!-- x\n\nCloses #5.", [5]],
+        ["Notes \\`\nCloses #5.\nend `", [5]],
+        ["Notes \\<!--\nCloses #5.\n-->", [5]],
+        ["Notes \\\\`a <!-- b` -->\nCloses #5.", [5]],
+      ];
+      for (const [text, closes] of cases) expect(closesOf(text), text).toEqual(closes);
+    });
+
+    // Each is a limit decisions.md#closes-its-issues names, with what GitHub's page shows in the
+    // comment: a change that mends one updates the entry and this test together.
+    it("closesOf's known limits read as decisions.md#closes-its-issues says", () => {
+      const cases: [string, number[]][] = [
+        // A second `<!--` after a comment's close on its line: GitHub hides the rest.
+        ["<!-- x --> <!-- y\nCloses #6.\n-->\nCloses #7.", [7]],
+        // A comment that outlasts its list item: GitHub hides the rest.
+        ["1. item\n\n    <!-- x\nCloses #3.\n-->\nCloses #4.", [4]],
+        // A `<!--` inside `<details>`, first on its line: GitHub hides the rest.
+        ["<details>\n<!-- x\n</details>\n\nCloses #5.\n-->\nCloses #6.", [6]],
+        // A `<!--` further along a line of an HTML block: GitHub hides the rest.
+        ["<details><summary>s</summary> <!-- a\n</details>\n\nCloses #5.", [5]],
+        // Code indented inside a list item, read as the item's text: GitHub shows #5.
+        ["- item\n\n      <!-- x\n\nCloses #5.", []],
+      ];
+      for (const [text, closes] of cases) expect(closesOf(text), text).toEqual(closes);
+    });
+
     it("githubEvents gives a merge no issues with issues off", () => {
       const body = { ...merged.pull_request, body: "Closes #12.\nCloses #13.\n" };
       const items = itemsOfDelivery("pull_request", { ...merged, pull_request: body }, "m2");

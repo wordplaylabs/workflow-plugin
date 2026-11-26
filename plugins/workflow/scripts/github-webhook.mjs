@@ -202,62 +202,228 @@ export function keeps(event, rawBody) {
  * numbers of the whole `Closes #<n>.` lines and of an older `For #<n>.` line
  * above the description's first `## ` heading, where the template puts them,
  * outside a fenced block or an HTML comment, the full stop optional, in order,
- * each once; `[]` with none. Lines end in `\n`, `\r\n` or `\r`. A comment
- * (`<!--` to `-->`, `<!-->` and `<!--->` empty ones, on one line or over
- * several) is read as nothing, a `## ` in it included, and a line holding one
- * is read with it taken out; a `<!--` in a code span, in indented code or on a
- * fence's line opens none.
+ * each once; `[]` with none. Lines end in `\n`, `\r\n` or `\r`. A fence and an
+ * HTML comment are told as GitHub's page tells them (CommonMark's fenced code,
+ * HTML blocks and raw HTML): a `<!--` first on its line hides every line up to
+ * the one holding `-->`; one further along a line hides only what its own
+ * paragraph closes, and is plain text when the paragraph ends first; a heading
+ * is told on the line as written, outside a fence or a block comment; a fence
+ * closes only at its mark alone on a line, and a four-space line is code only
+ * when no paragraph or list item runs on into it. `<!-->` and `<!--->` are
+ * empty comments, and a backslash before a `<!--` or a backtick makes it text.
+ * The limits are in the entry.
  */
 export function closesOf(text = "") {
   const numbers = [];
-  let fence = "";
+  const lines = String(text).split(/\r\n?|\n/);
+  // The open fence: its mark, whether a block quote holds it, and the content
+  // indent of the list item that does, 0 with none.
+  let fence = null;
   let comment = false;
-  for (const raw of String(text).split(/\r\n?|\n/)) {
-    const mark = comment ? "" : /^ {0,3}(`{3,}|~{3,})/.exec(raw)?.[1];
-    if (fence) {
-      if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = "";
-      continue;
-    }
-    if (mark) {
-      fence = mark;
-      continue;
-    }
-    const line = comment || !/^(?: {4}|\t)/.test(raw) ? uncommented(raw) : raw;
-    if (/^## /.test(line)) break;
+  let list = false;
+  // The content indent of the open list's last item.
+  let indent = 0;
+  const read = (line) => {
     const m = /^(?:Closes|For) #(\d+)\.?[ \t]*$/.exec(line);
     if (m && !numbers.includes(Number(m[1]))) numbers.push(Number(m[1]));
+  };
+  // A line with up to `n` leading spaces taken off.
+  const dedent = (raw, n) => raw.replace(new RegExp(`^ {0,${n}}`), "");
+  // The line as its innermost container holds it, for telling a fence: block
+  // quote markers or an item's marker taken off, or in a list the item's indent.
+  const inner = (raw) => {
+    const quote = QUOTES.exec(raw);
+    if (quote) return raw.slice(quote[0].length);
+    const item = ITEM_MARK.exec(raw);
+    if (item) return raw.slice(item[1].length + Math.min(item[2].length, 1));
+    return list ? dedent(raw, indent) : raw;
+  };
+  // Whether a line starts something a paragraph does not run on into: a line
+  // in a block quote continues the quote's paragraph unless what it holds is
+  // blank or starts something.
+  const starts = (raw, quoted) => {
+    if (BLANK.test(raw)) return true;
+    if (quoted && QUOTES.test(raw)) {
+      const rest = raw.replace(QUOTES, "");
+      return BLANK.test(rest) || (!INDENTED.test(rest) && interrupts(rest, false));
+    }
+    return (
+      (list || !INDENTED.test(raw)) &&
+      (QUOTES.test(raw) || interrupts(raw, list) || (list && OPENS_FENCE.test(inner(raw))))
+    );
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    if (fence) {
+      // A fence ends with the block quote or the list item that holds it.
+      const ended = fence.quoted
+        ? !QUOTES.test(raw)
+        : fence.indent > 0 && !BLANK.test(raw) && !raw.startsWith(" ".repeat(fence.indent));
+      if (!ended) {
+        const line = fence.quoted ? raw.replace(QUOTES, "") : dedent(raw, fence.indent);
+        const mark = CLOSES_FENCE.exec(line)?.[1];
+        if (mark && mark[0] === fence.mark[0] && mark.length >= fence.mark.length) fence = null;
+        continue;
+      }
+      fence = null;
+    }
+    if (comment) {
+      read(outsideComments(raw).trimStart());
+      continue;
+    }
+    if (BLANK.test(raw)) continue;
+    // A list runs from an item's line to a line indented by less than two spaces.
+    const item = !BREAK.test(raw) && ITEM_MARK.exec(raw);
+    if (item) {
+      list = true;
+      const spaces = item[2].length;
+      indent = item[1].length + (spaces >= 1 && spaces <= 4 ? spaces : 1);
+    } else if (!/^(?: {2}|\t)/.test(raw)) list = false;
+    if (INDENTED.test(raw) && !list) continue;
+    if (BREAK.test(raw)) continue;
+    const mark = OPENS_FENCE.exec(inner(raw));
+    if (mark) {
+      fence = { mark: mark[1] || mark[2], quoted: QUOTES.test(raw), indent: list ? indent : 0 };
+      continue;
+    }
+    if (OPENS_COMMENT.test(raw)) {
+      read(outsideComments(raw).trimStart());
+      continue;
+    }
+    if (/^ {0,3}## /.test(raw)) break;
+    if (HEADING.test(raw)) continue;
+    // A paragraph: this line and every one it runs on into, read as one text;
+    // a line of `=` or `-` under it makes it a heading and is taken with it.
+    const quoted = QUOTES.test(raw);
+    let end = i + 1;
+    while (end < lines.length && !starts(lines[end], quoted)) end++;
+    for (const line of withoutInlineComments(lines.slice(i, end).join("\n")).split("\n"))
+      read(line);
+    const under = lines[end] ?? "";
+    i = SETEXT.test(quoted && QUOTES.test(under) ? under.replace(QUOTES, "") : under)
+      ? end
+      : end - 1;
   }
   return numbers;
 
-  // The line with its comments taken out, `comment` left open when one runs on.
-  function uncommented(raw) {
+  // A block comment's line with its comments taken out, raw HTML with no code
+  // spans; `comment` stays set when one runs on.
+  function outsideComments(raw) {
     let line = "";
     let rest = raw;
-    while (rest) {
+    for (;;) {
       if (comment) {
         const end = rest.indexOf("-->");
-        if (end < 0) break;
+        if (end < 0) return line;
         comment = false;
         rest = rest.slice(end + 3);
-        continue;
       }
-      // Code spans are blanked to their length, so a `<!--` in one is found nowhere.
-      const masked = rest.replace(/(?<!`)(`+)(?!`)[^]*?(?<!`)\1(?!`)/g, (span) =>
-        " ".repeat(span.length),
-      );
-      const start = masked.indexOf("<!--");
-      if (start < 0) {
-        line += rest;
-        break;
-      }
+      const start = rest.indexOf("<!--");
+      if (start < 0) return line + rest;
       line += rest.slice(0, start);
       rest = rest.slice(start + 4);
       const empty = /^-?>/.exec(rest);
       if (empty) rest = rest.slice(empty[0].length);
       else comment = true;
     }
-    return line;
   }
+}
+
+/** A blank line: nothing but spaces and tabs, a no-break space being text. */
+const BLANK = /^[ \t]*$/;
+/** A fence opens: three or more backticks with no backtick after them, or tildes. */
+const OPENS_FENCE = /^ {0,3}(?:(`{3,})[^`]*|(~{3,}).*)$/;
+/** A fence closes: its mark alone on its line. */
+const CLOSES_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+/** A block comment opens: `<!--` first on its line, after block quote and list item markers. */
+const OPENS_COMMENT = /^[ \t]*(?:(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]))[ \t]*)*<!--/;
+/** A list item's marker and the spaces after it. */
+const ITEM_MARK = /^( {0,3}(?:[-+*]|\d{1,9}[.)]))((?:[ \t]+|$))/;
+/** A list item that may interrupt a paragraph outside a list: one with text, numbered 1 if numbered. */
+const FIRST_ITEM = /^ {0,3}(?:[-+*]|0*1[.)])[ \t]+[^ \t]/;
+const HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)/;
+/** A thematic break. */
+const BREAK = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/;
+/** A heading's underline, under a paragraph. */
+const SETEXT = /^ {0,3}(?:=+|-+)[ \t]*$/;
+/** An HTML block that may interrupt a paragraph (CommonMark's kinds 1 and 6). */
+const OPENS_HTML =
+  /^ {0,3}<(?:(?:pre|script|style|textarea)(?:[ \t>]|$)|\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>]|\/>|$))/i;
+/** The block quote markers a line starts with. */
+const QUOTES = /^(?: {0,3}>[ \t]?)+/;
+const INDENTED = /^(?: {4}| {0,3}\t)/;
+
+/** Whether a line, outside a quote's own markers, interrupts a paragraph; `inList` lets any item. */
+function interrupts(line, inList) {
+  return (
+    OPENS_FENCE.test(line) ||
+    OPENS_COMMENT.test(line) ||
+    OPENS_HTML.test(line) ||
+    HEADING.test(line) ||
+    BREAK.test(line) ||
+    SETEXT.test(line) ||
+    (inList ? ITEM_MARK : FIRST_ITEM).test(line)
+  );
+}
+
+/**
+ * A paragraph with the comments that open and close inside it taken out, read
+ * left to right as CommonMark does: a code span first when its backticks come
+ * first, its line ends made spaces, and a `<!--` the paragraph never closes
+ * left as the text it is. A backslash escapes the `<` or the backtick after it,
+ * outside a span; inside one it is text. The backtick runs and comment openings
+ * are found once, so a long description of unmatched ones is not searched again
+ * for each.
+ */
+function withoutInlineComments(text) {
+  const marks = [...text.matchAll(/`+|<!--/g)];
+  // Each length's backtick runs, by their place in `marks`, and how far a
+  // search for a closing run has come in each, so no run is passed twice.
+  const runs = new Map();
+  const passed = new Map();
+  marks.forEach(([mark], k) => {
+    if (mark === "<!--") return;
+    if (!runs.has(mark.length)) runs.set(mark.length, []);
+    runs.get(mark.length).push(k);
+  });
+  let out = "";
+  let at = 0;
+  let open = false;
+  for (let k = 0; k < marks.length; k++) {
+    let from = marks[k].index;
+    // Inside a span or a comment already taken.
+    if (from < at) continue;
+    let mark = marks[k][0];
+    let slash = from;
+    while (slash > at && text[slash - 1] === "\\") slash--;
+    if ((from - slash) % 2) {
+      if (mark === "<!--" || mark.length === 1) continue;
+      from += 1;
+      mark = mark.slice(1);
+    }
+    const to = from + mark.length;
+    if (mark === "<!--") {
+      const empty = /^-?>/.exec(text.slice(to, to + 2));
+      // Once no `-->` is ahead, none is for a later `<!--` either.
+      const close = empty ? to + empty[0].length : open ? -1 : text.indexOf("-->", to) + 3;
+      if (!empty && close < 3) {
+        open = true;
+        continue;
+      }
+      out += text.slice(at, from);
+      at = close;
+      continue;
+    }
+    const same = runs.get(mark.length) || [];
+    let p = passed.get(mark.length) || 0;
+    while (p < same.length && same[p] <= k) p++;
+    passed.set(mark.length, p);
+    if (p === same.length) continue;
+    const end = marks[same[p]].index + mark.length;
+    out += text.slice(at, from) + text.slice(from, end).replace(/\n/g, " ");
+    at = end;
+  }
+  return out + text.slice(at);
 }
 
 /**

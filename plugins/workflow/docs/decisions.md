@@ -813,9 +813,25 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   line would close somebody's. A `Closes` line in an HTML comment or a
   fence is not read, since the description does not show it, and lines
   ending in CRLF, as GitHub's web editor can save them, are read as any.
+  A comment and a fence are told as GitHub's page tells them, by
+  CommonMark's HTML blocks, raw HTML and fenced code, each case checked
+  on GitHub's own renderer: a `<!--` first on its line hides every line
+  up to the one holding `-->`; one further along a line hides only what
+  its own paragraph closes, and is plain text when the paragraph ends
+  first, so a sentence that mentions `<!--` hides nothing below it; a
+  fence closes at its mark alone on a line. Known limits, each a
+  description GitHub's page already shows cut short or one no template
+  writes: where GitHub finds a comment unclosed and hides the rest of
+  the description (a second `<!--` after a comment's close on its line,
+  a comment that outlasts its list item or block quote, a `<!--` inside
+  `<details>` or another HTML block), the reading goes on from the next
+  `-->`, or, for one further along a line of an HTML block, as past
+  plain text; and code indented inside a list item is read as the item's
+  text, so a `<!--` first on such a line hides what follows.
   plans/prs-close-their-issues.md, plans/merge-close-retried.md,
-  plans/merge-closes-no-pull-request.md and
-  plans/closes-skips-comments-and-crlf.md.
+  plans/merge-closes-no-pull-request.md,
+  plans/closes-skips-comments-and-crlf.md and
+  plans/closes-reads-comments-as-github.md.
   - ~~The executor writes `For #<n>` on the pull request, with no
     closing keyword.~~ (Javi, 3 November)
 - `project-app` **The queue writes issues, comments, labels and pull

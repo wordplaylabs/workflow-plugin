@@ -137,6 +137,7 @@ import {
   failedRunsOf,
   otherServices,
   nextName,
+  startedConfirmed,
 } from "../plugins/workflow/scripts/plan-queue.mjs";
 import { statusFrom } from "../plugins/workflow/scripts/statusline.mjs";
 import {
@@ -2756,6 +2757,8 @@ describe("the planner queue", () => {
       };
       expect(listWith([chat])).toMatch(/\nThe assistant: Test Assistant \[44444444\], idle\.\n/);
       expect(listWith([])).not.toContain("The assistant:");
+      // A row of the name with no process is no open chat.
+      expect(listWith([{ ...chat, status: undefined }])).not.toContain("The assistant:");
       // A quiet stop arms no end timer; past the ceiling the stop is held once,
       // and a later stop with the hand-over written arms it ten minutes on.
       const log = process.env.WORKFLOW_STOP_LOG!;
@@ -2923,8 +2926,12 @@ describe("the planner queue", () => {
       );
       const gone = { ...old, pid: undefined, status: undefined };
       queue([gone, fresh], ["end", "--timer", String(Date.now()), old.sessionId]);
-      expect(lines()).toContain(old.sessionId);
+      // Nothing to stop (plans/assistant-takeover-never-leaves-none.md), its state cleared.
+      expect(lines()).not.toContain(old.sessionId);
       expect(lines().some((line) => line.startsWith(`end ${old.sessionId} at `))).toBe(false);
+      const cleared = JSON.parse(readFileSync(stateFile(old.sessionId), "utf8"));
+      expect(cleared.handing).toBeUndefined();
+      expect(cleared.end).toBeUndefined();
       // The other handed on too: no successor, so the fresh start is tried (paused here) and
       // neither is stopped (/code-review).
       clean();
@@ -3030,6 +3037,243 @@ describe("the planner queue", () => {
     } finally {
       clean();
     }
+  });
+
+  // plans/assistant-takeover-never-leaves-none.md: a project of its own with a
+  // fake claude, no WORKFLOW_LIVE, the old chat handed on twenty minutes ago.
+  const takeover = (first: string, claude?: (dir: string) => string) => {
+    const dir = fixture("Test");
+    withOrigin(dir);
+    const script = claude ? claude(dir) : fakeClaude(dir, { status: "idle" });
+    if (claude) writeFileSync(join(dir, "rows.json"), "[]");
+    const rows = join(dir, "rows.json");
+    const log = join(dir, "stops.log");
+    const starts = join(dir, ".claude", "starts.log");
+    const old = {
+      sessionId: `${first}-aaaa-0000-0000-000000000000`,
+      name: "Test Assistant",
+      kind: "background",
+      status: "idle",
+      pid: 1000,
+      startedAt: 1000,
+      cwd: dir,
+    };
+    const state = stateFile(old.sessionId);
+    const handOn = () =>
+      writeFileSync(
+        state,
+        JSON.stringify({ agent: "assistant", handing: { at: Date.now() - 20 * 60_000 } }),
+      );
+    const queue = (args: string[], extra: Record<string, string> = {}) => {
+      const { WORKFLOW_LIVE: _, ...rest } = process.env;
+      return execFileSync("node", [join(here, "plan-queue.mjs"), ...args], {
+        encoding: "utf8",
+        env: {
+          ...rest,
+          CLAUDE_PROJECT_DIR: dir,
+          CLAUDE_CODE_SESSION_ID: "",
+          WORKFLOW_CLAUDE: script,
+          WORKFLOW_STARTS_LOG: starts,
+          WORKFLOW_USAGE_FILE: join(dir, ".claude", "usage.json"),
+          WORKFLOW_STOP_LOG: log,
+          ...extra,
+        },
+      });
+    };
+    const timer = (extra: Record<string, string> = {}) =>
+      queue(["end", "--timer", String(Date.now()), old.sessionId], extra);
+    const lines = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n") : []);
+    const ends = () =>
+      lines()
+        .map((line) => Number(new RegExp(`^end ${old.sessionId} at (\\d+)$`).exec(line)?.[1]))
+        .filter(Boolean);
+    const startLines = () =>
+      existsSync(starts) ? readFileSync(starts, "utf8").trim().split("\n").filter(Boolean) : [];
+    const stateNow = () => JSON.parse(readFileSync(state, "utf8"));
+    const clean = () => {
+      rmSync(state, { force: true });
+      rmSync(dir, { recursive: true, force: true });
+    };
+    return {
+      dir,
+      rows,
+      old,
+      state,
+      handOn,
+      queue,
+      timer,
+      lines,
+      ends,
+      startLines,
+      stateNow,
+      clean,
+    };
+  };
+
+  it(
+    "a takeover whose launch fails keeps the old chat, and the next timer opens the fresh one",
+    { timeout: 60_000 },
+    () => {
+      const { rows, old, handOn, timer, lines, ends, startLines, stateNow, clean } =
+        takeover("83000000");
+      try {
+        writeFileSync(rows, JSON.stringify([old]));
+        handOn();
+        timer({ STUB: "untrusted" });
+        expect(lines()).not.toContain(old.sessionId);
+        expect(ends()).toHaveLength(1);
+        expect(ends()[0]).toBeGreaterThan(Date.now() + 9 * 60_000);
+        expect(ends()[0]).toBeLessThan(Date.now() + 11 * 60_000);
+        expect(startLines()).toEqual([]);
+        expect(stateNow().handing).toBeDefined();
+        // The next firing, the launch working: the fresh chat open, the old one stopped.
+        timer();
+        expect(startLines()).toHaveLength(1);
+        expect(JSON.parse(startLines()[0]).paths).toEqual(["plans/assistant-handover.md"]);
+        expect(lines().filter((line) => line === old.sessionId)).toHaveLength(1);
+        expect(stateNow().handing).toBeUndefined();
+        expect(stateNow().end).toBeUndefined();
+      } finally {
+        clean();
+      }
+    },
+  );
+
+  it(
+    "a fresh chat confirmed but not listed leaves the old one running",
+    { timeout: 60_000 },
+    () => {
+      // claude --bg's backgrounded line with no row: confirmed, but no other chat is open
+      // (Codex C1).
+      const { rows, old, handOn, timer, lines, ends, startLines, stateNow, clean } =
+        takeover("89000000");
+      try {
+        writeFileSync(rows, JSON.stringify([old]));
+        handOn();
+        timer({ STUB: "backgrounded" });
+        expect(startLines()).toHaveLength(1);
+        expect(lines()).not.toContain(old.sessionId);
+        expect(ends()).toHaveLength(1);
+        expect(stateNow().handing).toBeDefined();
+      } finally {
+        clean();
+      }
+    },
+  );
+
+  it(
+    "a handed-on chat with no process is replaced, with nothing stopped",
+    { timeout: 60_000 },
+    () => {
+      for (const [what, first, listed] of [
+        ["its row with no process", "84000000", true],
+        ["no row", "85000000", false],
+      ] as const) {
+        const { rows, old, handOn, timer, lines, startLines, clean } = takeover(first);
+        try {
+          const { pid: _pid, status: _status, ...gone } = old;
+          writeFileSync(rows, JSON.stringify(listed ? [gone] : []));
+          handOn();
+          timer();
+          expect(startLines(), what).toHaveLength(1);
+          expect(lines(), what).not.toContain(old.sessionId);
+        } finally {
+          clean();
+        }
+      }
+    },
+  );
+
+  it("a chat that took a message during the takeover is kept", { timeout: 60_000 }, () => {
+    // A claude whose `--bg` adds the fresh row, then marks the old row busy
+    // (STUB_DO=busy) or takes his message, the prompt hook clearing `handing`
+    // (STUB_DO=message, STUB_STATE the old one's state file).
+    const claude = (dir: string) => {
+      const script = join(dir, "claude");
+      writeFileSync(
+        script,
+        `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const rows = ${JSON.stringify(join(dir, "rows.json"))};
+if (args[0] === "agents") process.stdout.write(fs.readFileSync(rows, "utf8"));
+else if (args.includes("--bg")) {
+  const name = args[args.indexOf("--name") + 1];
+  const all = JSON.parse(fs.readFileSync(rows, "utf8"));
+  if (process.env.STUB_DO === "busy") for (const row of all) row.status = "busy";
+  if (process.env.STUB_DO === "message") {
+    const { handing: _h, ...rest } = JSON.parse(fs.readFileSync(process.env.STUB_STATE, "utf8"));
+    fs.writeFileSync(process.env.STUB_STATE, JSON.stringify(rest));
+  }
+  all.push({ sessionId: "fresh-" + Date.now(), name, kind: "background", status: "idle", pid: 2000, cwd: process.cwd() });
+  fs.writeFileSync(rows, JSON.stringify(all));
+  console.log("Started " + name);
+}
+`,
+      );
+      chmodSync(script, 0o755);
+      return script;
+    };
+    for (const [what, first] of [
+      ["busy", "86000000"],
+      ["message", "87000000"],
+    ] as const) {
+      const { rows, old, state, handOn, timer, lines, ends, startLines, stateNow, clean } =
+        takeover(first, claude);
+      try {
+        writeFileSync(rows, JSON.stringify([old]));
+        handOn();
+        timer({ STUB_DO: what, STUB_STATE: state });
+        expect(startLines(), what).toHaveLength(1);
+        expect(lines(), what).not.toContain(old.sessionId);
+        if (what === "busy") {
+          // Busy once the fresh one is up: tried again ten minutes on.
+          expect(ends(), what).toHaveLength(1);
+          expect(stateNow().handing, what).toBeDefined();
+        } else {
+          // His message kept it: no timer armed.
+          expect(ends(), what).toHaveLength(0);
+          expect(stateNow().handing, what).toBeUndefined();
+        }
+      } finally {
+        clean();
+      }
+    }
+  });
+
+  it("an assistant chat is opened beside a row with no process", { timeout: 60_000 }, () => {
+    const { rows, old, queue, startLines, clean } = takeover("88000000");
+    try {
+      const { pid: _pid, status: _status, ...gone } = old;
+      writeFileSync(rows, JSON.stringify([gone]));
+      const refused = queue(["start", "--agent", "assistant"], { STUB: "untrusted" });
+      expect(refused).toContain("Test Assistant was not started: Workspace not trusted.");
+      expect(startLines()).toEqual([]);
+      expect(queue(["start", "--agent", "assistant"])).toContain(
+        "Test Assistant was opened for Javi.",
+      );
+      expect(startLines()).toHaveLength(1);
+    } finally {
+      clean();
+    }
+  });
+
+  it("startedConfirmed reads a start's line", () => {
+    const started = "Test Assistant was started on: plans/github/1.md.";
+    expect(startedConfirmed(started)).toBe(true);
+    expect(startedConfirmed("Test Assistant was opened for Javi.")).toBe(true);
+    expect(
+      startedConfirmed(
+        `${started} claude agents could not be read, so it is not confirmed; its output is in .claude/assistant.1.started.`,
+      ),
+    ).toBe(false);
+    expect(startedConfirmed("Test Assistant [44444444] is open: send it the message.")).toBe(false);
+    // A launcher's line quoted in a failed start says nothing of a start (Codex C5).
+    expect(
+      startedConfirmed(
+        "Test Assistant was not started: Workspace not trusted. Run claude in /w/x was opened for y once; its output is in .claude/assistant.1.started.",
+      ),
+    ).toBe(false);
   });
 
   // plans/prs-close-their-issues.md, part 5.

@@ -4069,7 +4069,7 @@ describe("one assistant chat is live after a hand-over", () => {
   it("the handbook, the assistant's file and the catalogue say so", () => {
     const handbook = read("docs/workflow.md");
     expect(handbook).toContain(
-      "One assistant chat is live: the handed-on one is stopped before the fresh one starts, or, when another is open already, as soon as it is quiet, the queue trying again every ten minutes until it is; none is opened while `claude agents` cannot be read; what the queue sends goes to the chat started last that is not handed on; and `plans end <id> --now` ends one he names.",
+      "One assistant chat is live: the fresh one is started first and the handed-on one stopped once the fresh one is listed, or, when another is open already, as soon as it is quiet, the queue trying again every ten minutes until one is open and the old one stopped; a chat with no process is not open, so one is opened beside its row; none is opened while `claude agents` cannot be read; what the queue sends goes to the chat started last that is not handed on; and `plans end <id> --now` ends one he names.",
     );
     expect(handbook).toContain(
       "starts a fresh session on it; an assistant chat named is stopped with nothing started in its place;",
@@ -4093,6 +4093,13 @@ describe("one assistant chat is live after a hand-over", () => {
     );
     expect(decisions).toContain(
       "So the takeover is tried every ten minutes until the handed-on chat is stopped, with no fresh start when another is open, quiet read from the process's own status; none is opened on a list that cannot be read; and what the queue sends goes to the chat started last that is not handed on.",
+    );
+    // plans/assistant-takeover-never-leaves-none.md, part 5.
+    expect(decisions).toContain(
+      "A takeover that stopped the old chat first left him with none when the fresh one's launch failed, and the launch was confirmed by the stopped chat's own row, which stays listed under the name for weeks.",
+    );
+    expect(decisions).toContain(
+      "So the fresh chat is started first, confirmed by a session not listed before, and the old one is stopped once it is, as a rolling update brings the new copy up before it takes the old one down; and a chat with no process is not open, since it takes no message: one is opened beside its row.",
     );
     expect(decisions).toContain(
       "An assistant chat he names is ended the same way, with nothing started in its place: archiving it stopped nothing.",

@@ -132,9 +132,17 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   handed-on chat is stopped, with no fresh start when another is open,
   quiet read from the process's own status; none is opened on a list
   that cannot be read; and what the queue sends goes to the chat started
-  last that is not handed on.
+  last that is not handed on. A takeover that stopped the old chat first
+  left him with none when the fresh one's launch failed, and the launch
+  was confirmed by the stopped chat's own row, which stays listed under
+  the name for weeks. So the fresh chat is started first, confirmed by a
+  session not listed before, and the old one is stopped once it is, as a
+  rolling update brings the new copy up before it takes the old one
+  down; and a chat with no process is not open, since it takes no
+  message: one is opened beside its row.
   plans/one-assistant-chat.md, plans/quiet-worker-starts.md,
-  plans/prs-close-their-issues.md, plans/one-assistant-after-handover.md.
+  plans/prs-close-their-issues.md, plans/one-assistant-after-handover.md,
+  plans/assistant-takeover-never-leaves-none.md.
   - ~~Planners and executors stay openable, in his chat list.~~
     (Javi, 24 November)
 - `new-topic-to-assistant` **Every new topic starts in the assistant's

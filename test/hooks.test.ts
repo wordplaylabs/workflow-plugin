@@ -136,6 +136,7 @@ import {
   hasIssues,
   failedRunsOf,
   otherServices,
+  nextName,
 } from "../plugins/workflow/scripts/plan-queue.mjs";
 import { statusFrom } from "../plugins/workflow/scripts/statusline.mjs";
 import {
@@ -243,8 +244,11 @@ const fixture = (name: string, front = "", body = "") => {
  * `STUB=backgrounded` it prints `claude --bg`'s confirmation and adds no row,
  * as a session `claude agents` does not list yet, after `STUB_WARNING` when
  * set and under `STUB_BG_NAME` when set, its id the one `STUB_BG_IDS` (a
- * JSON map) gives the name of the folder it runs in, else 1234abcd. `calls`
- * logs each call.
+ * JSON map) gives the name of the folder it runs in, else 1234abcd. With
+ * `STUB_ROW_AFTER=<ms>` a `--bg` start adds its row that many milliseconds
+ * later, its id the one `STUB_BG_IDS` gives the folder when set, quietly
+ * when the folder is gone by then; with `STUB=silent` a start prints
+ * nothing and adds no row. `calls` logs each call.
  */
 const fakeClaude = (
   dir: string,
@@ -269,6 +273,8 @@ if (args[0] === "agents") process.stdout.write(fs.readFileSync(rows, "utf8"));
 else if (process.env.STUB === "untrusted") {
   console.error("Workspace not trusted. Run claude in " + process.cwd() + " once and accept the trust prompt, then retry.");
   process.exit(1);
+} else if (process.env.STUB === "silent") {
+  // Started, says nothing and is listed by nobody yet.
 } else if (process.env.STUB === "backgrounded") {
   if (process.env.STUB_WARNING) console.error(process.env.STUB_WARNING);
   const name = process.env.STUB_BG_NAME || args[args.indexOf("--name") + 1];
@@ -276,9 +282,23 @@ else if (process.env.STUB === "untrusted") {
   console.log("backgrounded · " + (id || "1234abcd") + " · " + name);
 } else if (args.includes("--bg")) {
   const name = args[args.indexOf("--name") + 1];
-  const all = JSON.parse(fs.readFileSync(rows, "utf8"));
-  all.push({ sessionId: "${prefix}-" + ${numbered ? `all.length + "-" + ` : ""}Date.now(), name, kind: "background", ${status ? `status: "${status}", ` : ""}cwd: process.cwd() });
-  fs.writeFileSync(rows, JSON.stringify(all));
+  const cwd = process.cwd();
+  const add = () => {
+    const all = JSON.parse(fs.readFileSync(rows, "utf8"));
+    const id = JSON.parse(process.env.STUB_BG_IDS || "{}")[require("node:path").basename(cwd)];
+    all.push({ sessionId: id || "${prefix}-" + ${numbered ? `all.length + "-" + ` : ""}Date.now(), name, kind: "background", ${status ? `status: "${status}", ` : ""}cwd });
+    fs.writeFileSync(rows, JSON.stringify(all));
+  };
+  const after = Number(process.env.STUB_ROW_AFTER || 0);
+  if (after)
+    setTimeout(() => {
+      try {
+        add();
+      } catch {
+        // The test's folder is gone: nothing to list.
+      }
+    }, after);
+  else add();
   console.log("Started " + name);
 }
 `,
@@ -15105,8 +15125,7 @@ describe("several executors build at once", () => {
     const env = {
       ...one.env,
       STUB: "backgrounded",
-      // Each start's session by its worktree: the two may be given one name,
-      // both numbered before either is logged.
+      // Each start's session by its worktree.
       STUB_BG_IDS: JSON.stringify({ "executor-1": "1111aaaa", "executor-2": "2222bbbb" }),
     };
     const children: ReturnType<typeof spawn>[] = [];
@@ -15141,14 +15160,160 @@ describe("several executors build at once", () => {
     }
     expect(saidA).not.toContain("was not started");
     expect(saidB).not.toContain("was not started");
-    expect(saidA).toMatch(
-      /Overlap Executor \d \(lab\) was started on: plans\/a\.md, in executor-1\./,
-    );
-    expect(saidB).toMatch(
-      /Overlap Executor \d \(lab\) was started on: plans\/b\.md, in executor-2\./,
-    );
+    expect(saidA).toContain("Overlap Executor 1 (lab) was started on: plans/a.md, in executor-1.");
+    expect(saidB).toContain("Overlap Executor 2 (lab) was started on: plans/b.md, in executor-2.");
     expect(claims()["plans/a.md"].holder).toBe("1111aaaa");
     expect(claims()["plans/b.md"].holder).toBe("2222bbbb");
+  });
+
+  // plans/overlapping-starts-own-names.md: a start holds its name until it
+  // is logged, so a second start at the same moment numbers past it.
+  it(
+    "two overlapping starts get two names, and each claims its plan for its own session",
+    { timeout: 60_000 },
+    async () => {
+      const one = pool("Overlap", {
+        "a.md": plan("A", "Change src/a.js."),
+        "b.md": plan("B", "Change src/b.js."),
+      });
+      const ids = {
+        "executor-1": "1111aaaa-0000-4000-8000-000000000001",
+        "executor-2": "2222bbbb-0000-4000-8000-000000000002",
+      };
+      // Each session's row is listed six seconds after its launch, inside
+      // launch's ten, so the second numbers while the first is unlisted.
+      const env = { ...one.env, STUB_ROW_AFTER: "6000", STUB_BG_IDS: JSON.stringify(ids) };
+      const children: ReturnType<typeof spawn>[] = [];
+      const begin = (path: string) => {
+        const child = spawn("node", [join(here, "plan-queue.mjs"), "start", path], { env });
+        children.push(child);
+        let said = "";
+        child.stdout.on("data", (chunk) => (said += chunk));
+        child.stdin.end();
+        return new Promise<string>((done) => child.on("close", () => done(said)));
+      };
+      const claims = () => {
+        try {
+          return JSON.parse(readFileSync(join(one.dir, ".claude", "executor.claims.json"), "utf8"));
+        } catch {
+          return {};
+        }
+      };
+      let saidA = "";
+      let saidB = "";
+      try {
+        const first = begin("plans/a.md");
+        const by = Date.now() + 20_000;
+        while (!claims()["slot:1"] && Date.now() < by) await new Promise((r) => setTimeout(r, 100));
+        expect(claims()["slot:1"]).toBeTruthy();
+        const second = begin("plans/b.md");
+        [saidA, saidB] = await Promise.all([first, second]);
+      } finally {
+        for (const child of children) if (child.exitCode === null) child.kill();
+      }
+      expect(saidA).toContain(
+        "Overlap Executor 1 (lab) was started on: plans/a.md, in executor-1.",
+      );
+      expect(saidB).toContain(
+        "Overlap Executor 2 (lab) was started on: plans/b.md, in executor-2.",
+      );
+      expect(claims()["plans/a.md"].holder).toBe(ids["executor-1"]);
+      expect(claims()["plans/b.md"].holder).toBe(ids["executor-2"]);
+      const logged = readFileSync(join(one.dir, ".claude", "starts.log"), "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line).name);
+      expect(logged.sort()).toEqual(["Overlap Executor 1 (lab)", "Overlap Executor 2 (lab)"]);
+      expect(existsSync(join(one.dir, ".claude", "starts.log.names.json"))).toBe(false);
+    },
+  );
+
+  it("a planner start beside an executor start keeps its own number", { timeout: 30_000 }, () => {
+    const one = pool("Overlap", { "a.md": plan("A", "Change src/a.js.") });
+    writeFileSync(
+      join(one.dir, "plans", "q.md"),
+      "# Q\n\nBrief for the planner, 26 November 2026.\n\n## What was asked\n\nA question.\n",
+    );
+    const names = join(one.dir, ".claude", "starts.log.names.json");
+    // Another start, at work this moment, holds the first executor's name.
+    writeFileSync(
+      names,
+      JSON.stringify({ "Overlap Executor 1 (lab)": { pid: 999999, at: Date.now() } }),
+    );
+    const planner = one.queue(["start", "--agent", "planner", "plans/q.md"]);
+    expect(planner).toContain("Overlap Planner 1 (lab) was started on: plans/q.md.");
+    const executor = one.queue(["start", "plans/a.md"]);
+    expect(executor).toContain(
+      "Overlap Executor 2 (lab) was started on: plans/a.md, in executor-1.",
+    );
+    // Each start let its own name go; the other start's is left to it.
+    expect(Object.keys(JSON.parse(readFileSync(names, "utf8")))).toEqual([
+      "Overlap Executor 1 (lab)",
+    ]);
+  });
+
+  it("a held name lapses after two minutes", { timeout: 30_000 }, () => {
+    const one = pool("Overlap", { "a.md": plan("A", "Change src/a.js.") });
+    const names = join(one.dir, ".claude", "starts.log.names.json");
+    writeFileSync(
+      names,
+      JSON.stringify({
+        "Overlap Executor 1 (lab)": { pid: 999999, at: Date.now() - 3 * 60_000 },
+      }),
+    );
+    expect(one.queue(["start", "plans/a.md"])).toContain(
+      "Overlap Executor 1 (lab) was started on: plans/a.md, in executor-1.",
+    );
+    expect(existsSync(names)).toBe(false);
+  });
+
+  it("a start that fails holds no name", { timeout: 60_000 }, () => {
+    const one = pool("Overlap", { "a.md": plan("A", "Change src/a.js.") });
+    const names = join(one.dir, ".claude", "starts.log.names.json");
+    const refused = one.queue(["start", "plans/a.md"], {}, { STUB: "untrusted" });
+    expect(refused).toContain("Overlap Executor 1 (lab) was not started: Workspace not trusted");
+    expect(existsSync(names)).toBe(false);
+    expect(one.queue(["start", "plans/a.md"])).toContain(
+      "Overlap Executor 1 (lab) was started on: plans/a.md, in executor-1.",
+    );
+  });
+
+  it("a start not seen yet keeps its name held", { timeout: 60_000 }, () => {
+    const one = pool("Overlap", { "a.md": plan("A", "Change src/a.js.") });
+    const names = join(one.dir, ".claude", "starts.log.names.json");
+    const unseen = one.queue(["start", "plans/a.md"], {}, { STUB: "silent" });
+    expect(unseen).toContain(
+      "Overlap Executor 1 (lab) was started, but has not appeared in claude agents after ten seconds",
+    );
+    // Its session may still come up as Executor 1: the next start numbers past it.
+    expect(Object.keys(JSON.parse(readFileSync(names, "utf8")))).toEqual([
+      "Overlap Executor 1 (lab)",
+    ]);
+    expect(one.queue(["start", "plans/a.md"])).toContain(
+      "Overlap Executor 2 (lab) was started on: plans/a.md, in executor-1.",
+    );
+  });
+
+  it("nextName numbers one above the highest of its kind and project", () => {
+    const at = { project: "Docs", machine: "lab" };
+    expect(nextName("executor", { ...at, names: [] })).toBe("Docs Executor 1 (lab)");
+    expect(
+      nextName("executor", { ...at, names: ["Docs Executor 1 (lab)", "Docs Executor 3 (lab)"] }),
+    ).toBe("Docs Executor 4 (lab)");
+    // Another project's and another kind's names are not counted.
+    expect(
+      nextName("executor", {
+        ...at,
+        names: ["Web Executor 7 (lab)", "Docs Planner 5 (lab)", "Docs Assistant", ""],
+      }),
+    ).toBe("Docs Executor 1 (lab)");
+    expect(nextName("planner", { ...at, names: ["Docs Planner 5 (lab)"] })).toBe(
+      "Docs Planner 6 (lab)",
+    );
+    // A name with no machine, as the old log has, is counted.
+    expect(nextName("executor", { ...at, names: ["Docs Executor 2"] })).toBe(
+      "Docs Executor 3 (lab)",
+    );
   });
 
   // plans/claim-carries-the-launched-id.md: a start's claim holds the

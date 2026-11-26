@@ -607,11 +607,14 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   and the other chats on the machine still reach it by its name
   (tried in Claude Code 2.1.331, where his phone alerted for the two
   test chats in the list and not for the one outside it); no two
-  sessions on any machine share a name; the assistant is his one
+  sessions on any machine share a name. A start holds its name beside
+  the starts log from its numbering until it is logged, so two starts
+  at one moment, in one checkout or two, a planner's as an
+  executor's, number apart. The assistant is his one
   chat, so it has no number. GitHub Actions tells a person that a run
   of theirs ended, never that it started.
   plans/session-names-across-machines.md, plans/one-assistant-chat.md,
-  plans/quiet-worker-starts.md.
+  plans/quiet-worker-starts.md, plans/overlapping-starts-own-names.md.
   - ~~Every session the queue starts is a Remote Control chat.~~
     (Javi, 24 November)
 - `chat-ends-after-an-hour` **A finished chat ends an hour after it goes

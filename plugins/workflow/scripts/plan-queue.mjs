@@ -202,6 +202,10 @@ const files = {
   deferred: (kind = "executor") => join(root, ".claude", `${kind}.deferred`),
   usage: () => process.env.WORKFLOW_USAGE_FILE || join(data(), "usage.json"),
   starts: () => process.env.WORKFLOW_STARTS_LOG || join(data(), "starts.log"),
+  // The names starts hold from their numbering until they are logged, beside
+  // the log, so for every checkout and kind: `{ "<name>": { pid, at } }`
+  // (`holdName`, plans/overlapping-starts-own-names.md).
+  names: () => `${files.starts()}.names.json`,
   state: (sessionId) => join(tmpdir(), `workflow-queue-${sessionId || "unknown"}.json`),
   // The project's app's installation token and its end.
   appToken: () => join(root, ".claude", "app-token.json"),
@@ -1161,6 +1165,25 @@ export function sessionName(kind, n, { project = "", machine = "" } = {}) {
   if (kind === "assistant") return [project, "Assistant"].filter(Boolean).join(" ");
   const word = kind === "planner" ? "Planner" : "Executor";
   return [project, word, n, machine && `(${machine})`].filter(Boolean).join(" ");
+}
+
+/**
+ * The number a new session of `kind` takes: one above the highest among
+ * `names` that `parseName` reads as this kind and project, any machine or
+ * none (the old log's names carry none), from 1 with none; the name
+ * `sessionName` gives it. `canStart` numbers with it, and `holdName` again
+ * under its guard (plans/overlapping-starts-own-names.md).
+ */
+export function nextName(kind, { project = "", machine = "", names = [] } = {}) {
+  const n =
+    Math.max(
+      0,
+      ...names.map((one) => {
+        const parsed = parseName(one || "");
+        return parsed && parsed.project === project && parsed.kind === kind ? parsed.n : 0;
+      }),
+    ) + 1;
+  return sessionName(kind, n, { project, machine });
 }
 
 /** `{ project, kind, n, machine }` from a session's name, or null when the queue gave no such name. */
@@ -2728,9 +2751,9 @@ export function canStart({
   if (findings.length && !said) return { refuse: true, why: `${findings[0]} ${decides}` };
   // From 1 in a project with none started yet. The live list counts too: the
   // log can be reset (a marketplace move) while a session it named is still
-  // alive.
-  const n =
-    Math.max(0, ...[...log.map((line) => line.name), ...taken].map((one) => ours(one)?.n || 0)) + 1;
+  // alive. **A start holds its name** from here until it is logged
+  // (`holdName`), so a second start at the same moment, numbering again
+  // under its guard, never takes it (plans/overlapping-starts-own-names.md).
   const besideNote = beside
     .map(
       (one) =>
@@ -2739,7 +2762,10 @@ export function canStart({
     .join(" ");
   return {
     start: true,
-    name: kind === "assistant" ? assistantName : sessionName(kind, n, { project: name, machine }),
+    name:
+      kind === "assistant"
+        ? assistantName
+        : nextName(kind, { project: name, machine, names: [...log.map((l) => l.name), ...taken] }),
     note: [note, besideNote].filter(Boolean).join(" "),
     ...(replace.length ? { replace } : {}),
     ...(findings.length ? { past: findings[0] } : {}),
@@ -2865,6 +2891,78 @@ function readLog() {
       .map((line) => JSON.parse(line));
   } catch {
     return [];
+  }
+}
+
+/**
+ * **A start holds its name** (decisions.md#session-names): under the
+ * names' guard, the held names younger than `STARTING_SPAN` kept, the log
+ * read afresh, the name is numbered again by `nextName` over the log's
+ * names, `taken` (the live names) and the names held, and written held for
+ * this process. Since a start is logged before it lets its name go, a name
+ * in flight is in the file or in the log whenever the guard is held, and a
+ * second start at the same moment, in this checkout or another, numbers
+ * past it. `claude agents` is not asked under the guard: it can take
+ * seconds. "" when the guard is not taken or the file cannot be written:
+ * the start goes on with `canStart`'s name, unheld
+ * (plans/overlapping-starts-own-names.md).
+ */
+function holdName(kind, taken) {
+  const path = files.names();
+  const guard = `${path}.guard`;
+  try {
+    if (!takeGuard(guard)) return "";
+  } catch {
+    return "";
+  }
+  try {
+    const now = Date.now();
+    const held = Object.fromEntries(
+      Object.entries(readJson(path) || {}).filter(
+        ([, one]) => now - (one?.at || 0) < STARTING_SPAN,
+      ),
+    );
+    const name = nextName(kind, {
+      project: proj().name,
+      machine: machine().name,
+      names: [...readLog().map((line) => line.name), ...taken, ...Object.keys(held)],
+    });
+    writeJson(path, { ...held, [name]: { pid: process.pid, at: now } });
+    return name;
+  } catch {
+    return "";
+  } finally {
+    try {
+      unlinkSync(guard);
+    } catch {
+      // Gone already.
+    }
+  }
+}
+
+/** Lets go of a name `holdName` held for this process, and of the file once it holds none; a failed removal holds back nothing. */
+function dropName(name) {
+  const path = files.names();
+  const guard = `${path}.guard`;
+  try {
+    if (!takeGuard(guard)) return;
+  } catch {
+    return;
+  }
+  try {
+    const held = readJson(path);
+    if (!held || held[name]?.pid !== process.pid) return;
+    delete held[name];
+    if (Object.keys(held).length) writeJson(path, held);
+    else rmSync(path, { force: true });
+  } catch {
+    // The name lapses with its span.
+  } finally {
+    try {
+      unlinkSync(guard);
+    } catch {
+      // Gone already.
+    }
   }
 }
 
@@ -3080,7 +3178,9 @@ const startOutput = (kind) => join(root, ".claude", `${kind}.${process.pid}.star
  * process at the same moment cannot truncate it or be read in its place
  * (plans/start-output-per-start.md); a later start in the same process, as
  * a usage reset's timer makes one after another, writes it afresh. `claude agents` is asked once a second
- * for ten seconds for a row of the new name. `{ id }` when seen, the row's
+ * for ten seconds for a row of the new name, the start's own: a start holds
+ * its name until it is logged (`holdName`), so no start beside it at the
+ * same moment is given it (plans/overlapping-starts-own-names.md). `{ id }` when seen, the row's
  * session id, or when a line of the output is `claude --bg`'s own
  * confirmation for this name, `backgrounded · <id> · <name>`, which counts
  * as seeing the session though `claude agents` lists no row yet (a line
@@ -4750,22 +4850,25 @@ function startHere(
   // (decisions.md#session-names): a planner or an executor is a background
   // chat on the machine, in no list of the owner's, so its start alerts no
   // phone.
-  const args = [
+  const argsFor = (name) => [
     ...mcp,
     ...(tree ? ["--add-dir", join(root, "plans")] : []),
     "--bg",
-    ...(kind === "assistant" ? ["--remote-control", decision.name] : []),
+    ...(kind === "assistant" ? ["--remote-control", name] : []),
     "--name",
-    decision.name,
+    name,
     "--agent",
     // The plugin's agents are scoped by its name.
     `workflow:${agent}`,
     ...(effort ? ["--effort", effort] : []),
     prompt,
   ];
+  // A dry run holds nothing: it shows the name with no other start in flight.
   if (dry)
     return [
-      `Would run: claude ${args.map((a) => JSON.stringify(a)).join(" ")}`,
+      `Would run: claude ${argsFor(decision.name)
+        .map((a) => JSON.stringify(a))
+        .join(" ")}`,
       ...(tree ? [`Would run it in ${relative(root, tree)}.`] : []),
       ...(decision.past ? [`Would start on ${owner()}'s word, past: ${decision.past}`] : []),
       ...(decision.replace || []).map(
@@ -4779,6 +4882,11 @@ function startHere(
     // The one lock of before the numbers goes with the first start.
     rmSync(join(root, ".claude", "executor.lock"), { force: true });
   }
+  // **A start holds its name** until it is logged, numbered again under the
+  // names' guard, so two starts at once never share one; the assistant has
+  // one name and its own slot (plans/overlapping-starts-own-names.md).
+  const name = (kind !== "assistant" && holdName(kind, liveNames())) || decision.name;
+  const args = argsFor(name);
   // **A stale idle session is replaced**: retired and its lock released
   // before the launch, so the new executor's first prompt finds the lock
   // free; a launch that fails gives both back.
@@ -4808,9 +4916,10 @@ function startHere(
   // The session this start replaces gives up the plan its stop claimed.
   if (tree && replace) unclaim(paths[0], replace, { live });
   if (tree) {
-    const plan = claim(paths[0], { holder: starter, name: decision.name, live });
-    const slot = plan && claim(`slot:${number}`, { holder: starter, name: decision.name, live });
+    const plan = claim(paths[0], { holder: starter, name, live });
+    const slot = plan && claim(`slot:${number}`, { holder: starter, name, live });
     if (!slot) {
+      dropName(name);
       if (plan) unclaim(paths[0], starter);
       for (const { old, state, lock } of replaced) {
         writeJson(files.state(old.sessionId), state);
@@ -4820,11 +4929,16 @@ function startHere(
       return `${paths[0]} or executor-${number} was taken by another start at this moment; plans shows the queue.`;
     }
   }
-  const seen = launch(args, decision.name, kind, tree || root);
+  const seen = launch(args, name, kind, tree || root);
   if (tree) unclaim(`slot:${number}`, starter);
   if (kind === "assistant") unclaim("slot:assistant", starter);
   // A launch that failed keeps the deferral, and with it the timer's pid.
   if (typeof seen === "string" && seen !== "unread") {
+    // A start that said nothing and is not listed yet may still come up under
+    // its name: the name stays held until its span lapses, so no start numbers
+    // it again meanwhile (Codex C2, checked with the planner). A start that
+    // said why it failed lets it go.
+    if (!seen.startsWith(`${name} was started, but has not appeared`)) dropName(name);
     if (tree) unclaim(paths[0], starter);
     for (const { old, state, lock } of replaced) {
       writeJson(files.state(old.sessionId), state);
@@ -4882,8 +4996,10 @@ function startHere(
   ].join(" ");
   appendFileSync(
     files.starts(),
-    `${JSON.stringify({ at: Date.now(), name: decision.name, paths, five: usage?.five_hour?.used_percentage ?? null, seven: usage?.seven_day?.used_percentage ?? null, ...(because ? { why: because } : {}), ...(said ? { said } : {}) })}\n`,
+    `${JSON.stringify({ at: Date.now(), name, paths, five: usage?.five_hour?.used_percentage ?? null, seven: usage?.seven_day?.used_percentage ?? null, ...(because ? { why: because } : {}), ...(said ? { said } : {}) })}\n`,
   );
+  // Logged, the name is counted from the log: the held one goes.
+  dropName(name);
   // The session replaced is stopped three minutes on: a tired executor, or a
   // retired planner whose chat was its plan's until this next planner.
   if (replace) stopLater(replace, live);
@@ -4895,17 +5011,17 @@ function startHere(
   if (kind === "planner") stopRetiredPlanners(live, { except: replace });
   // **The plan is claimed for the executor started on it**, so no other start
   // takes it before its Building line.
-  out.started = { name: decision.name, path: paths[0], number: tree ? number : 0 };
+  out.started = { name, path: paths[0], number: tree ? number : 0 };
   if (tree) {
-    const row = liveSessions({ fresh: true })?.find((one) => one.name === decision.name);
+    const row = liveSessions({ fresh: true })?.find((one) => one.name === name);
     // Not listed yet: held by the id the launch read, else by its name, until
     // it is listed, or for the start's span ("A start sees its session"). The
     // start's own claim is handed over in the same write, so no other takes
     // the plan between.
     const id = row ? row.sessionId : seen?.id?.length >= 8 ? seen.id : "";
     claim(paths[0], {
-      holder: id || `name:${decision.name}`,
-      name: decision.name,
+      holder: id || `name:${name}`,
+      name,
       from: starter,
       launched: !row && Boolean(seen?.launched) && Boolean(id),
     });
@@ -4914,7 +5030,7 @@ function startHere(
     ? `was started on: ${paths.join(", ")}${tree ? `, in ${basename(tree)}` : ""}`
     : `was opened for ${owner()}`;
   return [
-    `${decision.name} ${what}.${unread}${decision.note ? ` ${decision.note}` : ""}${pastWords ? ` ${pastWords}` : ""}`,
+    `${name} ${what}.${unread}${decision.note ? ` ${decision.note}` : ""}${pastWords ? ` ${pastWords}` : ""}`,
     ...retiredWords,
   ].join(" ");
 }

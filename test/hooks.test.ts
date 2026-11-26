@@ -1078,7 +1078,7 @@ describe("plan-queue", () => {
 
     // plans/plans-as-github-issues.md, part 3: a plan with an issue waits for Ready.
     it("reads a plan with an Issue line and no Ready as planned, and with one as ready", () => {
-      const planned = `${header("3 November 2026")}Lands: topic t, ready.\nIssue: #12.\n\n## What was asked\n`;
+      const planned = `${header("3 November 2026")}Lands: topic t.\nIssue: #12.\n\n## What was asked\n`;
       expect(stateOf(planned)).toMatchObject({ state: "planned", issue: 12 });
       expect(issueOf(planned)).toBe(12);
       const ready = `${planned}\n## Ready, 4 November 2026\n\nReady on GitHub, 4 November.\nKeep the order on the phone (Henry, 4 November, comment on #12)\n`;
@@ -1301,7 +1301,7 @@ describe("plan-queue", () => {
     it("retires a session that stops with the plans it was named untaken, whatever its context", () => {
       const now = Date.now();
       const eight = ["topic-rename", "b", "c", "d", "e", "f", "g", "h"].map((x, i) =>
-        plan(`plans/${x}.md`, i ? {} : { lands: { name: "topic-rename", ready: false } }),
+        plan(`plans/${x}.md`, i ? {} : { lands: { name: "topic-rename" } }),
       );
       const told = ["plans/ai-client-on-sdk.md", ...eight.map((one) => one.path)];
       const out = decideStop({
@@ -1341,7 +1341,7 @@ describe("plan-queue", () => {
             const file = join(dir, "plans", `${name}.md`);
             writeFileSync(
               file,
-              `# ${name}\n\nPlan only, 6 November 2026, for Javi.\n${i ? "" : "\nLands: topic topic-rename, waiting.\n"}`,
+              `# ${name}\n\nPlan only, 6 November 2026, for Javi.\n${i ? "" : "\nLands: topic topic-rename.\n"}`,
             );
             const at = new Date(Date.now() - (10 - i) * 60_000);
             utimesSync(file, at, at);
@@ -3144,7 +3144,7 @@ describe("the planner queue", () => {
       // A plan of this queue's own holds topic shown, #24's head branch.
       writeFileSync(
         join(dir, "plans", "mine.md"),
-        "# Mine\n\nPlan only, 30 October 2026, for Javi.\n\nLands: topic shown, ready.\n\n## What was asked\n",
+        "# Mine\n\nPlan only, 30 October 2026, for Javi.\n\nLands: topic shown.\n\n## What was asked\n",
       );
       const bin = join(dir, ".bin");
       mkdirSync(bin);
@@ -4078,7 +4078,7 @@ describe("the queue's faults, closed", () => {
     });
 
     it("reads the Related line under the header, past a status section, and nowhere else", () => {
-      const head = "# P\n\nPlan only, 30 October 2026, for Javi.\n\nLands: topic x, ready.\n";
+      const head = "# P\n\nPlan only, 30 October 2026, for Javi.\n\nLands: topic x.\n";
       const of = (line: string) => relatedOf(`${head}${line}\n\n## What was asked\n`);
       expect(of("Related: #31.")).toEqual([{ kind: "pull", number: 31 }]);
       expect(of("Related: #31 and branch a-b.")).toEqual([
@@ -4177,11 +4177,11 @@ describe("the queue's faults, closed", () => {
         );
         writeFileSync(
           join(dir, "plans", "ready.md"),
-          "# R\n\nPlan only, 30 October 2026, for Javi.\n\nLands: topic shown, ready.\nRelated: #31.\n\n## What was asked\n\nChange docs/workflow.md.\n",
+          "# R\n\nPlan only, 30 October 2026, for Javi.\n\nLands: topic shown.\nRelated: #31.\n\n## What was asked\n\nChange docs/workflow.md.\n",
         );
         writeFileSync(
           join(dir, "plans", "earlier.md"),
-          "# E\n\nPlan only, 29 October 2026, for Javi.\n\nLands: topic earlier, ready.\n\n## Built, 29 October 2026\n\nPull request #33 (https://github.com/o/r/pull/33) to test from branch earlier, commit 61c4a812; open.\n",
+          "# E\n\nPlan only, 29 October 2026, for Javi.\n\nLands: topic earlier.\n\n## Built, 29 October 2026\n\nPull request #33 (https://github.com/o/r/pull/33) to test from branch earlier, commit 61c4a812; open.\n",
         );
       };
       const pulls = [
@@ -4228,7 +4228,7 @@ describe("the queue's faults, closed", () => {
         /plans\/brief\.md +brief, 30 October\n    looks related to #31 "Pictures kept" \(anton; both name plugins\/workflow\/scripts\/plan-queue\.mjs\)\n/,
       );
       expect(out).toMatch(
-        /plans\/ready\.md +Plan only, 30 October, topic shown, ready, related: #31\n    looks related to #33 "Earlier" \(this queue's, plans\/earlier\.md, topic earlier; both name plugins\/workflow\/docs\/workflow\.md\)\n/,
+        /plans\/ready\.md +Plan only, 30 October, topic shown, related: #31\n    looks related to #33 "Earlier" \(this queue's, plans\/earlier\.md, topic earlier; both name plugins\/workflow\/docs\/workflow\.md\)\n/,
       );
       // Its own topic's pull request is not related to it.
       expect(out).not.toContain("#32");
@@ -4398,49 +4398,56 @@ describe("the queue's faults, closed", () => {
       expect(landsOf(`${head}Lands: refresh.\n`)).toEqual({ kind: "refresh" });
       expect(landsWords({ kind: "refresh" })).toBe("a refresh");
       expect(landsUnread(`${head}Lands: refresh.\n`)).toBe(false);
-      expect(lands("Lands: topic pictures, waiting.")).toEqual({
+      // plans/topic-opens-when-nothing-waits.md: a topic is its name, and the
+      // marks written before 26 November are read and mean nothing.
+      expect(lands("Lands: topic x.")).toEqual({ kind: "topic", name: "x" });
+      expect(lands("Lands: topic x; lands in #7.")).toEqual({ kind: "topic", name: "x", into: 7 });
+      expect(lands("Lands: topic x; stacked on #7.")).toEqual({
         kind: "topic",
-        name: "pictures",
-        ready: false,
+        name: "x",
+        stackedOn: 7,
       });
-      expect(lands("Lands: topic pictures, ready.")).toEqual({
+      expect(lands("Lands: topic x, waiting.")).toEqual({ kind: "topic", name: "x" });
+      expect(lands("Lands: topic x, ready; lands in #7.")).toEqual({
         kind: "topic",
-        name: "pictures",
-        ready: true,
+        name: "x",
+        into: 7,
       });
+      expect(lands("Lands: topic pictures, ready.")).toEqual({ kind: "topic", name: "pictures" });
+      expect(landsWords({ kind: "topic", name: "x", into: 7 })).toBe("topic x, lands in #7");
       expect(lands("")).toBeNull();
       // Hand-wrapped, or with its full stop left off.
       expect(lands("Lands: topic pull-requests-by-topic,\nwaiting.")).toEqual({
         kind: "topic",
         name: "pull-requests-by-topic",
-        ready: false,
+      });
+      expect(lands("Lands: topic pull-requests-by-topic")).toEqual({
+        kind: "topic",
+        name: "pull-requests-by-topic",
       });
       expect(lands("Lands: fix")).toEqual({ kind: "fix", now: false });
       // plans/lands-line-suffix.md: the pull request it lands in, or is stacked
-      // on, after the topic's state, where agents write it.
-      expect(lands("Lands: topic headless-ui, ready; lands in #52.")).toEqual({
+      // on, after the topic's name, where agents write it.
+      expect(lands("Lands: topic headless-ui; lands in #52.")).toEqual({
         kind: "topic",
         name: "headless-ui",
-        ready: true,
         into: 52,
       });
-      expect(lands("Lands: topic ai-client, ready; stacked on #52.")).toEqual({
+      expect(lands("Lands: topic ai-client; stacked on #52.")).toEqual({
         kind: "topic",
         name: "ai-client",
-        ready: true,
         stackedOn: 52,
       });
       expect(lands("Lands: topic x, waiting; lands\nin #7")).toEqual({
         kind: "topic",
         name: "x",
-        ready: false,
         into: 7,
       });
-      expect(lands("Lands: topic x, waiting.")).toEqual({ kind: "topic", name: "x", ready: false });
+      expect(lands("Lands: topic x, someday.")).toBeNull();
       expect(lands("Lands: topic Bad Name, ready.")).toBeNull();
       expect(lands("Lands: fix; lands in #52.")).toBeNull();
       // An example quoted in a fence is not the plan's line (/code-review).
-      expect(lands("```\nLands: topic headless-ui, ready.\n```")).toBeNull();
+      expect(lands("```\nLands: topic headless-ui.\n```")).toBeNull();
       // A Lands line inside a later section is not the plan's.
       expect(stateOf(`${head}## What was asked\n\nLands: fix.\n`)?.lands).toBeNull();
       // Past a status section written above the header.
@@ -4582,6 +4589,8 @@ describe("the queue's faults, closed", () => {
     expect(bare).toMatch(/plans\/by-pull\.md\s+#21\n/);
   });
 
+  // plans/topic-opens-when-nothing-waits.md, part 3: each topic waiting for a
+  // pull request says why, and one with none to open is not listed.
   it("lists a fix pushed straight, a waiting topic and the Ready plans' landings", () => {
     const dir = fixture("Topics", "land: pull-request\n");
     const day = today();
@@ -4611,18 +4620,25 @@ describe("the queue's faults, closed", () => {
         join(dir, "plans", name),
         `# R\n\nPlan only, 30 October 2026, for Javi.\n\n${line}\n\n## What was asked\n`,
       );
-    ready("ready-topic.md", "Lands: topic pictures, ready.");
+    ready("ready-topic.md", "Lands: topic pictures.");
     ready("ready-fix.md", "Lands: fix, now.");
     ready("ready-refresh.md", "Lands: refresh.");
     ready("no-line.md", "");
-    // A topic opened by its ready plan alone: its Lands line names it.
+    // Nothing queued for it, and the day's fixes.
+    built("r.md", "C", "On topic colours, commit 5234abcd, branch pushed; its pull request waits.");
+    built(
+      "f.md",
+      "D",
+      "On topic fixes-2026-11-27, commit 6234abcd, branch pushed; its pull request waits.",
+    );
+    // A topic opened by the plan that opened it alone: its Lands line names it.
     writeFileSync(
       join(dir, "plans", "w.md"),
       `# W\n\nPlan only, 30 October 2026, for Javi.\n\n## Built, ${day}\n\nOn topic shown, commit 3234abcd, branch pushed; its pull request waits.\n`,
     );
     writeFileSync(
       join(dir, "plans", "v.md"),
-      `# V\n\nPlan only, 30 October 2026, for Javi.\n\nLands: topic shown, ready.\n\n## Built, ${day}\n\nPull request #24 (https://github.com/o/r/pull/24) to test from branch shown, commit 4234abcd; open.\n`,
+      `# V\n\nPlan only, 30 October 2026, for Javi.\n\nLands: topic shown.\n\n## Built, ${day}\n\nPull request #24 (https://github.com/o/r/pull/24) to test from branch shown, commit 4234abcd; open.\n`,
     );
     const empty = temp("queue-no-gh-topics-");
     for (const tool of ["git", "node"])
@@ -4635,40 +4651,184 @@ describe("the queue's faults, closed", () => {
     expect(listed).toMatch(/plans\/fix\.md\s+61c4a812, on test, a fix\n/);
     expect(listed).toMatch(/plans\/refresh\.md\s+a refresh\n/);
     expect(listed).toMatch(/plans\/ready-refresh\.md\s+Plan only, 30 October, a refresh\n/);
-    expect(listed).toMatch(/plans\/x\.md\s+topic pictures, waiting\n/);
+    expect(listed).toMatch(/plans\/x\.md\s+topic pictures, its pull request waits\n/);
     expect(listed).toMatch(/plans\/y\.md\s+#22\n/);
-    expect(listed).toContain("Topics waiting for a pull request\n  pictures: plans/x.md");
+    expect(listed).toContain("\nTopics waiting for a pull request\n");
+    expect(listed).toContain(
+      "\n  pictures: plans/x.md; opens once plans/ready-topic.md is built\n",
+    );
+    expect(listed).toContain(
+      "\n  colours: plans/r.md; nothing is queued for it, so the next plan's start opens it\n",
+    );
+    expect(listed).toContain(
+      "\n  fixes-2026-11-27: plans/f.md; the day's fixes, opened at a plan's start once its day has come",
+    );
     expect(listed).not.toContain("opened: plans/y.md");
     expect(listed).not.toContain("shown: plans/w.md");
-    expect(listed).toMatch(/plans\/no-line\.md\s+Plan only, 30 October, topic no-line, ready\n/);
-    expect(listed).toMatch(
-      /plans\/ready-topic\.md\s+Plan only, 30 October, topic pictures, ready\n/,
-    );
+    expect(listed).toMatch(/plans\/no-line\.md\s+Plan only, 30 October, topic no-line\n/);
+    expect(listed).toMatch(/plans\/ready-topic\.md\s+Plan only, 30 October, topic pictures\n/);
     expect(listed).toMatch(/plans\/ready-fix\.md\s+Plan only, 30 October, a fix, now\n/);
     expect(listed).not.toContain("Lands line not read");
     // plans/lands-line-suffix.md: the pull request after the state keeps the
     // topic, and a line the queue cannot read is said, not taken for the file.
-    ready("headless-ui-controls.md", "Lands: topic headless-ui, ready; lands in #52.");
-    ready("ai-client-stack.md", "Lands: topic ai-client, ready; stacked on #52.");
-    ready("bad-name.md", "Lands: topic Bad Name, ready.");
+    ready("headless-ui-controls.md", "Lands: topic headless-ui; lands in #52.");
+    ready("ai-client-stack.md", "Lands: topic ai-client; stacked on #52.");
+    ready("bad-name.md", "Lands: topic Bad Name.");
     const suffixed = runIn(dir, ["list"], { PATH: empty });
     // plans/related-plans-share-a-pull-request.md: the row says where it lands.
     expect(suffixed).toMatch(
-      /plans\/headless-ui-controls\.md\s+Plan only, 30 October, topic headless-ui, ready, lands in #52\n/,
+      /plans\/headless-ui-controls\.md\s+Plan only, 30 October, topic headless-ui, lands in #52\n/,
     );
     expect(suffixed).toMatch(
-      /plans\/ai-client-stack\.md\s+Plan only, 30 October, topic ai-client, ready, stacked on #52\n/,
+      /plans\/ai-client-stack\.md\s+Plan only, 30 October, topic ai-client, stacked on #52\n/,
     );
     expect(suffixed).toContain("Lands line not read: plans/bad-name.md\n");
     expect(suffixed).not.toMatch(/Lands line not read: .*plans\/(?:headless|ai-client|ready)/);
+    // Two queued: both named.
+    ready("ready-topic-2.md", "Lands: topic pictures.");
+    expect(runIn(dir, ["list"], { PATH: empty })).toContain(
+      "  pictures: plans/x.md; opens once plans/ready-topic.md and plans/ready-topic-2.md are built\n",
+    );
+    // A topic with no pull request to open: its row says so, and it waits for nothing.
+    built(
+      "x.md",
+      "X",
+      "On topic pictures, commit 1234abcd, branch pushed; its pull request waits.\nNo pull request: branch pictures is gone from origin.",
+    );
+    const none = runIn(dir, ["list"], { PATH: empty });
+    expect(none).toMatch(/plans\/x\.md\s+topic pictures, no pull request\n/);
+    expect(none).not.toContain("  pictures: plans/x.md");
     // Outside the pull request mode the line means nothing, so it is not said (Codex).
     const pushMode = fixture("TopicsPush");
     writeFileSync(
       join(pushMode, "plans", "bad-name.md"),
-      "# R\n\nPlan only, 30 October 2026, for Javi.\n\nLands: topic Bad Name, ready.\n\n## What was asked\n",
+      "# R\n\nPlan only, 30 October 2026, for Javi.\n\nLands: topic Bad Name.\n\n## What was asked\n",
     );
     expect(runIn(pushMode, ["list"], { PATH: empty })).not.toContain("Lands line not read");
   });
+
+  // plans/topic-opens-when-nothing-waits.md, part 2: when the last queued plan
+  // of a topic is built, then plans topic says its pull request opens with it;
+  // with more of the topic queued, then what it waits for.
+  it(
+    "a topic's pull request opens once nothing else is queued for it",
+    { timeout: 120_000 },
+    () => {
+      const dir = fixture("TopicQueued", "land: pull-request\n");
+      const day = "26 November 2026";
+      const live = "a0c0ffee-0000-4000-8000-000000000001";
+      const write = (name: string, text: string) => writeFileSync(join(dir, "plans", name), text);
+      const remove = (...names: string[]) =>
+        names.forEach((name) => rmSync(join(dir, "plans", name), { force: true }));
+      const planText = (lands: string, rest = "") =>
+        `# A plan\n\nPlan only, ${day}, for Javi; the executor builds it.\n\n${lands}\n\n${rest}## What was asked\n`;
+      const built = (lands: string) =>
+        planText(
+          lands,
+          `## Built, ${day}\n\nOn topic t, commit 1234abcd, branch pushed; its pull request waits.\n\n`,
+        );
+      const env = {
+        WORKFLOW_LIVE: JSON.stringify([
+          { sessionId: live, name: "Topic Executor 1", kind: "background", cwd: dir },
+        ]),
+      };
+      const topic = (path?: string, more: Record<string, string> = {}) => {
+        const done = spawnSync("node", [join(here, queue), "topic", ...(path ? [path] : [])], {
+          input: "",
+          encoding: "utf8",
+          env: { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env, ...more },
+        });
+        return { said: done.stdout, status: done.status };
+      };
+      // Earlier plans built under the old mark, none saying ready, and the plan
+      // in hand being built.
+      write("a.md", built("Lands: topic t, waiting."));
+      write("b.md", built("Lands: topic t, waiting."));
+      write(
+        "c.md",
+        planText("Lands: topic t, waiting.", `## Building, ${day}, session ${live}\n\n`),
+      );
+      const opens = {
+        said: "Nothing else is queued for topic t: its pull request opens with plans/c.md.\n",
+        status: 0,
+      };
+      expect(topic("plans/c.md")).toEqual(opens);
+      expect(topic(join(dir, "plans", "c.md"))).toEqual(opens);
+      // A second plan of the topic, ready, handed over, or being built by a live session.
+      const waits = {
+        said: "plans/d.md is still queued for topic t: its pull request waits for it.\n",
+        status: 0,
+      };
+      write("d.md", planText("Lands: topic t."));
+      expect(topic("plans/c.md")).toEqual(waits);
+      write(
+        "d.md",
+        planText(
+          "Lands: topic t.",
+          `## Handing over, ${day}\n\nStep in hand: 2\n\nOn branch t.\n\n`,
+        ),
+      );
+      expect(topic("plans/c.md")).toEqual(waits);
+      // Being built by a live session, where the same plan with its session gone
+      // is planned, held for its Ready (Codex C7).
+      write("c.md", planText("Lands: topic t."));
+      write(
+        "d.md",
+        planText("Lands: topic t.\nIssue: #12.", `## Building, ${day}, session ${live}\n\n`),
+      );
+      expect(topic("plans/c.md")).toEqual(waits);
+      expect(topic("plans/c.md", { WORKFLOW_LIVE: "[]" })).toEqual(opens);
+      write("d.md", planText("Lands: topic t.", `## Building, ${day}, session ${live}\n\n`));
+      // Two queued.
+      write("e.md", planText("Lands: topic t."));
+      expect(topic("plans/c.md")).toEqual({
+        said: "plans/d.md and plans/e.md are still queued for topic t: its pull request waits for them.\n",
+        status: 0,
+      });
+      remove("d.md", "e.md");
+      // Planned (an issue, no Ready), dropped, a brief, built, or on another topic: nothing held back.
+      write("d.md", planText("Lands: topic t.\nIssue: #12."));
+      write("e.md", planText("Lands: topic t.", `## Dropped, ${day}\n\nNot wanted.\n\n`));
+      write("f.md", `# F\n\nBrief for the planner, ${day}.\n\nLands: topic t.\n`);
+      write("g.md", built("Lands: topic t."));
+      write("h.md", planText("Lands: topic other."));
+      expect(topic("plans/c.md")).toEqual(opens);
+      remove("d.md", "e.md", "f.md", "g.md", "h.md");
+      // A plan with no Lands line is the topic named for its file.
+      write("n.md", planText(""));
+      expect(topic("plans/n.md")).toEqual({
+        said: "Nothing else is queued for topic n: its pull request opens with plans/n.md.\n",
+        status: 0,
+      });
+      write("m.md", planText("Lands: topic n."));
+      expect(topic("plans/n.md")).toEqual({
+        said: "plans/m.md is still queued for topic n: its pull request waits for it.\n",
+        status: 0,
+      });
+      // A fix is no topic's; no path is refused.
+      write("x.md", planText("Lands: fix."));
+      expect(topic("plans/x.md")).toEqual({
+        said: "plans/x.md is no topic's: it lands as a fix.\n",
+        status: 0,
+      });
+      // A topic named fix is a topic, and a fix in a file named for it holds nothing back (Codex C5).
+      remove("m.md", "n.md");
+      write("y.md", planText("Lands: topic fix."));
+      write("fix.md", planText("Lands: fix."));
+      expect(topic("plans/y.md")).toEqual({
+        said: "Nothing else is queued for topic fix: its pull request opens with plans/y.md.\n",
+        status: 0,
+      });
+      // A dropped plan opens nothing (/code-review).
+      write("z.md", planText("Lands: topic z.", `## Dropped, ${day}\n\nNot wanted.\n\n`));
+      expect(topic("plans/z.md").status).toBe(1);
+      expect(topic("plans/z.md").said).toMatch(/^plans\/z\.md is dropped/);
+      expect(topic()).toEqual({
+        said: "A path is needed: plans topic plans/<x>.md; plans shows the queue.\n",
+        status: 1,
+      });
+    },
+  );
 
   // plans/merged-pr-refreshes-the-rest.md, part 6: when Javi next writes in his own assistant
   // chat after a refresh was built, then its context names the refresh plan, once.
@@ -14841,10 +15001,10 @@ describe("several executors build at once", () => {
     const at = (path: string, text: string, state = "ready") => ({ path, text, state });
     const a = at(
       "plans/a.md",
-      plan("A", "Change src/a.js.", "\n\nLands: topic queue, waiting."),
+      plan("A", "Change src/a.js.", "\n\nLands: topic queue."),
       "building",
     );
-    const b = at("plans/b.md", plan("B", "Change src/b.js.", "\n\nLands: topic queue, waiting."));
+    const b = at("plans/b.md", plan("B", "Change src/b.js.", "\n\nLands: topic queue."));
     expect(freePlans([a, b])[0].waitsOn).toEqual({
       path: "plans/a.md",
       why: "the same topic, queue",

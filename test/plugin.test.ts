@@ -2310,10 +2310,13 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     expect(refresh).toContain("Merge its base, `origin/<baseRefName>`, in");
     expect(refresh).toContain("`git push origin <head branch>`, never to the branch");
     expect(refresh).toContain("`Refreshed <date>: merged <base>, commit <sha>, <files>`"); // plans/also-knows-whose-commit.md
-    const waiting = part("**A waiting branch**", "**An open pull request's branch**");
+    const waiting = part(
+      "**A branch with no pull request yet**",
+      "**An open pull request's branch**",
+    );
     expect(waiting).toContain("then its base merged in");
     expect(waiting).not.toContain("rebase");
-    const topic = part("**A topic's plan**", "**Waiting, no pull request**");
+    const topic = part("**A topic's plan**", "**A pull request already open**");
     expect(topic).toContain("`git push -u origin <name>`, retried as for a merge");
     const fixes = part("**A fix**, `Lands: fix.`", "**A fix wanted now**");
     expect(fixes).toContain("`origin/<branch>` merged in");
@@ -2481,7 +2484,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     expect(rests).toContain("A plan sent to another topic has its `Lands` line rewritten to it");
     const fresh = mode.slice(
       mode.indexOf("**No branch yet**"),
-      mode.indexOf("**A waiting branch**"),
+      mode.indexOf("**A branch with no pull request yet**"),
     );
     expect(fresh).toContain("Stacked: `git switch -c <name> <that head branch>`");
     expect(fresh).not.toContain("that plan's pull request is open: then");
@@ -2506,7 +2509,7 @@ describe("a pull request per topic", () => {
       " ",
     );
 
-  it("has the executor land a fix in the day's pull request or straight, and a topic when it is ready", () => {
+  it("has the executor land a fix in the day's pull request or straight, and a topic when nothing more of it is queued", () => {
     const text = read("docs/landing.md");
     const mode = /# Landing by pull request[\s\S]*/.exec(text)![0];
     // A fix: the day's branch and title.
@@ -2521,8 +2524,48 @@ describe("a pull request per topic", () => {
     expect(mode).toContain("**A fix wanted now**, `Lands: fix, now.`");
     expect(mode).toContain("`git push origin HEAD:<branch>` as a fast-forward");
     expect(mode).toContain("under `Already on <branch>`");
-    // A topic: its name is the branch, its pull request opens with the first ready plan.
+    // A topic: its name is the branch; plans/topic-opens-when-nothing-waits.md:
+    // its pull request opens by the queue's line, once nothing more is queued.
     expect(mode).toContain("**A topic's branch** is the topic's name");
+    expect(mode).toContain(
+      "- **No pull request**: run `plans topic plans/<this plan>.md` and follow its line (decisions.md#topic-landing).",
+    );
+    expect(mode).toContain(
+      '**More is queued** (`… still queued for topic <name>: its pull request waits for …`): nothing opens. "Built" opens with `On topic <name>, commit <sha>, branch pushed; its pull request waits for <the paths the line names>.`',
+    );
+    expect(mode).toContain(
+      "**Nothing else queued** (`Nothing else is queued for topic <name>: …`): the description (below), written from every plan of the topic so far, oldest first, to `plans/<this plan>/pull-request.md`",
+    );
+    expect(mode).toContain('--title "<the title of the topic\'s first plan>"');
+    expect(mode).toContain(
+      "- **The title** is the title of the topic's first plan, the one whose commit is first on the branch; a join leaves the title as it is.",
+    );
+    expect(mode).toContain(
+      "A line written before 26 November 2026 may say `, waiting` or `, ready` after the name: it means nothing now. Follow the line; its author judges whether a change is a fix.",
+    );
+    expect(mode).toContain(
+      "**A topic left with no pull request** is opened: each topic `plans` lists under `Topics waiting for a pull request` as `nothing is queued for it`.",
+    );
+    expect(mode).toContain("`Pull request #<n> (<url>) found <open | merged | closed> <date>.`");
+    // Codex C1 to C3: its own branch, not a fork's, and a closed one only at the branch's commit.
+    expect(mode).toContain(
+      "a pull request from a fork being another person's and not this topic's",
+    );
+    expect(mode).toContain("one found open, or merged or closed at `origin/<name>`'s commit");
+    // /code-review: work a squash merge took opens nothing.
+    expect(mode).toContain("so work a squash merge took is nothing");
+    expect(mode).toContain('is opened as "Nothing else queued" says with `--head <name>` added');
+    expect(mode).toContain(
+      "`No pull request: <branch <name> is gone from origin | its commits are on <branch> already>.` in each. A create refused because another executor opened it first is read again and written as found.",
+    );
+    expect(mode).toContain(
+      'lands as `topic <the plan\'s file name without .md>`, its `Lands` line rewritten to it, its "Built" and the final message saying why (decisions.md#fix-landing).',
+    );
+    expect(mode).toContain(
+      "then each topic whose pull request waits, with the plans it waits for, and each one opened or found at this plan's start",
+    );
+    expect(mode).not.toContain("marks the topic ready");
+    expect(mode).not.toContain("**Waiting, no pull request**");
     expect(mode).toContain("written from every plan of the topic so far, oldest first");
     // plans/ready-stays-ready.md: a pull request the owner marked ready stays ready when joined.
     expect(mode).toContain("a plan that joins one he has marked ready pushes to it as it is");
@@ -2566,9 +2609,39 @@ describe("a pull request per topic", () => {
 
   it("has the docs, the assistant and the planner say where a plan lands", () => {
     // plans/docs-as-a-prompt.md: the reason and the date are the catalogue's entry.
-    expect(read("docs/decisions.md").replace(/\s+/g, " ")).toContain(
-      "A pull request per topic when the topic has its central decision or two substantial ones; the fixes, with no decision, one pull request a day; one wanted at once straight to the branch.",
+    // plans/topic-opens-when-nothing-waits.md: nobody marks a topic ready.
+    expect(read("docs/decisions.md")).toContain(
+      "A pull request per topic, opened once nothing more of the topic is queued; the fixes, with no decision, one pull request a day; one wanted at once straight to the branch.",
     );
+    expect(read("docs/decisions.md")).toContain(
+      "- `topic-landing` **A topic's plans are built on one branch, pushed after each, and its pull request opens by itself once a plan of it is built and no other plan of it is queued.** (Javi, 26 November)",
+    );
+    expect(read("docs/decisions.md")).toContain(
+      "Queued is ready, handed over or being built; a plan held for his word, a brief and a dropped plan hold nothing back, since held work would hide built work.",
+    );
+    expect(read("docs/decisions.md")).toContain(
+      "- ~~A topic's plans are built on one branch, pushed after each, and its pull request opens with the first plan marked ready.~~ (Javi, 30 October)",
+    );
+    expect(read("docs/decisions.md")).toContain(
+      "one whose commit changes a rule lands as a topic of its own, whose pull request opens at once, since review beats silence.",
+    );
+    expect(read("docs/workflow.md")).toContain(
+      "- **A topic** (`Lands: topic <name>.`): one branch named for the topic, a commit per plan, pushed after each; its pull request opens by itself when a plan of it is built and no other plan of it is ready, handed over or being built, and nobody marks a topic ready;",
+    );
+    expect(read("docs/workflow.md")).toContain(
+      "commit changes a rule lands as a topic of its own. (decisions.md#fix-landing)",
+    );
+    expect(read("docs/github.md")).toContain(
+      "is a short plan for the fix, `Lands: topic <the head branch>; lands in #<n>.`",
+    );
+    expect(read("skills/setup/SKILL.md")).toContain("(`Lands: topic <name>; lands in #<n>.`)");
+    // No file under plugins/workflow writes a marked line.
+    const root = new URL("../plugins/workflow/", import.meta.url).pathname;
+    const marked = spawnSync("grep", ["-rnE", "topic <[^>]+>, (waiting|ready)", root], {
+      encoding: "utf8",
+    });
+    expect(marked.stdout).toBe("");
+    expect(marked.status).toBe(1);
     expect(read("docs/workflow.md")).toContain(
       "A topic's pull request opens as a draft and stays one until its owner has reviewed it himself",
     );
@@ -2588,12 +2661,18 @@ describe("a pull request per topic", () => {
     expect(read("docs/workflow.md").replace(/\s+/g, " ")).toContain(
       "the push and a picture's upload alone are the person's token.",
     );
+    expect(read("agents/assistant.md")).toContain("Lands: <fix | fix, now | topic <name>>.");
     expect(read("agents/assistant.md")).toContain(
-      "Lands: <fix | fix, now | topic <name>, waiting | topic <name>, ready>.",
+      "else `Lands: topic <name>.` (a topic `plans` lists, or a new one): its pull request opens by itself once nothing more of the topic is queued, so never ask him whether a topic is ready.",
     );
+    expect(read("agents/assistant.md")).not.toContain("That topic is ready");
+    expect(read("agents/assistant.md")).toContain("Lands: topic <name>; lands in #<n>.");
     expect(read("agents/assistant.md")).toContain("`Lands: fix, now.` only when");
     expect(read("agents/planner.md")).toContain(
-      "`Lands: topic <name>, ready.` or `Lands: topic <name>, waiting.`",
+      "With `land: pull-request`, `Lands: topic <name>.`, optionally `; lands in #<n>.` or `; stacked on #<n>.` after the name. `<name>` is the topic's branch, lower-case words joined by hyphens. A topic's first plan titles its pull request, so title it for the topic. A brief's `Lands` line is carried.",
+    );
+    expect(read("agents/planner.md")).toContain(
+      "or the refusal, and with `land: pull-request` the topic. One message per plan.",
     );
     expect(read("skills/setup/SKILL.md")).toContain(
       "Small fixes with no decision in them come as one pull request a day.",
@@ -3879,7 +3958,7 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
     expect(reaches).toContain(
       "a task or a change from a person **People** names, by the GitHub login it gives them, or by name where it gives none: when it is clear and not the owner's call, act on it without him.",
     );
-    expect(reaches).toContain("`Lands: topic <the head branch>, waiting; lands in #<n>.`");
+    expect(reaches).toContain("`Lands: topic <the head branch>; lands in #<n>.`");
     expect(reaches).toContain(
       "Reply once, as the app, only when they would otherwise not know it was taken: `On it: <what will change, in a line>.`",
     );

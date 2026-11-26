@@ -196,21 +196,36 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/agent-set-by-the-project.md.
 - `land-by-pull-request` **With `land: pull-request`, a plan lands by its
   `Lands` line: a topic's pull request, the day's fixes or straight to
-  the branch.** (Javi, 30 October) A pull request per topic when the
-  topic has its central decision or two substantial ones; the fixes, with
-  no decision, one pull request a day; one wanted at once straight to the
-  branch. The author of the plan heard the owner say whether he wanted
-  the thing or only a start. plans/land-by-pull-request.md,
-  plans/pull-requests-by-topic.md.
+  the branch.** (Javi, 30 October) A pull request per topic, opened once
+  nothing more of the topic is queued; the fixes, with no decision, one
+  pull request a day; one wanted at once straight to the branch.
+  plans/land-by-pull-request.md, plans/pull-requests-by-topic.md,
+  plans/topic-opens-when-nothing-waits.md.
   - ~~One pull request per plan.~~ (Javi, 28 October; made nine in a
     day)
 - `topic-landing` **A topic's plans are built on one branch, pushed after
-  each, and its pull request opens with the first plan marked ready.**
-  (Javi, 30 October) The branch survives the container and the people
-  can look at it before it asks anything of them; a later plan with a
-  central decision of its own is a new topic; a plan with no `Lands`
-  line is a topic of its own, so nothing lands unread by omission.
-  plans/pull-requests-by-topic.md.
+  each, and its pull request opens by itself once a plan of it is built
+  and no other plan of it is queued.** (Javi, 26 November) In the project
+  that asked, four plans of one topic were built over a day and no pull
+  request opened, each marked waiting, until the assistant asked him; two
+  more topics had sat built for eleven and twelve days. Nobody marks a
+  topic: `Lands: topic <name>.` names it, and `, waiting` or `, ready`
+  after the name is still read and means nothing. Queued is ready, handed
+  over or being built; a plan held for his word, a brief and a dropped
+  plan hold nothing back, since held work would hide built work.
+  `plans topic <path>` says which it is; a topic left with no pull request
+  is opened at the next plan's start, unless one found open, or merged or
+  closed at its branch's commit, already holds its work, so a pull request
+  closed long ago hides no commit pushed since. Unfinished is said by the draft, as
+  GitHub's draft pull requests, GitLab's `merge_request.create` push
+  option and Gerrit's work in progress open the request at the push. The
+  topic's first plan titles it, as gh's `--fill-first` takes the first
+  commit's title. A plan with no `Lands` line is a topic of its own, so
+  nothing lands unread by omission. plans/pull-requests-by-topic.md,
+  plans/topic-opens-when-nothing-waits.md.
+  - ~~A topic's plans are built on one branch, pushed after each, and its
+    pull request opens with the first plan marked ready.~~ (Javi, 30
+    October)
 - `joined-pull-request` **A later plan joins an open pull request: the
   description is written again, its screenshots attached with `gh pr edit
   --attach`, and nothing is posted.** (Javi, 31 October) The description
@@ -222,8 +237,9 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
 - `fix-landing` **A fix, a short plan with no decision that changes no
   catalogue or doc rule, goes into the day's fixes pull request.** (Javi,
   30 October) A fix has nothing to decide, so it asks nobody's reading;
-  one whose commit changes a rule lands as a waiting topic, since review
-  beats silence. plans/pull-requests-by-topic.md.
+  one whose commit changes a rule lands as a topic of its own, whose pull
+  request opens at once, since review beats silence.
+  plans/pull-requests-by-topic.md, plans/topic-opens-when-nothing-waits.md.
 - `fix-now-landing` **A fix wanted now, on the owner's word only, is
   pushed straight to the branch and listed in the day's fixes.** (Javi,
   30 October) A fix the site needs today cannot wait for a merge.

@@ -231,7 +231,7 @@ when the file has no such heading (decisions.md#pull-requests-heading):
 ## Pull requests
 
 Related plans share one: a plan related to an open pull request of the
-queue's own lands in it (`Lands: topic <name>, ready; lands in #<n>.`),
+queue's own lands in it (`Lands: topic <name>; lands in #<n>.`),
 and a new pull request opens only when none fits.
 ```
 

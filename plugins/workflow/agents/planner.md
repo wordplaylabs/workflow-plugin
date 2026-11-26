@@ -124,10 +124,8 @@ Sources as its "Where to look".
    queue's marked ready by the **Pull requests** heading, stacked without
    it.
    Then, each on its own line, as they apply:
-   - With `land: pull-request`, `Lands: topic <name>, ready.` or `Lands: topic <name>, waiting.`, optionally `; lands in #<n>.` or `; stacked on #<n>.` after the state. `<name>` is the topic's branch, lower-case
-     words joined by hyphens. `ready` when the topic now holds its central
-     decision or two substantial ones; `waiting` when it is a part others
-     will finish. The plan that marks a topic ready titles its pull
+   - With `land: pull-request`, `Lands: topic <name>.`, optionally `; lands in #<n>.` or `; stacked on #<n>.` after the name. `<name>` is the topic's branch, lower-case
+     words joined by hyphens. A topic's first plan titles its pull
      request, so title it for the topic. A brief's `Lands` line is
      carried.
    - `Related: #31.` (or `Related: #31 and branch <name>.`) for each open
@@ -193,8 +191,7 @@ waits for.
 start plans/<topic>.md` and do what its line says: send the message it
 gives to the chat it names, once, or nothing. The message is `Plan ready: plans/<topic>.md. Build it when you are free, in queue order; nothing to answer.`, or
 `Plan first: plans/<topic>.md. Build it next, once the plan in hand is built; nothing to answer.` for a plan put first. Say which happened, or the
-refusal, and with `land: pull-request` the topic and whether its pull
-request opens.
+refusal, and with `land: pull-request` the topic.
 One message per plan. Paused, write the plan and say so. A dropped plan
 is handed to nobody. A refusal that says `${user_config.owner} decides` goes in
 the `Planned:` message, for the assistant to put to him.

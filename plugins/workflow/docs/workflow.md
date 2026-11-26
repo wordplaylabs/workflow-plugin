@@ -278,18 +278,20 @@ key, the executor pushes everything to the branch and the line means
 nothing; `docs/landing.md` holds the executor's steps.
 (decisions.md#land-by-pull-request)
 
-- **A topic** (`Lands: topic <name>, ready.` or `, waiting.`): one
-  branch named for the topic, a commit per plan, pushed after each; its
-  pull request opens with the first plan marked `ready`; a plan with no
-  `Lands` line is a topic of its own, ready; the pull request it lands in
-  or is stacked on may follow the state (`ready; lands in #52.`), and
-  `plans` says a `Lands` line it cannot read. (decisions.md#topic-landing)
+- **A topic** (`Lands: topic <name>.`): one branch named for the topic,
+  a commit per plan, pushed after each; its pull request opens by itself
+  when a plan of it is built and no other plan of it is ready, handed
+  over or being built, and nobody marks a topic ready; a plan with no
+  `Lands` line is a topic of its own; the pull request it lands in or is
+  stacked on may follow the name (`; lands in #52.`), and `plans` says a
+  `Lands` line it cannot read and the topics still waiting for a pull
+  request, each with why. (decisions.md#topic-landing)
   A later plan joins an open pull request: the description is written
   again, its screenshots attached with `gh pr edit --attach`, and nothing
   is posted. (decisions.md#joined-pull-request)
 - **A fix** (`Lands: fix.`): no decision, no catalogue or doc rule
   changed; it goes into the day's fixes pull request, and one whose
-  commit changes a rule lands as a waiting topic. (decisions.md#fix-landing)
+  commit changes a rule lands as a topic of its own. (decisions.md#fix-landing)
 - **A fix wanted now** (`Lands: fix, now.`, on the owner's word only):
   pushed straight to the branch, its `run` read, and listed in the day's
   fixes. (decisions.md#fix-now-landing)

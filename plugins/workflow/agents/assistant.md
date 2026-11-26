@@ -114,10 +114,9 @@ Say it at the end of every topic, as one of four exits, with the reason:
    changes no catalogue or doc rule and its "Decided" records nothing a
    rule did not settle (a plan with a decision in it is a topic's); `Lands: fix, now.` only when
    ${user_config.owner} wants it on the site at once; else
-   `Lands: topic <name>, waiting.` (a waiting topic `plans` lists, or a
-   new one) or `Lands: topic <name>, ready.` when he said it is the whole
-   of it. "That topic is ready" is a short plan with that line and
-   nothing to build. Asked to mark a pull request ready, give the step,
+   `Lands: topic <name>.` (a topic `plans` lists, or a new one): its pull
+   request opens by itself once nothing more of the topic is queued, so
+   never ask him whether a topic is ready. Asked to mark a pull request ready, give the step,
    the Ready for review button, and run nothing ("`land: pull-request`
    lands by pull request").
    Write it by "A short plan", run `plans start plans/<topic>.md` and
@@ -147,7 +146,7 @@ Say it at the end of every topic, as one of four exits, with the reason:
 
    Brief for the planner, <date>, by the assistant with ${user_config.owner}. The planner's plan replaces this file.
 
-   Lands: topic <name>, ready; lands in #<n>.
+   Lands: topic <name>; lands in #<n>.
    Related: <#<n> | branch <name>>.
    From: <Project>, <path>.
    Issue: #<n>.
@@ -168,7 +167,7 @@ Say it at the end of every topic, as one of four exits, with the reason:
 file `looks related to` a pull request or branch, open it, then go by
 the project file's **Pull requests** heading: a pull request of the
 queue's own the heading says to share gets `Lands: topic <its topic,
-from the plans line>, ready; lands in #<n>.`, whether it is a draft or
+from the plans line>; lands in #<n>.`, whether it is a draft or
 marked ready, and no question; otherwise, when it is the same thing, add
 `Related: #31.` or `Related: #31 and branch <name>.` under the `Lands`
 or header line and say what it does and whose it is. A shared file alone
@@ -179,8 +178,8 @@ it uses what that plan adds, never for a shared file. Then it goes in
 that plan's pull request: an open draft of this queue's own it lands in
 ("lands in #<n>", its `Lands` that draft's topic), another person's it
 is stacked on ("stacked on #<n>"), one of this queue's marked ready by
-the **Pull requests** heading, stacked without it, after the state:
-`Lands: topic <name>, ready; lands in #<n>.` or `; stacked on #<n>.`.
+the **Pull requests** heading, stacked without it, after the name:
+`Lands: topic <name>; lands in #<n>.` or `; stacked on #<n>.`.
 
 **A workflow topic** (agents, queue, hooks, this plugin) goes through
 `/workflow:change` to the workflow's own checkout. A topic that is two
@@ -199,7 +198,7 @@ unanswered included ("Asked once"). A `Screenshots not attached` line
 whose cause is the login gh has (none, ended, refused) is a step only he
 can take, told once with the cause as written; once he says it is done,
 write one short plan per topic's pull request still
-without them, `Lands: topic <its head branch>, waiting; lands in #<n>.`,
+without them, `Lands: topic <its head branch>; lands in #<n>.`,
 whose one step is the description written again with `--attach` for the
 files its plans' "Built" sections name; a day's fixes pull request
 (`fixes-<date>`, no topic's branch) is told to him with the files' paths
@@ -365,7 +364,7 @@ waits on (decisions.md#screenshots-attach).
 Short plan, <date>, by the assistant with ${user_config.owner}; the executor builds it.
 Read with <the project's docs> ("<rule names>").
 
-Lands: <fix | fix, now | topic <name>, waiting | topic <name>, ready>.
+Lands: <fix | fix, now | topic <name>>.
 Related: <#<n> | branch <name>, joined by "and">.
 
 ## What was asked

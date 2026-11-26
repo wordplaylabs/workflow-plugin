@@ -333,25 +333,27 @@ export function withoutStatus(text) {
  * **Where a plan lands**, from its `Lands` line
  * (decisions.md#land-by-pull-request): `{ kind: "fix", now }`, `{ kind:
  * "refresh" }` (decisions.md#merge-refreshes-the-rest, the assistant's plan
- * after a merge) or `{ kind: "topic", name, ready }`, read from the text before
- * the plan's first `## ` heading, past its status sections; null with none, as
- * a plan in the push mode or an older plan has. A topic's line may say after
- * its state the pull request it lands in or is stacked on, `; lands in #52` or
- * `; stacked on #52`, where agents write it: `into` or `stackedOn`, beside the
+ * after a merge) or `{ kind: "topic", name }`, read from the text before the
+ * plan's first `## ` heading, past its status sections; null with none, as a
+ * plan in the push mode or an older plan has. A topic's line may say after its
+ * name the pull request it lands in or is stacked on, `; lands in #52` or `;
+ * stacked on #52`, where agents write it: `into` or `stackedOn`, beside the
  * topic, so an agent's placement does not change where the queue thinks the
- * plan lands.
+ * plan lands. `, waiting` and `, ready` after the name were a topic's marks
+ * until 26 November 2026 (decisions.md#topic-landing): still read, so every
+ * older plan's topic is, and they mean nothing.
  */
 export function landsOf(text = "") {
   // Hand-wrapped prose: the line may wrap anywhere a space is.
   const m =
-    /^Lands:\s+(?:fix(,\s+now)?|(refresh)|topic\s+([a-z0-9]+(?:-[a-z0-9]+)*),\s+(waiting|ready)(?:;\s+(lands\s+in|stacked\s+on)\s+#(\d+))?)\.?[ \t]*$/m.exec(
+    /^Lands:\s+(?:fix(,\s+now)?|(refresh)|topic\s+([a-z0-9]+(?:-[a-z0-9]+)*)(?:,\s+(?:waiting|ready))?(?:;\s+(lands\s+in|stacked\s+on)\s+#(\d+))?)\.?[ \t]*$/m.exec(
       headOf(text),
     );
   if (!m) return null;
   if (m[2]) return { kind: "refresh" };
   if (m[3]) {
-    const lands = { kind: "topic", name: m[3], ready: m[4] === "ready" };
-    if (m[5]) lands[/^lands/.test(m[5]) ? "into" : "stackedOn"] = Number(m[6]);
+    const lands = { kind: "topic", name: m[3] };
+    if (m[4]) lands[/^lands/.test(m[4]) ? "into" : "stackedOn"] = Number(m[5]);
     return lands;
   }
   return { kind: "fix", now: Boolean(m[1]) };
@@ -739,6 +741,10 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
         .find((line) => line.trim()) || "";
     const fix = /^Pushed straight to /.test(opening);
     const topic = /^On topic ([^\s,]+)/.exec(opening)?.[1] || "";
+    // A topic left with no pull request that has none to open
+    // (decisions.md#topic-landing): its branch gone, or its commits on the
+    // branch already.
+    const noPull = /^No pull request: /m.test(section);
     // A refresh has no commit of its own: the pull requests' are theirs
     // (decisions.md#merge-refreshes-the-rest).
     const refresh = /^Refreshed\b/.test(opening);
@@ -750,6 +756,7 @@ export function stateOf(text, { mtime = 0, live = null } = {}) {
       pr: refresh ? 0 : pr,
       fix,
       topic,
+      noPull,
       refresh,
     };
   }
@@ -4384,6 +4391,64 @@ function firstCommand(args = [], { now = Date.now(), live } = {}) {
 }
 
 /**
+ * **What a topic's pull request waits for** (decisions.md#topic-landing): the
+ * plans other than `but` that land on `topic` and are queued, ready (asking
+ * included), handed over or being built, in the queue's order. A plan held
+ * for the owner's word, a brief and a dropped plan hold nothing back; a fix
+ * or a refresh is no topic's, whatever its file is named (Codex C5).
+ */
+export function topicQueued(plans, topic, but = "") {
+  return plans.filter(
+    (plan) =>
+      plan.path !== but &&
+      ["ready", "handed", "building"].includes(plan.state) &&
+      !["fix", "refresh"].includes(plan.lands?.kind) &&
+      topicOf(plan) === topic,
+  );
+}
+
+/**
+ * **`plans topic <path>`** (decisions.md#topic-landing): whether the build of
+ * the plan at `path` opens its topic's pull request, or what it waits for,
+ * in one line the executor follows at the landing. It reads the plans and the
+ * live sessions, never gh: whether a pull request is open is the executor's
+ * check. `{ said, status }`.
+ */
+function topicCommand(args = [], { live } = {}) {
+  if (!proj().found) return { said: NO_PROJECT, status: 1 };
+  if (proj().form === "compact") return { said: COMPACT, status: 1 };
+  if (args.length > 1 || args.some((arg) => arg.startsWith("--")))
+    return { said: "plans topic takes one path: plans topic plans/<x>.md.", status: 1 };
+  if (!args[0])
+    return {
+      said: "A path is needed: plans topic plans/<x>.md; plans shows the queue.",
+      status: 1,
+    };
+  const path = queuePath(args[0]);
+  live = live === undefined ? liveSessions() : live;
+  const plans = readPlans(join(root, "plans"), liveIds(live));
+  const plan = plans.find((p) => p.path === path && p.kind !== "Brief" && p.state !== "old");
+  if (!plan) return { said: `${path} is not a plan in the queue; plans shows them.`, status: 1 };
+  // A dropped plan is built by nobody, so nothing opens with it (/code-review).
+  if (plan.state === "dropped") return { said: droppedWords(plan), status: 1 };
+  // By the line's kind, so a topic named fix or refresh is a topic (Codex C5).
+  if (plan.lands?.kind === "fix" || plan.lands?.kind === "refresh")
+    return { said: `${path} is no topic's: it lands as ${landsWords(plan.lands)}.`, status: 0 };
+  const topic = topicOf(plan);
+  const queued = topicQueued(plans, topic, path).map((p) => p.path);
+  if (!queued.length)
+    return {
+      said: `Nothing else is queued for topic ${topic}: its pull request opens with ${path}.`,
+      status: 0,
+    };
+  const one = queued.length === 1;
+  return {
+    said: `${andList(queued)} ${one ? "is" : "are"} still queued for topic ${topic}: its pull request waits for ${one ? "it" : "them"}.`,
+    status: 0,
+  };
+}
+
+/**
  * **Where `plans first` writes a file's First line**
  * (decisions.md#plan-put-first): after the header paragraph, as `handOverEdit`
  * places a hand-over, or, with `above`, when the header sits under a `## `
@@ -5699,10 +5764,8 @@ export function list({ all = false, live, related = true, readers = null } = {})
       [
         `${p.kind}, ${p.day.replace(/ \d{4}$/, "")}`,
         firstWords(p),
-        // A plan with no Lands line is a topic of its own, ready.
-        byPull
-          ? landsWords(p.lands || { kind: "topic", name: basename(p.path, ".md"), ready: true })
-          : "",
+        // A plan with no Lands line is a topic of its own.
+        byPull ? landsWords(p.lands || { kind: "topic", name: basename(p.path, ".md") }) : "",
         byPull && p.relatedTo ? `related: ${relatedWords(p.relatedTo)}` : "",
         p.state === "handed" ? "handed over, resume" : "",
         p.waitsOn ? `waits on ${p.waitsOn.path} (${p.waitsOn.why})` : "",
@@ -5732,7 +5795,7 @@ export function list({ all = false, live, related = true, readers = null } = {})
       : p.pr
         ? [`#${p.pr}`, states?.get(p.pr)].filter(Boolean).join(", ")
         : p.topic
-          ? `topic ${p.topic}, waiting`
+          ? `topic ${p.topic}, ${p.noPull ? "no pull request" : "its pull request waits"}`
           : [p.sha, onWhere(p.sha), p.fix ? "a fix" : ""].filter(Boolean).join(", "),
   );
   // **A dropped plan is on screen only on its day**
@@ -5747,20 +5810,32 @@ export function list({ all = false, live, related = true, readers = null } = {})
       `dropped${p.droppedDay ? `, ${p.droppedDay.replace(/ \d{4}$/, "")}` : ""}${p.why ? `: ${p.why}` : ""}`,
   );
   // **The topics built and waiting for their pull request**, oldest first:
-  // a topic none of whose built plans names one yet. The ready plan's
-  // Built names the pull request, not the topic: its `Lands` line does.
+  // a topic none of whose built plans names one yet, but one each of whose
+  // plans says it has none to open; each with why it waits
+  // (decisions.md#topic-landing). The plan that opened it names the pull
+  // request, not the topic: its `Lands` line does.
   const opened = new Set(
     built.filter((p) => p.pr).flatMap((p) => [p.topic, p.lands?.name].filter(Boolean)),
   );
   const topics = new Map();
   for (const p of built)
     if (p.topic && !p.pr && !opened.has(p.topic))
-      topics.set(p.topic, [...(topics.get(p.topic) || []), p.path]);
-  if (topics.size)
+      topics.set(p.topic, [...(topics.get(p.topic) || []), p]);
+  const why = (name) => {
+    if (name.startsWith("fixes-"))
+      return "the day's fixes, opened at a plan's start once its day has come";
+    const queued = topicQueued(plans, name).map((p) => p.path);
+    if (!queued.length) return "nothing is queued for it, so the next plan's start opens it";
+    return `opens once ${andList(queued)} ${queued.length === 1 ? "is" : "are"} built`;
+  };
+  const waitingTopics = [...topics].filter(([, ps]) => !ps.every((p) => p.noPull));
+  if (waitingTopics.length)
     out.push(
       "",
       "Topics waiting for a pull request",
-      ...[...topics].map(([name, paths]) => `  ${name}: ${paths.join(", ")}`),
+      ...waitingTopics.map(
+        ([name, ps]) => `  ${name}: ${ps.map((p) => p.path).join(", ")}; ${why(name)}`,
+      ),
     );
   const old = plans.filter((p) => p.state === "old").length;
   if (old)
@@ -6502,7 +6577,7 @@ export function landsWords(lands) {
     : lands.stackedOn
       ? `, stacked on #${lands.stackedOn}`
       : "";
-  return `topic ${lands.name}, ${lands.ready ? "ready" : "waiting"}${where}`;
+  return `topic ${lands.name}${where}`;
 }
 
 /**
@@ -10241,6 +10316,7 @@ plans start --agent assistant   open the owner's assistant chat when none is ope
 plans start --agent assistant <plan>  open it on a built plan, or name the one open
 plans start --owner-said "<words>" [path...]  start one more past a refusal that says the owner decides, on the owner's yes
 plans first <path> [--undo]  put a waiting plan or brief first, on the owner's word, or take that back
+plans topic <path>    say whether a plan's build opens its topic's pull request, or what it waits for
 plans pause | resume  stop and restart starting sessions
 plans end [id...] [--now]  end this queue's finished chats, or these; --now ends a named one whatever it is doing
 plans sync            move a clean checkout with no commit of its own to the branch, detached
@@ -10374,6 +10450,13 @@ export function main(args = process.argv.slice(2)) {
         { immediate: rest.includes("--now") },
       )}\n`,
     );
+    return;
+  }
+  // **`plans topic`** (decisions.md#topic-landing).
+  if (mode === "topic") {
+    const { said, status } = topicCommand(rest);
+    process.stdout.write(`${said}\n`);
+    if (status) process.exitCode = status;
     return;
   }
   // **`plans first`** (decisions.md#plan-put-first).

@@ -9,12 +9,13 @@ the push runs as `plans gh` (`gh pr create`, `gh pr edit`); the push
 stays on `GH_TOKEN`.
 
 **The `Lands` line**, under the plan's header paragraph, is one of
-`Lands: fix.`, `Lands: fix, now.`, `Lands: refresh.`, `Lands: topic
-<name>, waiting.` and `Lands: topic <name>, ready.`, a topic's with `; lands in #<n>.` or
-`; stacked on #<n>.` after its state when the author names the pull
-request, kept when the line is rewritten. A plan with none is `topic
-<the plan's file name without .md>, ready`. Follow the line; its author
-judges whether a topic is ready and a change a fix.
+`Lands: fix.`, `Lands: fix, now.`, `Lands: refresh.` and `Lands: topic
+<name>.`, a topic's with `; lands in #<n>.` or `; stacked on #<n>.` after
+its name when the author names the pull request, kept when the line is
+rewritten. A plan with none is `topic <the plan's file name without
+.md>`. A line written before 26 November 2026 may say `, waiting` or `,
+ready` after the name: it means nothing now. Follow the line; its author
+judges whether a change is a fix.
 
 **A topic's pull request opens as a draft, and stays ready once the
 owner marks it** (decisions.md#draft-until-reviewed): `gh pr create`
@@ -36,7 +37,7 @@ and push once more; refused again, leave it and name it. Each merge gets a line 
 **A topic's branch** is the topic's name, after `git fetch --prune`. A
 name that is the branch, `main` or `fixes-` followed by anything is no
 topic's: build the plan as `topic <the plan's file name without .md>`,
-its "Built" saying why.
+its `Lands` line rewritten to it, its "Built" saying why.
 
 **A branch another worktree has checked out is that executor's** (git
 refuses the switch and names the worktree): at a plan's start and in a
@@ -61,7 +62,7 @@ refresh it is left and named, `left: #<k>, executor-<n> is building on it`.
   -c <name> origin/<branch>`. Stacked: `git switch -c <name> <that head
   branch>`, that branch the pull request's `--base` and the first line
   of its body `Builds on #<n>; merge that first.`
-- **A waiting branch** (`origin/<name>`, no open pull request): `git
+- **A branch with no pull request yet** (`origin/<name>`, no open pull request): `git
   switch -C <name> origin/<name>`, then its base merged in, the plan's
   push carrying the merge; an unsettled conflict leaves it as it is.
 - **An open pull request's branch**: `git switch -C <name>
@@ -80,6 +81,28 @@ request has merged is retargeted, `gh pr edit <n> --base <branch>`, and
 Delete a local branch only when `gh pr view <name> --json
 state,headRefOid` says MERGED at its own commit; others stay, named in
 the final message.
+
+**A topic left with no pull request** is opened: each topic `plans` lists
+under `Topics waiting for a pull request` as `nothing is queued for it`.
+`gh pr list --state all --head <name> --json
+number,url,state,headRefOid,isCrossRepository`, a pull request from a
+fork being another person's and not this topic's: one found open, or
+merged or closed at `origin/<name>`'s commit, is written into each of its
+plans' "Built" after the first line, `Pull request #<n> (<url>) found
+<open | merged | closed> <date>.`; none such, with `origin/<name>`
+adding something to the branch (`git merge-tree --write-tree
+origin/<branch> origin/<name>` giving a first line other than `git
+rev-parse origin/<branch>^{tree}`, so work a squash merge took is
+nothing), is opened as "Nothing else queued" says with `--head <name>` added,
+from the branch the plan in hand is on, the description written to
+`plans/<its last built plan>/pull-request.md`, each of its plans' "Built"
+getting `Pull request #<n> (<url>) opened <date> with plans/<the plan in
+hand>.md.`; none and
+no such branch, or nothing ahead, gets `No pull request: <branch <name>
+is gone from origin | its commits are on <branch> already>.` in each. A
+create refused because another executor opened it first is read again
+and written as found. The plan in hand's "Built" and its `Built:`
+message name each.
 
 **Then a conflicting pull request is refreshed**: each of the queue's
 own that GitHub reports as conflicting (`gh pr view <n> --json
@@ -118,24 +141,9 @@ where that would rewrite a pushed commit, push the plan's commits as
 they are and name each in "Built". Then `git push -u origin <name>`,
 retried as for a merge. Then, by the topic:
 
-- **Waiting, no pull request**: nothing opens. "Built" opens with
-  `On topic <name>, commit <sha>, branch pushed; its pull request waits.`
-- **Ready, no pull request**: the description (below), written from
-  every plan of the topic so far, oldest first, to `plans/<the ready
-  plan>/pull-request.md` and read back as the reviewer will, then:
-
-  ```
-  gh pr create --draft --base <branch, or the head branch it is stacked on> \
-    --title "<the ready plan's title>" \
-    --body-file plans/<the ready plan>/pull-request.md \
-    --attach plans/<topic>/<file>.png#<the line> ...
-  ```
-
-  one `--attach` per screenshot the body names. "Built" opens
-  with `Pull request #<n> (<url>) to <branch> from branch <name>, commit <sha>; draft.`, and each earlier plan of the topic gets,
-  after its "Built" section's first line,
-  `Pull request #<n> (<url>) opened <date> with plans/<x>.md.`
-- **A pull request already open**: the description written again from
+- **A pull request already open** (`gh pr list --state open --head
+  <name> --json number,url,isCrossRepository`, one from a fork being
+  another person's): the description written again from
   every plan of the topic to `plans/<this plan>/pull-request.md`, keeping
   the uploaded image addresses of its body (`gh pr view <n> --json
   body`), this plan's screenshots as local paths; then
@@ -146,12 +154,34 @@ retried as for a merge. Then, by the topic:
   ```
 
   one `--attach` per local screenshot the body names, the uploaded ones
-  kept as they are. A plan marked waiting says in "Built" that it was
-  open already.
+  kept as they are.
   No comment: the description is the record
   (decisions.md#joined-pull-request). "Built" opens with
   `Pull request #<n> (<url>) joined, commit <sha>; <draft | ready>.`,
   its state as `gh pr view <n> --json isDraft` gives it.
+- **No pull request**: run `plans topic plans/<this plan>.md` and follow
+  its line (decisions.md#topic-landing).
+  - **More is queued** (`… still queued for topic <name>: its pull
+    request waits for …`): nothing opens. "Built" opens with `On topic
+    <name>, commit <sha>, branch pushed; its pull request waits for <the
+    paths the line names>.`
+  - **Nothing else queued** (`Nothing else is queued for topic <name>:
+    …`): the description (below), written from every plan of the topic
+    so far, oldest first, to `plans/<this plan>/pull-request.md` and read
+    back as the reviewer will, then:
+
+    ```
+    gh pr create --draft --base <branch, or the head branch it is stacked on> \
+      --title "<the title of the topic's first plan>" \
+      --body-file plans/<this plan>/pull-request.md \
+      --attach plans/<topic>/<file>.png#<the line> ...
+    ```
+
+    one `--attach` per screenshot the body names. "Built" opens with
+    `Pull request #<n> (<url>) to <branch> from branch <name>, commit
+    <sha>; draft.`, and each earlier plan of the topic gets, after its
+    "Built" section's first line, `Pull request #<n> (<url>) opened
+    <date> with plans/<x>.md.`
 
 **Each issue it closes is linked** (decisions.md#closes-its-issues).
 GitHub reads a closing keyword only on a pull request into the default
@@ -206,8 +236,8 @@ its commit, which the final message says. "Built" opens with
 
 **A fix that is not one**, a commit that adds, changes or strikes a
 catalogue rule or a rule in the project's docs, lands as `topic <the
-plan's file name without .md>, waiting`, its "Built" and the final
-message saying why (decisions.md#fix-landing).
+plan's file name without .md>`, its `Lands` line rewritten to it, its
+"Built" and the final message saying why (decisions.md#fix-landing).
 
 **The screenshots, when `--attach` fails** (decisions.md#screenshots-attach):
 through `plans gh`, a picture that did not go up means nothing was
@@ -254,8 +284,10 @@ link and what it was marked related to, and, for a draft: `Pull request
 screenshots, then mark it ready for review on GitHub (the Ready for
 review button at the bottom of the pull request). Until then it asks
 nothing of anyone else.`; for one he marked ready, that it stays ready,
-its checks running again, and the merge his; then the topics left waiting, the day's fixes
-pull request, and the fixes pushed straight.
+its checks running again, and the merge his; then each topic whose pull
+request waits, with the plans it waits for, and each one opened or found
+at this plan's start, the day's fixes pull request, and the fixes pushed
+straight.
 
 **The description** is a short list of what changed
 (decisions.md#short-description): plain words, no dashes, the
@@ -339,7 +371,8 @@ to a Claude session left out>
   attached. A bullet with nothing to show has no picture.
 - **To try it**: a line from the project file's "After the push", else
   "Check out the branch."
-- **The title** is the title of the plan that marks the topic ready.
+- **The title** is the title of the topic's first plan, the one whose
+  commit is first on the branch; a join leaves the title as it is.
 - **The attribution**: the session's lines for a pull request, less
   any line with a `claude.ai/code/session_` address, old ones included.
   On a rewrite, the attribution lines at the old body's end belong to

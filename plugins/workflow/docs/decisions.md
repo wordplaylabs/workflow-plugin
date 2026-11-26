@@ -522,7 +522,12 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   behind one another; Claude Code's agent teams give each teammate
   its own files, hand out no blocked task and claim under a file
   lock; git refuses one branch in two worktrees. Waiting too often
-  costs time, never a conflict. plans/parallel-executors.md.
+  costs time, never a conflict. A start's claim holds the session it
+  started: its row's id, else the id `claude --bg` printed before
+  `claude agents` lists it, and its name only when neither is read; a
+  name claim is that session's wherever a claim is read, and its
+  refusal shows no name in the id's place. plans/parallel-executors.md,
+  plans/claim-carries-the-launched-id.md.
 - `push-not-waited-on` **The executor runs the checks once, before the
   push, and waits on no pull request's run of them; a failed run
   reaches the assistant by the webhook.** (Javi, 14 November) The pull

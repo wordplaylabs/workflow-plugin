@@ -3017,9 +3017,19 @@ export function startPrompt(path, plans) {
   return `Build ${path}.`;
 }
 
-/** The words for a plan another executor has claimed. */
-function claimedWords(path, one) {
-  return `${path} is ${one.name || "an executor"}'s [${String(one.holder).slice(0, 8)}], taken at ${hhmm(one.at)}: leave it.`;
+/**
+ * The words for a plan another executor has claimed: its holder's id in
+ * brackets, at eight; for a `name:` holder the id of the running row of
+ * that name, and no brackets when none has it, since a name is no id.
+ */
+function claimedWords(path, one, live = null) {
+  const named = /^name:(.+)$/.exec(String(one.holder || ""));
+  const id = named
+    ? live?.findLast((row) => row.name === named[1] && statusOf(row) !== "not running")
+        ?.sessionId || ""
+    : String(one.holder || "");
+  const bracket = id ? ` [${id.slice(0, 8)}]` : "";
+  return `${path} is ${one.name || "an executor"}'s${bracket}, taken at ${hhmm(one.at)}: leave it.`;
 }
 
 /**
@@ -3063,12 +3073,13 @@ const START_WAIT = 10;
  * **A start sees its session, or says why not**: `claude --bg` returns at
  * once, and where no trust dialog can appear it exits with `Workspace not
  * trusted`. Its output goes to `.claude/<kind>.started`, and `claude agents`
- * is asked once a second for ten seconds for a row of the new name. True when
- * seen, or when a line of the output is `claude --bg`'s own confirmation for
- * this name, `backgrounded · <id> · <name>`, which counts as seeing the
- * session though `claude agents` lists no row yet (another start's line, in
- * the same file, does not); else the line to say, its first, and nothing is
- * logged.
+ * is asked once a second for ten seconds for a row of the new name.
+ * `{ id }` when seen, the row's session id, or when a line of the output is
+ * `claude --bg`'s own confirmation for this name, `backgrounded · <id> ·
+ * <name>`, which counts as seeing the session though `claude agents` lists
+ * no row yet (another start's line, in the same file, does not), the id that
+ * line printed, `{ id, launched: true }`; the start claims the plan for it.
+ * Else the line to say, its first, and nothing is logged.
  */
 function launch(args, name, kind, cwd = root) {
   const out = join(root, ".claude", `${kind}.started`);
@@ -3097,7 +3108,8 @@ function launch(args, name, kind, cwd = root) {
     if (left <= 0) break;
     const rows = liveSessions({ fresh: true, timeout: left });
     if (rows) read = true;
-    if (rows?.some((row) => row.name === name)) return true;
+    const row = rows?.find((one) => one.name === name);
+    if (row) return { id: row.sessionId };
   }
   let lines = [];
   try {
@@ -3110,8 +3122,10 @@ function launch(args, name, kind, cwd = root) {
   }
   // The launcher's own report that the session exists, read or not, after
   // any warning it printed first.
-  if (lines.some((line) => /^backgrounded\s*·\s*\S+\s*·\s*(.+)$/.exec(line)?.[1] === name))
-    return true;
+  const confirmed = lines
+    .map((line) => /^backgrounded\s*·\s*(\S+)\s*·\s*(.+)$/.exec(line))
+    .find((match) => match?.[2] === name);
+  if (confirmed) return { id: confirmed[1], launched: true };
   const said = lines[0] || "";
   // Nothing could be read: the start is not known to have failed.
   if (!read) return "unread";
@@ -3786,39 +3800,73 @@ function readClaims(plans = [], live = null, now = Date.now()) {
 
 /**
  * Whether claim `one` is `sessionId`'s: its holder is the session's id
- * (`sameSession`), or `name:<n>` and the live row with that id is named
- * `<n>`. A start that saw no row yet claims for the name of the session it
- * started ("A start sees its session, or says why not";
- * decisions.md#plan-waits-on), so that session's own Building line is let
- * through. With no live rows read, a `name:` holder is nobody's.
+ * (`idHolds`), or `name:<n>` and the live row with that id is named `<n>`
+ * and running. A start claims for the id `claude --bg` printed when it saw
+ * no row yet, and for the session's name when it read no id either ("A
+ * start sees its session, or says why not"; decisions.md#plan-waits-on), so
+ * that session's own Building line is let through. With no live rows read,
+ * a `name:` holder is nobody's.
  */
 function holdsClaim(one, sessionId, live) {
   const holder = one?.holder || "";
-  if (sameSession(holder, sessionId)) return true;
+  if (idHolds(holder, sessionId, live)) return true;
   const named = /^name:(.+)$/.exec(holder);
   return Boolean(
-    named && live?.some((row) => row.sessionId === sessionId && row.name === named[1]),
+    named &&
+    live?.some(
+      (row) =>
+        row.sessionId === sessionId && row.name === named[1] && statusOf(row) !== "not running",
+    ),
   );
 }
 
-/** Whether a claim's holder is a session with its process running. */
+/**
+ * Whether an id holder names session `sessionId`: the same id; a start of it
+ * of eight or more (`sameSession`), as `claude --bg` prints one, that starts
+ * no other row's id; or the `id` `claude agents` gives that session's row. A
+ * `start:` or `name:` holder only by being the same.
+ */
+function idHolds(holder, sessionId, rows) {
+  if (!holder || holder === sessionId) return Boolean(holder);
+  if (/^(?:start|name):/.test(holder)) return false;
+  if (rows?.some((row) => row.sessionId === sessionId && row.id === holder)) return true;
+  if (!sameSession(holder, sessionId)) return false;
+  return !rows || rows.filter((row) => sameSession(holder, row.sessionId)).length <= 1;
+}
+
+/**
+ * Whether a claim's holder is a session with its process running: a row
+ * of its id (`idHolds`) or its name that is not "not running". A name, or
+ * an id `claude --bg` printed (`launched`), that no row lists yet is a
+ * session starting, held for the start's span.
+ */
 function holderRuns(one, live, now = Date.now()) {
   const holder = one?.holder || "";
   const start = /^start:(\d+)$/.exec(holder);
   if (start) return pidAlive(Number(start[1]));
   const named = /^name:(.+)$/.exec(holder);
-  if (named)
-    return now - (one.at || 0) < STARTING_SPAN || live.some((row) => row.name === named[1]);
-  return live.some((row) => row.sessionId === holder && statusOf(row) !== "not running");
+  const rows = live.filter((row) =>
+    named ? row.name === named[1] : idHolds(holder, row.sessionId, live),
+  );
+  if (!rows.length) return (named || one.launched) && now - (one.at || 0) < STARTING_SPAN;
+  return rows.some((row) => statusOf(row) !== "not running");
 }
 
-/** Ends a session's claim on a plan, under the guard. */
-function unclaim(path, holder) {
+/**
+ * Ends a session's claim on a plan, under the guard: the claim `holder`
+ * holds; given the live rows (`{ live }`), any claim `holdsClaim` says is
+ * that session's, by a start of its id or by its name.
+ */
+function unclaim(path, holder, { live } = {}) {
   const guard = `${files.claims()}.guard`;
   const guarded = takeGuard(guard);
   try {
     const table = readJson(files.claims()) || {};
-    if (table[path]?.holder !== holder) return;
+    const one = table[path];
+    const mine =
+      one?.holder === holder ||
+      (live !== undefined && Boolean(one) && holdsClaim(one, holder, live));
+    if (!mine) return;
     delete table[path];
     writeJson(files.claims(), table);
   } finally {
@@ -3831,8 +3879,12 @@ function unclaim(path, holder) {
   }
 }
 
-/** Claims a plan for a session under the guard; false when another holds it. */
-function claim(path, { holder, name, now = Date.now(), live = null }) {
+/**
+ * Claims a plan for a session under the guard; false when another holds it.
+ * `from`, a holder whose claim this one takes over in the same write;
+ * `launched`, an id `claude --bg` printed, held while no row lists it yet.
+ */
+function claim(path, { holder, name, now = Date.now(), live = null, from = "", launched = false }) {
   const guard = `${files.claims()}.guard`;
   if (!takeGuard(guard)) return false;
   try {
@@ -3840,13 +3892,22 @@ function claim(path, { holder, name, now = Date.now(), live = null }) {
     const held = table[path];
     // A claim whose holder is gone from the sessions read ends, as `readClaims` reads it.
     const gone = live && held && !holderRuns(held, live, now);
-    // A claim a start made for this session's name is its own to take again,
-    // so its stop names the plan it was started on, now under its id.
+    // A claim a start made for this session, by its name or a start of its
+    // id, is its own to take again, so its stop names the plan it was started
+    // on, now under its whole id.
     const own =
       held &&
-      (held.holder === holder || (/^name:/.test(held.holder) && holdsClaim(held, holder, live)));
+      (held.holder === holder ||
+        (from && held.holder === from) ||
+        (!/^start:/.test(held.holder) && holdsClaim(held, holder, live)));
     if (held && !own && held.until > now && !gone) return false;
-    table[path] = { holder, name, at: now, until: now + ANSWER_WINDOW };
+    table[path] = {
+      holder,
+      name,
+      at: now,
+      until: now + ANSWER_WINDOW,
+      ...(launched ? { launched: true } : {}),
+    };
     writeJson(files.claims(), table);
     return true;
   } finally {
@@ -3869,20 +3930,22 @@ function ownTree(plan, executors, trees = null) {
  * executor there or null; a handed plan its own worktree's number while that
  * number is within `executors` and its worktree is there, else the lowest
  * number that is free, one with no live unretired executor or with one that
- * is idle, has no plan building and holds no claim; null when none is.
+ * is idle, has no plan building and holds no claim, by its id or its name
+ * (`holdsClaim`, the sessions read as the live rows); null when none is.
  */
 export function takerFor(
   plan,
   { executors = 1, sessions = [], claims = {}, trees = null, from = 1 },
 ) {
-  const held = new Set(Object.values(claims).map((one) => one.holder));
+  const holds = (one) =>
+    Object.values(claims).some((held) => holdsClaim(held, one.sessionId, sessions));
   const at = (n) => sessions.filter((one) => one.number === n && !one.retired);
   const free = (n) =>
     !claims[`slot:${n}`] &&
     at(n).every(
       (one) =>
         one.status === "not running" ||
-        (/^idle\b/.test(one.status || "") && !one.on && !held.has(one.sessionId)),
+        (/^idle\b/.test(one.status || "") && !one.on && !holds(one)),
     );
   const taker = (n) => ({ number: n, session: at(n)[0] || null });
   const own = ownTree(plan, executors, trees);
@@ -4374,7 +4437,9 @@ function startHere(
   let sessionAt = false;
   if (kind === "executor" && agent === "executor") {
     const claims = Object.fromEntries([
-      ...Object.entries(readClaims(plans, live)).filter(([, one]) => one.holder !== replace),
+      ...Object.entries(readClaims(plans, live)).filter(
+        ([, one]) => !holdsClaim(one, replace, live),
+      ),
       // The numbers this timer started or was refused at, held as a start holds its own.
       ...passed.map((n) => [`slot:${n}`, { holder: "started", until: Infinity }]),
     ]);
@@ -4400,7 +4465,7 @@ function startHere(
       const waiting = paths.map((path) => free.find((p) => p.path === path)).find(Boolean);
       if (waiting?.waitsOn) return waitsWords(waiting);
       const held = paths.find((path) => claims[path]);
-      if (held) return claimedWords(held, claims[held]);
+      if (held) return claimedWords(held, claims[held], live);
       return "Nothing is waiting in the queue.";
     }
     const executors = proj().executors;
@@ -4446,7 +4511,7 @@ function startHere(
           ? `Plan first: ${pick.path}. Build it next, once the plan in hand is built; nothing to answer.`
           : `Plan ready: ${pick.path}. Build it when you are free, in queue order; nothing to answer.`;
         if (!dry && !claim(pick.path, { holder: chat.sessionId, name: chat.name, live }))
-          return claimedWords(pick.path, readJson(files.claims())?.[pick.path] || {});
+          return claimedWords(pick.path, readJson(files.claims())?.[pick.path] || {}, live);
         messaged = `${who} in executor-${number} is idle with room for ${pick.path} (${room.why}): send it the plan with SendMessage, one message: ${line} It has until ${hhmm(Date.now() + ANSWER_WINDOW)} to take it; then a fresh executor is started on it.`;
       }
     }
@@ -4724,7 +4789,7 @@ function startHere(
   )
     return `${decision.name} is being opened by another start at this moment: send it the message once plans lists it.`;
   // The session this start replaces gives up the plan its stop claimed.
-  if (tree && replace) unclaim(paths[0], replace);
+  if (tree && replace) unclaim(paths[0], replace, { live });
   if (tree) {
     const plan = claim(paths[0], { holder: starter, name: decision.name, live });
     const slot = plan && claim(`slot:${number}`, { holder: starter, name: decision.name, live });
@@ -4742,7 +4807,7 @@ function startHere(
   if (tree) unclaim(`slot:${number}`, starter);
   if (kind === "assistant") unclaim("slot:assistant", starter);
   // A launch that failed keeps the deferral, and with it the timer's pid.
-  if (seen !== true && seen !== "unread") {
+  if (typeof seen === "string" && seen !== "unread") {
     if (tree) unclaim(paths[0], starter);
     for (const { old, state, lock } of replaced) {
       writeJson(files.state(old.sessionId), state);
@@ -4814,9 +4879,17 @@ function startHere(
   out.started = { name: decision.name, path: paths[0], number: tree ? number : 0 };
   if (tree) {
     const row = liveSessions({ fresh: true })?.find((one) => one.name === decision.name);
-    unclaim(paths[0], starter);
-    // Not listed yet: held by its name until it is, or for the start's span.
-    claim(paths[0], { holder: row ? row.sessionId : `name:${decision.name}`, name: decision.name });
+    // Not listed yet: held by the id the launch read, else by its name, until
+    // it is listed, or for the start's span ("A start sees its session"). The
+    // start's own claim is handed over in the same write, so no other takes
+    // the plan between.
+    const id = row ? row.sessionId : seen?.id?.length >= 8 ? seen.id : "";
+    claim(paths[0], {
+      holder: id || `name:${decision.name}`,
+      name: decision.name,
+      from: starter,
+      launched: !row && Boolean(seen?.launched) && Boolean(id),
+    });
   }
   const what = paths.length
     ? `was started on: ${paths.join(", ")}${tree ? `, in ${basename(tree)}` : ""}`
@@ -6933,7 +7006,7 @@ function takenWords(path, plans, live, sessionId) {
   }
   const claims = readClaims(plans, live);
   if (claims[path] && !holdsClaim(claims[path], sessionId, live))
-    return claimedWords(path, claims[path]);
+    return claimedWords(path, claims[path], live);
   const others = Object.fromEntries(
     Object.entries(claims).filter(([, one]) => !holdsClaim(one, sessionId, live)),
   );

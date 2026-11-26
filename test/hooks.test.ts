@@ -14961,7 +14961,7 @@ describe("several executors build at once", () => {
         }) || "{}",
       );
     expect(edit(other).hookSpecificOutput?.permissionDecisionReason).toBe(
-      `plans/a.md is ${name}'s [name:Wor], taken at ${new Date(at).toTimeString().slice(0, 5)}: leave it.`,
+      `plans/a.md is ${name}'s [abcd1234], taken at ${new Date(at).toTimeString().slice(0, 5)}: leave it.`,
     );
     expect(edit(started).hookSpecificOutput?.permissionDecision).not.toBe("deny");
     // Stopped before its line, it is named the plan it was started on, now
@@ -14984,6 +14984,201 @@ describe("several executors build at once", () => {
       rmSync(stateFile(started), { force: true });
       rmSync(stateFile(other), { force: true });
     }
+  });
+
+  // plans/claim-carries-the-launched-id.md: a start's claim holds the
+  // launched session's id, and a name claim reads as its session's everywhere.
+  it(
+    "a start confirmed only by claude --bg's line claims the plan for the printed id",
+    { timeout: 30_000 },
+    () => {
+      const one = pool("Printed", { "a.md": plan("A", "Change src/a.js.") });
+      const said = one.queue(["start"], {}, { STUB: "backgrounded" });
+      expect(said).toContain("Printed Executor 1 (lab) was started on: plans/a.md, in executor-1.");
+      const claims = () =>
+        JSON.parse(readFileSync(join(one.dir, ".claude", "executor.claims.json"), "utf8"));
+      expect(claims()["plans/a.md"].holder).toBe("1234abcd");
+      const at = new Date(claims()["plans/a.md"].at).toTimeString().slice(0, 5);
+      // Not listed yet, the claim holds: no other start takes the plan.
+      expect(one.queue(["start", "--dry"]).trim()).toBe(
+        `plans/a.md is Printed Executor 1 (lab)'s [1234abcd], taken at ${at}: leave it.`,
+      );
+      const started = "1234abcd-0000-4000-8000-000000000001";
+      const other = "ef015678-0000-4000-8000-000000000002";
+      one.write(
+        [
+          [started, "Printed Executor 1 (lab)"],
+          [other, "Printed Executor 2 (lab)"],
+        ].map(([sessionId, name]) => ({
+          sessionId,
+          name,
+          kind: "background",
+          status: "busy",
+          cwd: one.dir,
+        })),
+      );
+      const file = join(one.dir, "plans", "a.md");
+      const edit = (session: string) =>
+        JSON.parse(
+          one.queue(["tool"], {
+            session_id: session,
+            agent_type: "workflow:executor",
+            cwd: one.dir,
+            tool_name: "Edit",
+            tool_input: {
+              file_path: file,
+              old_string: "\n\nPlan only",
+              new_string: `\n\n## Building, 26 November 2026, session ${session}\n\nPlan only`,
+            },
+          }) || "{}",
+        );
+      expect(edit(other).hookSpecificOutput?.permissionDecisionReason).toBe(
+        `plans/a.md is Printed Executor 1 (lab)'s [1234abcd], taken at ${at}: leave it.`,
+      );
+      expect(edit(started).hookSpecificOutput?.permissionDecision).not.toBe("deny");
+      // A row whose agent id is the printed one holds it too, whatever its session id (Codex C1).
+      const agent = "c41d0000-0000-4000-8000-000000000003";
+      one.write([
+        {
+          sessionId: agent,
+          id: "1234abcd",
+          name: "Printed Executor 1 (lab)",
+          kind: "background",
+          status: "busy",
+          cwd: one.dir,
+        },
+        {
+          sessionId: other,
+          name: "Printed Executor 2 (lab)",
+          kind: "background",
+          status: "busy",
+          cwd: one.dir,
+        },
+      ]);
+      expect(edit(agent).hookSpecificOutput?.permissionDecision).not.toBe("deny");
+      expect(edit(other).hookSpecificOutput?.permissionDecision).toBe("deny");
+      // A claim under a whole id no row lists ends at once: only a printed id waits for its row (Codex C6).
+      const now = Date.now();
+      writeFileSync(
+        join(one.dir, ".claude", "executor.claims.json"),
+        JSON.stringify({
+          "plans/a.md": {
+            holder: "dead0000-0000-4000-8000-000000000009",
+            name: "Gone",
+            at: now,
+            until: now + 30 * 60_000,
+          },
+        }),
+      );
+      expect(edit(other).hookSpecificOutput?.permissionDecision).not.toBe("deny");
+    },
+  );
+
+  it("takerFor reads an idle executor holding a name claim as holding it", () => {
+    const sessions = [
+      {
+        sessionId: "abcd1234-0000-4000-8000-000000000001",
+        name: "Taker Executor 1 (lab)",
+        number: 1,
+        status: "idle",
+      },
+    ];
+    const claims = {
+      "plans/a.md": { holder: "name:Taker Executor 1 (lab)", name: "Taker Executor 1 (lab)" },
+    };
+    const b = { path: "plans/b.md", state: "ready" };
+    expect(takerFor(b, { executors: 1, sessions, claims })).toBeNull();
+    expect(takerFor(b, { executors: 2, sessions, claims })).toEqual({ number: 2, session: null });
+    // Held by a start of its id, as claude --bg prints it, it is held as well.
+    expect(
+      takerFor(b, { executors: 1, sessions, claims: { "plans/a.md": { holder: "abcd1234" } } }),
+    ).toBeNull();
+    // Another session's name claim leaves it free.
+    expect(
+      takerFor(b, {
+        executors: 1,
+        sessions,
+        claims: { "plans/a.md": { holder: "name:Taker Executor 2 (lab)" } },
+      }),
+    ).toEqual({ number: 1, session: sessions[0] });
+  });
+
+  it("replacing a session releases its name claim", { timeout: 30_000 }, () => {
+    const one = pool("Replace", { "a.md": plan("A", "Change src/a.js.") });
+    const old = "abcd1234-0000-4000-8000-000000000001";
+    const name = "Replace Executor 1 (lab)";
+    one.write([{ sessionId: old, name, kind: "background", status: "idle", cwd: one.tree(1) }]);
+    const at = Date.now();
+    writeFileSync(
+      join(one.dir, ".claude", "executor.claims.json"),
+      JSON.stringify({
+        "plans/a.md": { holder: `name:${name}`, name, at, until: at + 30 * 60_000 },
+      }),
+    );
+    const said = one.queue(["start", "plans/a.md", "--replace", old]);
+    expect(said).toContain("was started on: plans/a.md, in executor-1.");
+    const fresh = one.read().find((row: { sessionId: string }) => row.sessionId !== old);
+    expect(
+      JSON.parse(readFileSync(join(one.dir, ".claude", "executor.claims.json"), "utf8"))[
+        "plans/a.md"
+      ].holder,
+    ).toBe(fresh.sessionId);
+  });
+
+  it("a name claim's refusal shows no name in the id's place", () => {
+    const one = pool("Bracket", { "a.md": plan("A", "Change src/a.js.") });
+    const other = "ef015678-0000-4000-8000-000000000002";
+    const name = "Bracket Executor 9 (host)";
+    const rows = [
+      {
+        sessionId: other,
+        name: "Bracket Executor 10 (host)",
+        kind: "background",
+        status: "busy",
+        cwd: one.dir,
+      },
+    ];
+    one.write(rows);
+    const at = Date.now();
+    writeFileSync(
+      join(one.dir, ".claude", "executor.claims.json"),
+      JSON.stringify({
+        "plans/a.md": { holder: `name:${name}`, name, at, until: at + 30 * 60_000 },
+      }),
+    );
+    const hhmm = new Date(at).toTimeString().slice(0, 5);
+    const edit = () =>
+      JSON.parse(
+        one.queue(["tool"], {
+          session_id: other,
+          agent_type: "workflow:executor",
+          cwd: one.dir,
+          tool_name: "Edit",
+          tool_input: {
+            file_path: join(one.dir, "plans", "a.md"),
+            old_string: "\n\nPlan only",
+            new_string: `\n\n## Building, 26 November 2026, session ${other}\n\nPlan only`,
+          },
+        }) || "{}",
+      );
+    // No row has the name: no brackets.
+    expect(edit().hookSpecificOutput?.permissionDecisionReason).toBe(
+      `plans/a.md is ${name}'s, taken at ${hhmm}: leave it.`,
+    );
+    // A row has it: its id, at eight.
+    one.write([
+      ...rows,
+      {
+        sessionId: "abcd1234-0000-4000-8000-000000000001",
+        name,
+        kind: "background",
+        status: "busy",
+        cwd: one.dir,
+      },
+    ]);
+    expect(edit().hookSpecificOutput?.permissionDecisionReason).toBe(
+      `plans/a.md is ${name}'s [abcd1234], taken at ${hhmm}: leave it.`,
+    );
   });
 
   it("refuses a Building line on a built plan and lists it once, under Built", () => {

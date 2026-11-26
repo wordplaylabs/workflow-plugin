@@ -339,17 +339,22 @@ waits on (decisions.md#screenshots-attach).
    its fixes. On `Nothing is under way.`, `CronDelete`
    the job.
 3. **Handing the chat on.** When the Stop hook says this chat is over
-   its ceiling, write `plans/assistant-handover.md`: `# Handing the
-   assistant chat on`, then every question asked and not answered, what
-   ${user_config.owner} said that no plan or brief records yet, what he is waiting
-   to hear, and the paths of the plans in the queue; then stop. A fresh
-   chat takes over once this one is quiet ten minutes; his message
-   meanwhile keeps this one. A prompt's line that this chat is over its
-   ceiling needs nothing more.
+   its ceiling, first write and hand on every brief or short plan this
+   chat still owes ("Where each topic ends"), so each is in the queue.
+   Then write `plans/assistant-handover.md`: `# Handing the assistant
+   chat on`, then every question asked and not answered, what
+   ${user_config.owner} said that no plan or brief records yet, what he
+   is waiting to hear, each thing still to do that waits on something,
+   as `When <what happens>, then <what to do>.`, and the paths of the
+   plans in the queue; then stop. A brief or a plan to write that waits
+   on nothing is never a line of it. A fresh chat takes over once this
+   one is quiet ten minutes; his message meanwhile keeps this one. A
+   prompt's line that this chat is over its ceiling needs nothing more.
 4. Opened on `Taking over as <Project> Assistant:
-   plans/assistant-handover.md.`, read the file, tell him in one line
-   `A fresh assistant chat took over: <what is open>.`, and go on from
-   it.
+   plans/assistant-handover.md.`, or told by a prompt's line that no
+   assistant chat has read the file since it was written, read it before
+   anything else, tell him in one line `A fresh assistant chat took over:
+   <what is open>.`, and go on from it.
 
 ## A short plan
 

@@ -197,9 +197,31 @@ export function keeps(event, rawBody) {
   }
 }
 
-/** The issue a pull request is for, from its `For #<n>.` line; 0 with none. */
-function forOf(text = "") {
-  return Number(/^For #(\d+)\.?[ \t]*$/m.exec(text)?.[1] || 0);
+/**
+ * **The issues a pull request closes** (decisions.md#closes-its-issues): the
+ * numbers of the whole `Closes #<n>.` lines and of an older `For #<n>.` line
+ * above the description's first `## ` heading, where the template puts them,
+ * outside a fenced block, the full stop optional, in order, each once; `[]`
+ * with none.
+ */
+export function closesOf(text = "") {
+  const numbers = [];
+  let fence = "";
+  for (const line of String(text).split("\n")) {
+    const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = "";
+      continue;
+    }
+    if (mark) {
+      fence = mark;
+      continue;
+    }
+    if (/^## /.test(line)) break;
+    const m = /^(?:Closes|For) #(\d+)\.?[ \t]*$/.exec(line);
+    if (m && !numbers.includes(Number(m[1]))) numbers.push(Number(m[1]));
+  }
+  return numbers;
 }
 
 /**
@@ -244,9 +266,10 @@ const ITEMS_KEPT = 5000;
  * unlabelled), `plan` (`status: planning` set on an issue nothing carries),
  * `mention` (`@<slug>` in a comment), `comment` (on an issue), `review` (on a
  * pull request), `ready` (`status: ready` on a planned plan's issue), `merged` (a
- * pull request merged, told once by its number, `issue` its `For #<n>` line's
- * or 0 with issues off, with `base` and `head`; nobody is gated, since only a
- * person with write access merges), `failed` (a run that failed on the queue's
+ * pull request merged, told once by its number, `issues` the ones its
+ * description closes, by `closesOf`, whoever wrote it, or `[]` with issues
+ * off, with `base` and `head`; nobody is gated, since only a person with write access merges),
+ * `failed` (a run that failed on the queue's
  * own pull request, `by` its workflow, with `run` and `sha`). A reader's item,
  * one whose author's permission is not write or admin in `seen.permissions`,
  * and the app's own are never events, but a failed run is nobody's writing and
@@ -318,7 +341,7 @@ export function githubEvents(seen = NOTHING_SEEN, items = [], context = {}) {
       events.push({
         kind: "merged",
         number: item.number,
-        issue: context.issuesOff ? 0 : forOf(item.text),
+        issues: context.issuesOff ? [] : closesOf(item.text),
         base: item.base || "",
         head: item.head || "",
         by: item.author || "",

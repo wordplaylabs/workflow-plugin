@@ -132,9 +132,12 @@ Sources as its "Where to look".
      carried.
    - `Related: #31.` (or `Related: #31 and branch <name>.`) for each open
      pull request or branch the brief or the context names that is a
-     different thing on the same files.
+     different thing on the same files, and for an issue the plan does
+     only part of, which stays open.
    - The brief's `From: <Project>, <path>.` and `Issue: #<n>.` lines,
-     and its `First:` line, as it stands, above the first `## ` section.
+     and its `First:` line, as it stands, above the first `## ` section;
+     the `Issue` line as `Related: #<n>.` when the plan does only part of
+     that issue (github.md, "In part").
    - `Touches <name>'s part (<what>).` at the head of "What was asked".
    When another person's open pull request already decides what the
    brief asks, ask once: build it as its own pull request (recommended),

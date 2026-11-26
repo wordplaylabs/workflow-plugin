@@ -57,6 +57,9 @@ say what it says.
   plans/<topic>/. <The cause.>` (landing.md, "The screenshots, when
   `--attach` fails", gives the cause), the `Check` run on the file
   again, since the cause is new text; the upload is not tried again.
+- **In part**: a brief or plan that does only part of an issue names it
+  `Related: #<n>.`; the one that finishes it carries `Issue: #<n>.`, since
+  the pull request closes what its plans' `Issue` lines name.
 - **The labels**, created when missing, one at a time: `status: planning` with the brief, added (`plans gh issue edit
   <n> --add-label "status: planning"`) when a brief takes the number of
   an issue that has no label; `status: planned` the planner's, on a held plan; `status: ready` the planner's on the owner's standing word, a writer's, or yours on his word; `status: building` the executor's.

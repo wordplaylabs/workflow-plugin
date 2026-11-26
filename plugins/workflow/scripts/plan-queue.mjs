@@ -222,6 +222,9 @@ const files = {
   // The refresh plans the owner's own assistant chat was told of
   // (decisions.md#merge-refreshes-the-rest).
   refreshesTold: () => join(root, ".claude", "refreshes.told.json"),
+  // The hand-over file's time when last recorded, the session that wrote it
+  // and the one told of it (decisions.md#one-chat).
+  handoverTold: () => join(root, ".claude", "handover.told.json"),
 };
 
 /** What `plans` says, and `plans start` refuses with, in a project with no project file. */
@@ -5282,6 +5285,12 @@ export function list({ all = false, live, related = true, readers = null } = {})
     (proj().found && proj().land === "pull-request" && secret("WORKFLOW_WEBHOOK_SECRET"))
   )
     out.push(webhookLine());
+  // **Issues off while plans carry them** (decisions.md#closes-its-issues):
+  // there no comment reaches the queue and no merge closes an issue.
+  if (proj().found && proj().land === "pull-request" && !issues) {
+    const line = issuesOffLine(plans);
+    if (line) out.push(line);
+  }
   // **What GitHub would not give**, with pull requests, a webhook or none:
   // with none the Stop hook's read is the only route.
   if (proj().found && proj().land === "pull-request") out.push(...unreadLines(readSeen()));
@@ -7150,6 +7159,65 @@ function handOnStop(input, sessionId) {
   return "";
 }
 
+/**
+ * **A hand-over written is recorded as its writer's** (decisions.md#one-chat):
+ * when the file's time is past the record's, the record becomes `{ at,
+ * writer }`, nobody told yet, whether a Write, an Edit or a shell command
+ * wrote it.
+ */
+function recordHandover(sessionId) {
+  try {
+    const at = mtimeOf(ASSISTANT_HANDOVER);
+    const record = readJson(files.handoverTold()) || {};
+    if (at && at > (record.at || 0)) writeJson(files.handoverTold(), { at, writer: sessionId });
+  } catch {
+    // Recorded nothing: the next chat is told of the file as of one from before the record.
+  }
+}
+
+/**
+ * **A hand-over out of date is said to nobody**: the chat that wrote it is
+ * kept by the owner's message, so the record marks the file read.
+ */
+function dropHandover() {
+  try {
+    const at = mtimeOf(ASSISTANT_HANDOVER);
+    const record = readJson(files.handoverTold()) || {};
+    if (at) writeJson(files.handoverTold(), { at, writer: record.writer || "", told: "kept" });
+  } catch {
+    // Dropped nothing: the next chat may be told of the file once.
+  }
+}
+
+/**
+ * **The hand-over is said once to the next assistant chat**
+ * (decisions.md#one-chat), whatever message opened it: "" when there is no
+ * file, or when it is not newer than the record and a chat was told of it or
+ * this chat wrote it. Else the record names this chat as told, and the line is
+ * returned, but for a prompt `Taking over as `, which names the file itself.
+ */
+function handoverLine(sessionId, prompt) {
+  try {
+    const at = mtimeOf(ASSISTANT_HANDOVER);
+    if (!at) return "";
+    const record = readJson(files.handoverTold()) || {};
+    const fresh = at > (record.at || 0);
+    if (!fresh && (record.told || sameSession(record.writer || "", sessionId))) return "";
+    writeJson(files.handoverTold(), {
+      at,
+      writer: fresh ? "" : record.writer || "",
+      told: sessionId,
+    });
+    if (prompt.trim().startsWith("Taking over as ") && prompt.includes(ASSISTANT_HANDOVER))
+      return "";
+    const day = new Date(at);
+    return `${ASSISTANT_HANDOVER} was written ${day.getDate()} ${MONTHS[day.getMonth()]} ${hhmm(at)} and no assistant chat has read it since: read it first, by "Staying ready" 4.`;
+  } catch {
+    // Said nothing, which is the prompt without it.
+    return "";
+  }
+}
+
 /** **The assistant's ceiling's line**, when its context is over it; else "". */
 function ceilingLine(usage, ceiling) {
   return usage && usage.context > ceiling
@@ -7203,12 +7271,14 @@ function hook(mode, input) {
     if (state.agent !== "assistant") writeJson(statePath, { ...state, agent: "assistant" });
   }
   if (mode === "wrote" && kindOf(input) === "assistant") {
+    recordHandover(sessionId);
     leaveAsking(input);
     return;
   }
   // **The assistant chat's prompt**: the heartbeat's line in place of
-  // anything else, the ceiling's when over it, and what was refreshed at his
-  // next message (decisions.md#one-chat, decisions.md#merge-refreshes-the-rest).
+  // anything else, the ceiling's when over it, and a hand-over no chat has
+  // read and what was refreshed at any other prompt (decisions.md#one-chat,
+  // decisions.md#merge-refreshes-the-rest).
   if (mode === "prompt" && kindOf(input) === "assistant") {
     const heartbeat = String(input.prompt || "").trim() === HEARTBEAT;
     // **His prompt keeps the chat**: a hand-over's timer waits for quiet, so
@@ -7221,9 +7291,12 @@ function hook(mode, input) {
       if (state.end || state.handing) {
         const { end: _end, handing: _handing, ...rest } = state;
         writeJson(files.state(sessionId), rest);
+        // A hand-over his message made out of date is no chat's to read.
+        dropHandover();
       }
     }
     const lines = [
+      heartbeat ? "" : handoverLine(sessionId, String(input.prompt || "")),
       heartbeat ? workLine() : refreshedLine(),
       ceilingLine(sessionUsage(input.transcript_path), proj().reuse.assistant),
     ].filter(Boolean);
@@ -7830,6 +7903,21 @@ export function hasIssues(body = proj().body || "", land = proj().land) {
   return land === "pull-request" && /^## Issues[ \t]*$/m.test(withoutFences(body));
 }
 
+/**
+ * The line `plans` says when issues are off but plans neither built nor
+ * dropped carry an `Issue` line (decisions.md#closes-its-issues); "" with none.
+ */
+export function issuesOffLine(plans) {
+  const carrying = plans.filter(
+    (p) => p.issue && !["built", "dropped", "gone", "old"].includes(p.state),
+  );
+  if (!carrying.length) return "";
+  const paths = carrying.slice(0, 3).map((p) => p.path);
+  const more = carrying.length > 3 ? `, and ${carrying.length - 3} more` : "";
+  const carry = carrying.length === 1 ? "1 plan carries" : `${carrying.length} plans carry`;
+  return `Issues are off here: .claude/workflow.md has no Issues heading, but ${carry} an Issue line (${paths.join(", ")}${more}). No comment on their issues reaches the queue and no merge closes one; /workflow:setup turns issues on.`;
+}
+
 /** `plans webhook`'s refusal with no secret here. */
 export function noSecretWords(env = process.env, project = proj().name) {
   return `The project's Claude has no webhook secret here: turn the webhook on in the app's settings on GitHub, subscribed to ${eventsWords()}, with the address routed to this container and a secret, and ${setWhere("WORKFLOW_WEBHOOK_SECRET and WORKFLOW_WEBHOOK_PORT", env, project)}`;
@@ -8167,7 +8255,7 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
   };
   for (const event of events) {
     if (event.kind === "merged") {
-      if (event.issue) said.push(await closeIssue(event, plans, dry));
+      for (const issue of event.issues || []) said.push(await closeIssue(event, issue, plans, dry));
       // **What the merge left behind**
       // (decisions.md#merge-refreshes-the-rest): the open pull requests, read
       // as they are now.
@@ -8264,17 +8352,18 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
 }
 
 /**
- * The issue a merged pull request was for, closed as the app with a line in
- * its plan's "Built"; the line `plans github` says of it.
+ * An issue a merged pull request closes (decisions.md#closes-its-issues),
+ * closed as the app with a line in its plan's "Built"; the line `plans
+ * github` says of it.
  */
-async function closeIssue(event, plans, dry) {
+async function closeIssue(event, issue, plans, dry) {
   const done = dry
     ? { status: 0 }
     : await ghCommand(
         [
           "issue",
           "close",
-          String(event.issue),
+          String(issue),
           "--reason",
           "completed",
           "--comment",
@@ -8286,19 +8375,19 @@ async function closeIssue(event, plans, dry) {
           repo: repoHere(spawnSync, process.env, false),
         },
       );
-  const plan = plans.find((p) => p.issue === event.issue && p.state === "built");
+  const plan = plans.find((p) => p.issue === issue && p.state === "built");
   if (plan && done.status === 0 && !dry) {
     const lines = plan.text.split("\n");
     const at = lines.findIndex((line) => /^## Built\b/.test(line));
     const first = lines.findIndex((line, i) => i > at && line.trim());
     if (at >= 0 && first > at) {
-      lines.splice(first + 1, 0, `Issue #${event.issue} closed ${today()}.`);
+      lines.splice(first + 1, 0, `Issue #${issue} closed ${today()}.`);
       writeFileSync(plan.file, lines.join("\n"));
     }
   }
   return done.status === 0
-    ? `GitHub: #${event.issue} closed, merged as #${event.number}.`
-    : `GitHub: #${event.issue} was not closed: ${done.said || "plans gh failed"}`;
+    ? `GitHub: #${issue} closed, merged as #${event.number}.`
+    : `GitHub: #${issue} was not closed: ${done.said || "plans gh failed"}`;
 }
 
 /**

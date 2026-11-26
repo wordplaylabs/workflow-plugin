@@ -654,6 +654,8 @@ export const QUEUE_IGNORES = [
   // The refresh plans the owner was told of
   // (decisions.md#merge-refreshes-the-rest).
   ".claude/refreshes.*",
+  // The hand-over file's writer and the chat told of it (decisions.md#one-chat).
+  ".claude/handover.*",
   // The agent a plain chat opens as (`sessionAgent`): Claude Code keeps the
   // file out of git only when it creates it itself.
   ".claude/settings.local.json",

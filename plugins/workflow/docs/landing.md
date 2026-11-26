@@ -153,6 +153,24 @@ retried as for a merge. Then, by the topic:
   `Pull request #<n> (<url>) joined, commit <sha>; <draft | ready>.`,
   its state as `gh pr view <n> --json isDraft` gives it.
 
+**Each issue it closes is linked** (decisions.md#closes-its-issues).
+GitHub reads a closing keyword only on a pull request into the default
+branch. After the create or the edit, read what it shows, `gh pr view <n>
+--json closingIssuesReferences --jq '.closingIssuesReferences[].number'`,
+and for each `Closes` line's issue not listed, link it, by the gh the
+pull request was written with:
+
+```
+plans gh api graphql \
+  -f query='mutation($issue: ID!, $pull: ID!) { addCloseIssueReferences(input: { issueId: $issue, pullRequestIds: [$pull] }) { issue { number } } }' \
+  -f issue="$(gh issue view <i> --json id --jq .id)" \
+  -f pull="$(gh pr view <n> --json id --jq .id)"
+```
+
+One that is refused is not tried again: "Built" and the `Built:` message
+say `Not linked: #<i>, <gh's line>.`, and the `Closes` line and the
+queue's close at the merge stand.
+
 **A fix**, `Lands: fix.`, is built on the day's branch,
 `fixes-<yyyy-mm-dd>`, the day of its push (decisions.md#days-fixes),
 one commit pushed with `git push -u origin fixes-<yyyy-mm-dd>`. Its pull
@@ -247,7 +265,7 @@ catalogue, a commit's title as written; on one screen, pictures aside.
 ```
 <The owner's paragraphs, word for word, when the body has some>
 
-For #<n>.                                     <- plans with an Issue line only
+Closes #<n>.                                  <- one per issue its plans' Issue lines name
 Builds on #<n>; merge that first.             <- stacked plans only
 Related: #<n>.                                <- plans with a Related line only
 
@@ -273,15 +291,21 @@ to a Claude session left out>
 
 - **The owner's paragraphs**: on a rewrite (`gh pr view <n> --json
   body`), everything above the body's first `## ` heading, less its
-  `For #`, `Builds on #` and `Related:` lines, is the owner's and opens
-  the new body unchanged; with nothing there, the body opens with the
-  three lines that apply. So is every `## ` section whose heading the
+  `Closes #`, `For #`, `Builds on #` and `Related:` lines, is the owner's
+  and opens the new body unchanged; a `Closes #` line for an issue no
+  plan of the topic names is the owner's too, and is kept. With nothing
+  there, the body opens with the three lines that apply, so a pull
+  request written again loses an older `For #<n>.` line and gains
+  `Closes #<n>.`. So is every `## ` section whose heading the
   template does not name: it follows To try it, word for word, in the
   order the body has it. Write no opening paragraph of your
   own: the title is the summary.
-- **For** and **Related**: `For #<n>.` for each plan's `Issue` line, no
-  closing keyword; the plans' `Related` lines as written (`Related:
-  #31.`). Look for no related work yourself, and comment on no other
+- **Closes** and **Related**: `Closes #<n>.` for each issue a plan of
+  the topic names in its `Issue` line, one line each, no issue twice:
+  GitHub's keyword, so a merge into the default branch closes it and the
+  queue closes it elsewhere (decisions.md#closes-its-issues). Then the
+  plans' `Related` lines as written (`Related: #31.`), less a number a
+  `Closes` line names. Look for no related work yourself, and comment on no other
   person's pull request.
 - **Changes**: one bullet per thing a person can now do or see, from
   every plan of the topic, oldest first: a plan's central decision, each

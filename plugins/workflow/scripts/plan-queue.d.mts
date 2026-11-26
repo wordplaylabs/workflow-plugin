@@ -99,6 +99,8 @@ export function today(now?: number): string;
 export function withoutStatus(text: string): string;
 /** Issues are on with an Issues heading and `land: pull-request`, the project file's by default. */
 export function hasIssues(body?: string, land?: string): boolean;
+/** The line `plans` says when issues are off but plans neither built nor dropped carry an `Issue` line; "" with none. */
+export function issuesOffLine(plans: { path: string; issue?: number; state?: string }[]): string;
 /** The live id a Building or Planning line's `written` id names: itself, the one live id it begins at eight or more, or "". */
 export function liveId(written: string, live: string[] | null): string;
 /** Whether the id a line wrote, read with the sessions unread, is `sessionId`'s: the same, or a start of eight or more. */

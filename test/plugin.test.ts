@@ -206,6 +206,7 @@ catalogue: docs/patterns
       ".claude/github-*",
       ".claude/webhook.*",
       ".claude/refreshes.*",
+      ".claude/handover.*",
       ".claude/settings.local.json",
     ]);
     // The names plan-queue.mjs writes there: its literal files and one per kind.
@@ -242,7 +243,7 @@ catalogue: docs/patterns
     gitIn(root)("init", "-q");
     writeFileSync(join(root, ".gitignore"), ".claude/executor.*\n.claude/planner.*\n");
     expect(ignoreQueueFiles(root)).toBe(
-      "Added .claude/asking.*, .claude/handed.*, .claude/assistant.*, .claude/worktrees/, .claude/app-token.*, .claude/github-*, .claude/webhook.*, .claude/refreshes.*, .claude/settings.local.json to .git/info/exclude.",
+      "Added .claude/asking.*, .claude/handed.*, .claude/assistant.*, .claude/worktrees/, .claude/app-token.*, .claude/github-*, .claude/webhook.*, .claude/refreshes.*, .claude/handover.*, .claude/settings.local.json to .git/info/exclude.",
     );
     expect(ignoreQueueFiles(root)).toBe("");
     writeFileSync(join(root, ".gitignore"), "!.claude/**\n");
@@ -261,7 +262,7 @@ catalogue: docs/patterns
     writeFileSync(join(root, ".gitignore"), ".claude/worktrees\n");
     init(root);
     expect(readFileSync(join(root, ".gitignore"), "utf8")).toBe(
-      ".claude/worktrees\n.claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/refreshes.*\n.claude/settings.local.json\n",
+      ".claude/worktrees\n.claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/refreshes.*\n.claude/handover.*\n.claude/settings.local.json\n",
     );
   });
 
@@ -286,7 +287,7 @@ catalogue: docs/patterns
     expect(project(root).found).toBe(true);
     expect(init(root)).toBe(".claude/workflow.md exists already; edit it instead.");
     expect(readFileSync(join(root, ".gitignore"), "utf8")).toBe(
-      ".claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/worktrees/\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/refreshes.*\n.claude/settings.local.json\n",
+      ".claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/worktrees/\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/refreshes.*\n.claude/handover.*\n.claude/settings.local.json\n",
     );
     expect(text).toContain(
       "# deny:                  MCP tools an agent here may never call, by agent (regular expressions)",
@@ -2382,6 +2383,73 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     expect(read("docs/landing.md").replace(/\s+/g, " ")).toContain(
       "One of the queue's own marked ready goes by the project's **Pull requests** heading: lands in it (ready as he left it) when the heading says related plans share a pull request, else stacked on it",
     );
+  });
+
+  // plans/prs-close-their-issues.md: a pull request closes the issues it fixes, and the
+  // assistant hands on with nothing owed.
+  it("has the executor write Closes and link each issue, and the assistant hand on with nothing owed", () => {
+    const flat = (path: string) => read(path).replace(/\s+/g, " ");
+    const landing = flat("docs/landing.md");
+    expect(read("docs/landing.md")).toMatch(
+      /\nCloses #<n>\. +<- one per issue its plans' Issue lines name\n/,
+    );
+    expect(landing).toContain(
+      "- **Closes** and **Related**: `Closes #<n>.` for each issue a plan of the topic names in its `Issue` line, one line each, no issue twice: GitHub's keyword, so a merge into the default branch closes it and the queue closes it elsewhere (decisions.md#closes-its-issues).",
+    );
+    expect(landing).toContain(
+      "less its `Closes #`, `For #`, `Builds on #` and `Related:` lines, is the owner's and opens the new body unchanged; a `Closes #` line for an issue no plan of the topic names is the owner's too, and is kept.",
+    );
+    expect(landing).toContain(
+      "**Each issue it closes is linked** (decisions.md#closes-its-issues). GitHub reads a closing keyword only on a pull request into the default branch.",
+    );
+    expect(landing).toContain(
+      "addCloseIssueReferences(input: { issueId: $issue, pullRequestIds: [$pull] })",
+    );
+    expect(landing).toContain(
+      "One that is refused is not tried again: \"Built\" and the `Built:` message say `Not linked: #<i>, <gh's line>.`, and the `Closes` line and the queue's close at the merge stand.",
+    );
+    expect(flat("docs/github.md")).toContain(
+      "- **In part**: a brief or plan that does only part of an issue names it `Related: #<n>.`; the one that finishes it carries `Issue: #<n>.`, since the pull request closes what its plans' `Issue` lines name.",
+    );
+    expect(flat("agents/planner.md")).toContain(
+      "different thing on the same files, and for an issue the plan does only part of, which stays open.",
+    );
+    const docs = flat("docs/workflow.md");
+    expect(docs).toContain(
+      "the executor writes `Closes #<n>` on the pull request for each issue its plans carry and links it, and the queue closes each when it merges, whatever branch it merges into.",
+    );
+    expect(docs).toContain("the `Closes`, `Builds on` and `Related` lines");
+    expect(docs).toContain("closes each issue a merged pull request's description closes;");
+    expect(docs).toContain(
+      "what it still owes is written into the queue first, and the file is said once to whichever assistant chat speaks next",
+    );
+    const assistant = flat("agents/assistant.md");
+    expect(assistant).toContain(
+      'first write and hand on every brief or short plan this chat still owes ("Where each topic ends"), so each is in the queue.',
+    );
+    expect(assistant).toContain(
+      "each thing still to do that waits on something, as `When <what happens>, then <what to do>.`",
+    );
+    expect(assistant).toContain(
+      "A brief or a plan to write that waits on nothing is never a line of it.",
+    );
+    expect(assistant).toContain(
+      "or told by a prompt's line that no assistant chat has read the file since it was written, read it before anything else",
+    );
+    expect(flat("docs/decisions.md")).toContain(
+      "- `closes-its-issues` **A pull request names each issue it fixes with `Closes #<n>.`, is linked to it, and its merge closes it, whatever branch it merges into.** (Javi, 26 November)",
+    );
+    // `For #<n>.` is no longer what the executor writes: only an older line read or taken out.
+    for (const path of [
+      "docs/landing.md",
+      "docs/workflow.md",
+      "docs/github.md",
+      "agents/executor.md",
+    ])
+      for (const line of read(path)
+        .split("\n")
+        .filter((one) => one.includes("For #")))
+        expect(line).toMatch(/`Closes #`, `For #`|an older `For #<n>\.` line/);
   });
 
   // plans/draft-takes-its-follow-ups.md: a plan resting on an open draft of

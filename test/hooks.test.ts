@@ -154,6 +154,7 @@ import {
 import { withAddresses } from "../plugins/workflow/scripts/github-attach.mjs";
 import {
   WEBHOOK_EVENTS,
+  closesOf,
   githubEvents,
   itemsOfDelivery,
   keeps,
@@ -2498,7 +2499,7 @@ describe("plan-queue", () => {
       g(clone, "checkout", "-q", "--detach", "origin/test");
       writeFileSync(
         join(clone, ".gitignore"),
-        ".claude/executor.*\n.claude/planner.*\n.claude/worktrees/\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/refreshes.*\n.claude/settings.local.json\n",
+        ".claude/executor.*\n.claude/planner.*\n.claude/worktrees/\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/refreshes.*\n.claude/handover.*\n.claude/settings.local.json\n",
       );
       g(clone, "commit", "-q", "-am", "two kinds");
       const behind = g(clone, "rev-parse", "HEAD");
@@ -2532,7 +2533,7 @@ describe("plan-queue", () => {
       g(clone, "checkout", "-q", "--detach", "origin/test");
       writeFileSync(
         join(clone, ".gitignore"),
-        ".claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/refreshes.*\n.claude/settings.local.json\n",
+        ".claude/executor.*\n.claude/planner.*\n.claude/asking.*\n.claude/handed.*\n.claude/assistant.*\n.claude/app-token.*\n.claude/github-*\n.claude/webhook.*\n.claude/refreshes.*\n.claude/handover.*\n.claude/settings.local.json\n",
       );
       g(clone, "commit", "-q", "-am", "three kinds");
       const behind = g(clone, "rev-parse", "HEAD");
@@ -2800,6 +2801,93 @@ describe("the planner queue", () => {
     }
     for (const name of ["q-built.md", "q-ready-a.md", "q-brief-a.md"])
       rmSync(join(plansDir(), name), { force: true });
+    rmSync(join(repo, ".claude", "handover.told.json"), { force: true });
+  });
+
+  // plans/prs-close-their-issues.md, part 5.
+  it("an assistant chat opened on a built plan is told once to read a hand-over no chat has read", () => {
+    const told = join(repo, ".claude", "handover.told.json");
+    const handover = join(plansDir(), "assistant-handover.md");
+    const old = "55555555-aaaa-0000-0000-000000000000";
+    const fresh = "66666666-aaaa-0000-0000-000000000000";
+    const later = "77777777-aaaa-0000-0000-000000000000";
+    const hook = (mode: string, sessionId: string, extra: object = {}) => {
+      const out = execFileSync("node", [join(here, "plan-queue.mjs"), mode], {
+        input: JSON.stringify({
+          session_id: sessionId,
+          agent_type: "workflow:assistant",
+          ...extra,
+        }),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          CLAUDE_PROJECT_DIR: repo,
+          CLAUDE_CODE_SESSION_ID: "",
+          WORKFLOW_STARTS_LOG: join(repo, ".claude", "starts-handover.log"),
+          WORKFLOW_USAGE_FILE: join(repo, ".claude", "usage-handover.json"),
+          WORKFLOW_LIVE: "[]",
+        },
+      });
+      return out ? JSON.parse(out).hookSpecificOutput.additionalContext : "";
+    };
+    const prompt = (sessionId: string, text: string) => hook("prompt", sessionId, { prompt: text });
+    const write = (at: number) => {
+      writeFileSync(
+        handover,
+        "# Handing the assistant chat on\n\nWhen Javi answers, then plan it.\n",
+      );
+      utimesSync(handover, new Date(at), new Date(at));
+      hook("wrote", old, { tool_name: "Write", tool_input: { file_path: handover } });
+    };
+    const built =
+      '<cross-session-message from="uds:/tmp/x.sock" from-name="Executor">\nBuilt: plans/q.md.\n</cross-session-message>';
+    mkdirSync(plansDir(), { recursive: true });
+    rmSync(told, { force: true });
+    try {
+      // No file: nothing said.
+      rmSync(handover, { force: true });
+      expect(prompt(fresh, built)).toBe("");
+      const at = new Date(2026, 10, 25, 23, 40).getTime();
+      write(at);
+      // The writer is never told of its own file.
+      expect(prompt(old, "Anything new?")).toBe("");
+      // A heartbeat does not spend it.
+      expect(prompt(fresh, "Heartbeat.")).not.toContain("assistant-handover");
+      // The chat opened on Built: is told once.
+      expect(prompt(fresh, built)).toBe(
+        'plans/assistant-handover.md was written 25 November 23:40 and no assistant chat has read it since: read it first, by "Staying ready" 4.',
+      );
+      expect(prompt(fresh, "And now?")).toBe("");
+      // A second chat is not told.
+      expect(prompt(later, built)).toBe("");
+      // Told again after the file is written again, once.
+      write(at + 60_000);
+      expect(prompt(later, "GitHub: plans/github/4.md.")).toContain(
+        "plans/assistant-handover.md was written 25 November 23:41",
+      );
+      expect(prompt(fresh, "Hello")).toBe("");
+      // A chat opened on the file itself is recorded as told, and says nothing.
+      write(at + 120_000);
+      expect(prompt(later, "Taking over as Test Assistant: plans/assistant-handover.md.")).toBe("");
+      expect(JSON.parse(readFileSync(told, "utf8"))).toMatchObject({ told: later });
+      expect(prompt(fresh, built)).toBe("");
+      // A file from before the record was kept is said once to the chat that speaks next.
+      rmSync(told, { force: true });
+      // A prompt that only begins as the take-over does is told (Codex C4).
+      expect(prompt(old, "Taking over as lead today, Hi")).toContain(
+        "plans/assistant-handover.md was written",
+      );
+      expect(prompt(fresh, "Hi")).toBe("");
+      // A hand-over his message made out of date, the writer kept, is said to nobody (/code-review).
+      write(at + 180_000);
+      writeFileSync(stateFile(old), JSON.stringify({ handing: { at: at + 170_000 } }));
+      expect(prompt(old, "Stay, one more thing.")).toBe("");
+      expect(prompt(fresh, built)).toBe("");
+    } finally {
+      rmSync(handover, { force: true });
+      rmSync(told, { force: true });
+      for (const id of [old, fresh, later]) rmSync(stateFile(id), { force: true });
+    }
   });
 
   // plans/simpler-agents.md, part 3: the agent file carries the workflow.
@@ -9856,7 +9944,7 @@ describe("github webhook", () => {
       ["merged", 41, "javi"],
       ["ready", 12, "anton"],
     ]);
-    expect(events[3]).toMatchObject({ issue: 12, head: "x" });
+    expect(events[3]).toMatchObject({ issues: [12], head: "x" });
     // The same delivery twice is one event: GitHub's redelivery is safe.
     const twice = githubEvents(seen, [items[1], items[1]], context);
     expect(twice.events).toHaveLength(1);
@@ -10194,15 +10282,15 @@ describe("github webhook", () => {
       expect(on.events[0]).toMatchObject({
         kind: "merged",
         number: 41,
-        issue: 12,
+        issues: [12],
         base: "test",
         head: "series-order",
         by: "javi",
       });
       expect(on.seen.merges).toEqual([41]);
       const off = githubEvents(fresh, mergedItem(), { issuesOff: true });
-      expect(off.events.map((one) => [one.kind, one.number, one.issue])).toEqual([
-        ["merged", 41, 0],
+      expect(off.events.map((one) => [one.kind, one.number, one.issues])).toEqual([
+        ["merged", 41, []],
       ]);
       // The same merge twice, or by a delivery and then a read, is one event.
       expect(githubEvents(fresh, [...mergedItem(), ...mergedItem()], {}).events).toHaveLength(1);
@@ -10247,6 +10335,88 @@ describe("github webhook", () => {
           { number: 38, head: "d", login: "anton" },
         ],
       });
+    });
+
+    // plans/prs-close-their-issues.md, part 3: the merge closes every issue the description closes.
+    it("closesOf reads every Closes line and an older For line", () => {
+      expect(
+        closesOf(
+          "Closes #161.\nCloses #163\nFor #160.\nCloses #161.\nRelated: #162.\nCloses #9. in a line\n\n## Changes\n",
+        ),
+      ).toEqual([161, 163, 160]);
+      expect(closesOf("For #12.\n\n## Changes\n")).toEqual([12]);
+      // Only the opening block, where the template puts them, and never inside a fence (Codex C2).
+      expect(
+        closesOf(
+          "```\nCloses #88.\n```\nCloses #4.\n\n## To try it\n\n```\nCloses #89.\n```\nCloses #90.\n",
+        ),
+      ).toEqual([4]);
+      expect(closesOf("Related: #162.\n")).toEqual([]);
+      expect(closesOf("")).toEqual([]);
+      expect(closesOf()).toEqual([]);
+    });
+
+    it("githubEvents gives a merge no issues with issues off", () => {
+      const body = { ...merged.pull_request, body: "Closes #12.\nCloses #13.\n" };
+      const items = itemsOfDelivery("pull_request", { ...merged, pull_request: body }, "m2");
+      expect(githubEvents({}, items, { issuesOff: true }).events[0].issues).toEqual([]);
+      expect(githubEvents({}, items, { own: ["series-order"] }).events[0].issues).toEqual([12, 13]);
+      // Another person's pull request closes the same way (checked with the planner).
+      expect(githubEvents({}, items, { own: [40] }).events[0].issues).toEqual([12, 13]);
+    });
+
+    // plans/prs-close-their-issues.md, part 4.
+    it("plans says issues are off when a plan carries an Issue line and the project file has no Issues heading", () => {
+      const listOf = (dir: string) =>
+        execFileSync(
+          "node",
+          [
+            "--input-type=module",
+            "-e",
+            `import { list } from ${JSON.stringify(join(here, "plan-queue.mjs"))};
+             console.log(list({ live: [] }));`,
+          ],
+          {
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              CLAUDE_PROJECT_DIR: dir,
+              WORKFLOW_ROOT: dir,
+              WORKFLOW_STARTS_LOG: join(dir, ".claude", "starts.log"),
+              WORKFLOW_WEBHOOK_SECRET: "",
+              WORKFLOW_SECRETS_FILE: "",
+            },
+          },
+        );
+      const carrying = (n: number) =>
+        `${header("26 November 2026")}Issue: #${n}.\n\n## What was asked\n`;
+      const off = fixture("Off", "land: pull-request\n", "\n# Off\n");
+      const on = fixture("On", "land: pull-request\n", "\n# On\n\n## Issues\n\nTopics.\n");
+      try {
+        writeFileSync(join(off, "plans", "a.md"), carrying(1));
+        expect(listOf(off)).toContain(
+          "Issues are off here: .claude/workflow.md has no Issues heading, but 1 plan carries an Issue line (plans/a.md). No comment on their issues reaches the queue and no merge closes one; /workflow:setup turns issues on.",
+        );
+        for (const [name, n] of [
+          ["b", 2],
+          ["c", 3],
+          ["d", 4],
+        ] as const)
+          writeFileSync(join(off, "plans", `${name}.md`), carrying(n));
+        writeFileSync(
+          join(off, "plans", "e.md"),
+          `${carrying(5)}\n## Built, 26 November 2026\n\nPushed.\n`,
+        );
+        writeFileSync(join(off, "plans", "f.md"), `${carrying(6)}\n## Dropped\n\nNot needed.\n`);
+        expect(listOf(off)).toMatch(
+          /Issues are off here: \.claude\/workflow\.md has no Issues heading, but 4 plans carry an Issue line \((plans\/[a-d]\.md, ){3}and 1 more\)\./,
+        );
+        writeFileSync(join(on, "plans", "a.md"), carrying(1));
+        expect(listOf(on)).not.toContain("Issues are off here");
+      } finally {
+        rmSync(off, { recursive: true, force: true });
+        rmSync(on, { recursive: true, force: true });
+      }
     });
 
     it("noteFor writes the merged line and what it left behind, and notesWaiting lists it", () => {
@@ -10550,6 +10720,45 @@ else say([]);
             expect(readFileSync(join(dir, "asked.log"), "utf8")).toContain(
               "issue close 12 --reason completed --comment Merged as #41.",
             );
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        },
+      );
+
+      // plans/prs-close-their-issues.md, part 3.
+      it(
+        "a merged pull request closes every issue its description closes, and none it names as related",
+        { timeout: 30_000 },
+        () => {
+          const dir = project(true);
+          try {
+            writeFileSync(
+              join(dir, ".claude", "app-token.json"),
+              JSON.stringify({
+                token: "app-tok",
+                expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+                repo: "o/r",
+                app: "12",
+              }),
+            );
+            deliver(dir, "m1", {
+              ...merged,
+              pull_request: {
+                ...merged.pull_request,
+                body: "Closes #12.\nCloses #13.\nRelated: #14.\n\n## Changes\n",
+              },
+            });
+            const said = run(dir, ["github", "--inbox"], {
+              WORKFLOW_APP_ID: "12",
+              WORKFLOW_APP_KEY: "key",
+            });
+            expect(said).toContain("GitHub: #12 closed, merged as #41.");
+            expect(said).toContain("GitHub: #13 closed, merged as #41.");
+            const asked = readFileSync(join(dir, "asked.log"), "utf8");
+            expect(asked).toContain("issue close 12 --reason completed --comment Merged as #41.");
+            expect(asked).toContain("issue close 13 --reason completed --comment Merged as #41.");
+            expect(asked).not.toContain("issue close 14");
           } finally {
             rmSync(dir, { recursive: true, force: true });
           }

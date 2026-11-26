@@ -115,13 +115,18 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   fills within a day, and he chose to keep it where it is; a scheduled
   `/compact` reaches a background chat as a plain message (tried 24
   November), so one past its ceiling writes a hand-over file and a fresh
-  chat of the same name takes over once it is quiet. While work runs it
+  chat of the same name takes over once it is quiet. A chat opened on a
+  built plan, not on the hand-over, never read the file, and a brief the
+  old chat still owed sat a day: what a chat owes is written into the
+  queue before it hands on, and the file is said once to whichever
+  assistant chat speaks next after it was written. While work runs it
   is kept warm: a turn that reads the cache renews its hour for about a
   fortieth of what the first turn of a cold chat costs (`context-cost`).
   The workers keep nothing that was for him (a task list, files sent, a
   message written to be read): what one makes for him to see is kept
   beside its plan and the assistant brings it up.
-  plans/one-assistant-chat.md, plans/quiet-worker-starts.md.
+  plans/one-assistant-chat.md, plans/quiet-worker-starts.md,
+  plans/prs-close-their-issues.md.
   - ~~Planners and executors stay openable, in his chat list.~~
     (Javi, 24 November)
 - `new-topic-to-assistant` **Every new topic starts in the assistant's
@@ -776,6 +781,26 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   no plan line until a brief carries its number.** (Javi, 4 November) An
   idea made an issue to discuss would otherwise read on GitHub as being
   planned, with a plan that does not exist. plans/ask-before-briefing.md.
+- `closes-its-issues` **A pull request names each issue it fixes with
+  `Closes #<n>.`, is linked to it, and its merge closes it, whatever
+  branch it merges into.** (Javi, 26 November) He could not tell which
+  pull request fixed which issue: `For #<n>` is no keyword, so GitHub
+  listed no pull request under an issue's Development. GitHub's keyword
+  links and closes only on a pull request into the default branch
+  ("Linking a pull request to an issue"), and the project that asked
+  merges into another, so the executor adds the link the sidebar adds by
+  hand (`addCloseIssueReferences`) and the queue closes each issue on the
+  merge it already hears, not on the release to the default branch,
+  which is one pull request for many topics, days later. A person's own
+  `Closes` line is read the same way, since they wrote it and a writer
+  merged it. An issue done in
+  part is in the plan's `Related` line and stays open; a `For #<n>.` line
+  written before is still read at the merge. `plans` says when plans
+  carry an `Issue` line where the project file turns issues off, since
+  there no comment reaches the queue and no merge closes an issue, and
+  nothing had said so. plans/prs-close-their-issues.md.
+  - ~~The executor writes `For #<n>` on the pull request, with no
+    closing keyword.~~ (Javi, 3 November)
 - `project-app` **The queue writes issues, comments, labels and pull
   requests as the project's own GitHub App, never under a person's
   name.** (Javi, 3 November) A write under his name needed his yes each

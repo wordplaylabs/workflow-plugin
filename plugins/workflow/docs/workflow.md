@@ -31,8 +31,10 @@ from a terminal on its machine, is passed to the assistant. With none open, whoe
 (`plans start --agent assistant`). While work is under way the chat is
 kept warm by a scheduled prompt twice an hour, and one over its ceiling
 (`reuse.assistant`, 150k) writes a hand-over file and is replaced, once
-quiet ten minutes, by a fresh chat of the same name, since a scheduled
-`/compact` reaches a background chat as a plain message.
+quiet ten minutes, by a fresh chat of the same name: what it still owes
+is written into the queue first, and the file is said once to whichever
+assistant chat speaks next, since a scheduled `/compact` reaches a
+background chat as a plain message.
 (decisions.md#one-chat)
 
 **An agent file is the agent's instructions, and a start prompt names
@@ -295,7 +297,7 @@ nothing; `docs/landing.md` holds the executor's steps.
   commit of its own. (decisions.md#merge-refreshes-the-rest)
 
 **The description is a short list of what changed**: the owner's
-paragraphs when he wrote some, the `For`, `Builds on` and `Related`
+paragraphs when he wrote some, the `Closes`, `Builds on` and `Related`
 lines, then `Changes`, a few bullets, each a bold lead and one plain
 sentence of what a person can now do or see, with one screenshot under
 a bullet only where it shows it; a bullet that replaces another
@@ -757,9 +759,11 @@ is made, and never edited by an agent after; the plan behind it is one
 collapsed comment, the planner's, found again by its hidden first line
 and edited in place on a change, or the project's Detail address in that
 comment; anyone opens one, the assistant writes them on the owner's
-word, the executor writes `For #<n>` on the pull request. A plan or a
-brief quoted anywhere on GitHub is collapsed under a one-line summary.
-(decisions.md#issue-is-the-overview)
+word, the executor writes `Closes #<n>` on the pull request for each
+issue its plans carry and links it, and the queue closes each when it
+merges, whatever branch it merges into. A plan or a brief quoted
+anywhere on GitHub is collapsed under a one-line summary.
+(decisions.md#issue-is-the-overview, decisions.md#closes-its-issues)
 
 **An issue nobody plans yet carries no status label and no plan line**
 until a brief carries its number, and its topic ends as answered, with
@@ -781,8 +785,8 @@ section, comments folded by whose call each is; the issue's stage is one
 app's webhook**: `plans webhook` listens on the container behind the
 host's reverse proxy, checks each delivery's signature, notes each event in
 `plans/github/`, starts the assistant on it, or sends the open one its
-line, and closes an issue when its
-pull request merges; a comment from a person **People** names by login
+line, and closes each issue a merged pull request's description
+closes; a comment from a person **People** names by login
 is an event on any issue or pull request, another writer's only where it
 mentions the app, on an issue a plan carries or on one of the queue's own
 pull requests; a failed run and a merge arrive the same way in

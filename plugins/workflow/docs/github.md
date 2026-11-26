@@ -129,6 +129,17 @@ once:
   in a chat; `plans first` it, on his standing word, and hand it on as
   any short plan. Several `merged` notes not handled are one plan. A refresh plan that waits with no Building
   line gains the pull requests it lacks, and no second is written;
+- `unclosed`, an issue a merged pull request's description closes that
+  the queue could not close: its line names the issue, the line under it
+  the cause. A hiccup ("Hiccups"). Read `plans gh issue view <i> --json
+  state,url,comments --jq '.state, .url, .comments[-1].body'`: `CLOSED`,
+  nothing more. Open, `plans gh issue close <i> --reason completed
+  --comment "Merged as #<m>."`, without `--comment` when the last
+  comment already says it, twice at most. One still open then, a number
+  that is no issue here or is a pull request's (the address `issue view`
+  gives has `/pull/`; never closed this way), or a cause that is his
+  step (no app here, a permission the app lacks) is a failure you tell
+  him: `#<i> was not closed when #<m> merged: <the cause>.`;
 - `failed`, a run that failed on the queue's own pull request: `gh run
   view <id> --json attempt,headSha` and `gh pr view <n> --json
   state,headRefOid,headRefName,baseRefName`; a pull request closed or past
@@ -147,7 +158,8 @@ once:
   written.
 
 Then write `## Handled, <date>, session <id>` with a line of what you did,
-for `failed` which of the four.
+for `failed` which of the four, for
+`unclosed` closed or told.
 
 ## A refresh plan
 

@@ -10447,6 +10447,22 @@ describe("github webhook", () => {
       rmSync(dir, { recursive: true, force: true });
     });
 
+    // plans/merge-close-retried.md, part 2.
+    it("noteFor writes an issue a merge did not close", () => {
+      const [event] = githubEvents({}, mergedItem(), { issuesOff: true }).events;
+      const unclosed = { ...event, kind: "unclosed", issue: 13, why: "HTTP 502: Bad Gateway" };
+      expect(noteFor(unclosed, { first: true })).toMatch(
+        /^# GitHub #41: Series keep their order on the phone\n\nunclosed, 15 November 2026 \d\d:26, issue #13: https:\/\/github\.com\/o\/r\/pull\/41\n {4}HTTP 502: Bad Gateway\n\n$/,
+      );
+      expect(noteFor(unclosed)).toMatch(
+        /^unclosed, 15 November 2026 \d\d:26, issue #13: https:\/\/github\.com\/o\/r\/pull\/41\n {4}HTTP 502: Bad Gateway\n\n$/,
+      );
+      const dir = mkdtempSync(join(tmpdir(), "notes-unclosed-"));
+      writeFileSync(join(dir, "41.md"), noteFor(unclosed, { first: true }));
+      expect(notesWaiting(dir)).toEqual(["plans/github/41.md"]);
+      rmSync(dir, { recursive: true, force: true });
+    });
+
     it("keeps only a delivery the queue takes something from", () => {
       const body = JSON.stringify(merged);
       expect(keeps("pull_request", body)).toBe(true);
@@ -10581,6 +10597,10 @@ else if (args[0] === "api" && args[1] === "user") {
   process.stdout.write("javi\\n");
 }
 else if (args[0] === "api" && /collaborators/.test(args[1])) process.stdout.write("write");
+else if (args[0] === "issue" && args[1] === "close" && args[2] === process.env.STUB_NOT_CLOSED) {
+  process.stderr.write("GraphQL: Resource not accessible by integration (closeIssue)\\n");
+  process.exit(1);
+}
 else say([]);
 `,
         );
@@ -10764,6 +10784,90 @@ else say([]);
           }
         },
       );
+
+      // plans/merge-close-retried.md, part 2: a failed close is a note for the assistant.
+      const closesTwo = {
+        ...merged,
+        pull_request: { ...merged.pull_request, body: "Closes #12.\nCloses #13.\n\n## Changes\n" },
+      };
+      const appToken = (dir: string) =>
+        writeFileSync(
+          join(dir, ".claude", "app-token.json"),
+          JSON.stringify({
+            token: "app-tok",
+            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+            repo: "o/r",
+            app: "12",
+          }),
+        );
+      it(
+        "a merged pull request whose close of one issue fails closes the other at once and notes the failed one for the assistant",
+        { timeout: 60_000 },
+        () => {
+          const dir = project(true);
+          try {
+            appToken(dir);
+            const app = { WORKFLOW_APP_ID: "12", WORKFLOW_APP_KEY: "key", STUB_NOT_CLOSED: "13" };
+            deliver(dir, "m1", closesTwo);
+            const said = run(dir, ["github", "--inbox"], app);
+            expect(said).toContain("GitHub: #12 closed, merged as #41.");
+            expect(said).toMatch(
+              /^GitHub: #13 was not closed, merged as #41, noted: GraphQL: Resource not accessible by integration \(closeIssue\)/m,
+            );
+            const file = join(dir, "plans", "github", "41.md");
+            expect(readFileSync(file, "utf8")).toMatch(
+              /^# GitHub #41: .*\n\nunclosed, 15 November 2026 \d\d:26, issue #13: https:\/\/github\.com\/o\/r\/pull\/41\n {4}GraphQL: Resource not accessible by integration \(closeIssue\)\n\nmerged, /,
+            );
+            writeFileSync(join(stub, "rows.json"), "[]");
+            expect(run(dir, ["list"], { WORKFLOW_LIVE: "[]" })).toContain(
+              "From GitHub, not handled\n  plans/github/41.md",
+            );
+            // A redelivery of the merge, still failing: tried once, said once.
+            deliver(dir, "m2", closesTwo);
+            run(dir, ["github", "--inbox"], app);
+            expect(readFileSync(file, "utf8").match(/^unclosed, /gm)).toHaveLength(1);
+            const asked = readFileSync(join(dir, "asked.log"), "utf8");
+            expect(asked.match(/^issue close 13 /gm)).toHaveLength(1);
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        },
+      );
+
+      it("the note of a close plans gh refused carries what it said", { timeout: 60_000 }, () => {
+        const dir = project(true);
+        try {
+          // Into a branch none of the queue's own is on, so the failed closes
+          // are the merge's only note and start the assistant themselves.
+          deliver(dir, "m1", {
+            ...closesTwo,
+            pull_request: {
+              ...closesTwo.pull_request,
+              base: { ref: "main" },
+              head: { ref: "other" },
+            },
+          });
+          // Its own starts log: the case before started an assistant, whose quick end
+          // in the shared log would hold this start back.
+          const said = run(dir, ["github", "--inbox"], {
+            WORKFLOW_STARTS_LOG: join(dir, "starts.log"),
+          });
+          const why = noAppWords("o/r", { WORKFLOW_SECRETS_FILE: "" }, "Runs").replace(/\.$/, "");
+          expect(said).toContain(
+            `GitHub: #12 was not closed, merged as #41, noted: ${why}; assistant started.`,
+          );
+          expect(said).toContain(`GitHub: #13 was not closed, merged as #41, noted: ${why}.`);
+          expect(said).toContain(
+            "GitHub: #41 merged into main: none of the queue's own is behind.",
+          );
+          const note = readFileSync(join(dir, "plans", "github", "41.md"), "utf8");
+          expect(note).not.toContain("\nmerged, ");
+          expect(note).toContain(`issue #12: https://github.com/o/r/pull/41\n    ${why}\n\n`);
+          expect(note).toContain(`issue #13: https://github.com/o/r/pull/41\n    ${why}\n\n`);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
     });
   });
 

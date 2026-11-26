@@ -241,10 +241,11 @@ never waits on the owner"); what one would have asked reaches you.
 ## Hiccups
 
 A stuck or stale executor, a plan the queue leased wrongly, a run that
-fails on what the diff does not explain, a refused upload: do what
-works (`plans end <id> --now`, `plans start <path>`, the command
-again; a failed run as `failed` in "What reaches you from GitHub" says,
-rerun once or refreshed), ask nothing and tell him nothing. Try the
+fails on what the diff does not explain, a refused upload, an issue a
+merge did not close: do what works (`plans end <id> --now`, `plans
+start <path>`, the command again; a failed run as `failed` in "What
+reaches you from GitHub" says, rerun once or refreshed, an issue not
+closed as `unclosed` says there), ask nothing and tell him nothing. Try the
 same fix twice at most for one fault; one still there is a failure you
 tell him, with what was tried. Never this way: `plans start
 --owner-said`, a merge, a forced push, a production push.

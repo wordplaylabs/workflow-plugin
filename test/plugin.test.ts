@@ -3936,6 +3936,30 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
     );
   });
 
+  // plans/merge-close-retried.md, parts 3 and 4.
+  it("an issue a merge did not close is noted for the assistant, which closes it or says so", () => {
+    const reaches = section("docs/github.md", "What reaches you from GitHub");
+    expect(reaches).toContain(
+      "- `unclosed`, an issue a merged pull request's description closes that the queue could not close: its line names the issue, the line under it the cause. A hiccup (\"Hiccups\"). Read `plans gh issue view <i> --json state,url,comments --jq '.state, .url, .comments[-1].body'`: `CLOSED`, nothing more. Open, `plans gh issue close <i> --reason completed --comment \"Merged as #<m>.\"`, without `--comment` when the last comment already says it, twice at most. One still open then, a number that is no issue here or is a pull request's (the address `issue view` gives has `/pull/`; never closed this way), or a cause that is his step (no app here, a permission the app lacks) is a failure you tell him: `#<i> was not closed when #<m> merged: <the cause>.`;",
+    );
+    expect(reaches).toContain(
+      "Then write `## Handled, <date>, session <id>` with a line of what you did, for `failed` which of the four, for `unclosed` closed or told.",
+    );
+    expect(section("agents/assistant.md", "Hiccups")).toContain(
+      'A stuck or stale executor, a plan the queue leased wrongly, a run that fails on what the diff does not explain, a refused upload, an issue a merge did not close: do what works (`plans end <id> --now`, `plans start <path>`, the command again; a failed run as `failed` in "What reaches you from GitHub" says, rerun once or refreshed, an issue not closed as `unclosed` says there), ask nothing and tell him nothing.',
+    );
+    const docs = flat("docs/workflow.md");
+    expect(docs).toContain(
+      "a run that fails on what the diff does not explain, a refused upload or an issue a merge did not close is fixed by the assistant by whatever works",
+    );
+    expect(docs).toContain(
+      "closes each issue a merged pull request's description closes; a close that fails is noted for the assistant, as a failed run is;",
+    );
+    expect(flat("docs/decisions.md")).toContain(
+      "A close that fails is noted for the assistant, which closes the issue by hand as any hiccup, twice at most, and tells him of one still open: nothing tried it again, and its one line was printed where nobody reads. The queue itself tries once, since gh posts the `Merged as` comment before it closes and a blind second try would post it twice. plans/prs-close-their-issues.md and plans/merge-close-retried.md.",
+    );
+  });
+
   it("a question names no choice by its place and never asks to hold", () => {
     const docs = flat("docs/workflow.md");
     expect(docs).toContain(

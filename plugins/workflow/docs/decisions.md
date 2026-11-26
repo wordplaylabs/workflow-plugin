@@ -798,7 +798,13 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   written before is still read at the merge. `plans` says when plans
   carry an `Issue` line where the project file turns issues off, since
   there no comment reaches the queue and no merge closes an issue, and
-  nothing had said so. plans/prs-close-their-issues.md.
+  nothing had said so. A close that fails is noted for the assistant,
+  which closes the issue by hand as any hiccup, twice at most, and tells
+  him of one still open: nothing tried it again, and its one line was
+  printed where nobody reads. The queue itself tries once, since gh posts
+  the `Merged as` comment before it closes and a blind second try would
+  post it twice. plans/prs-close-their-issues.md and
+  plans/merge-close-retried.md.
   - ~~The executor writes `For #<n>` on the pull request, with no
     closing keyword.~~ (Javi, 3 November)
 - `project-app` **The queue writes issues, comments, labels and pull

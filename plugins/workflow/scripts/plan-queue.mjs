@@ -8227,9 +8227,11 @@ export function githubPrompt(path) {
 
 /**
  * **What is done with the events** (decisions.md#github-webhook), in their
- * order, a line printed per thing: `merged` closes the issue as the app
- * with `Merged as #<m>.` and writes `Issue #<n> closed <date>.` in its
- * plan's "Built"; every other kind but `issue` is appended to
+ * order, a line printed per thing: `merged` closes each issue its
+ * description closes as the app with `Merged as #<m>.` and writes `Issue
+ * #<n> closed <date>.` in its plan's "Built", and a close that fails is an
+ * `unclosed` note for the assistant (decisions.md#closes-its-issues), tried
+ * once since a merge is an event once; every other kind but `issue` is appended to
  * `plans/github/<n>.md` and the assistant started on the oldest note not
  * handled, under the queue's bounds; `issue` is kept for `plans` to list.
  */
@@ -8255,7 +8257,13 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
   };
   for (const event of events) {
     if (event.kind === "merged") {
-      for (const issue of event.issues || []) said.push(await closeIssue(event, issue, plans, dry));
+      // Each issue in turn, whatever the last one's close did; a failed one is
+      // noted first, so the line said is that note's.
+      for (const issue of event.issues || []) {
+        const done = await closeIssue(event, issue, plans, dry);
+        if (done.why) note({ ...event, kind: "unclosed", issue, why: done.why });
+        said.push(done.said);
+      }
       // **What the merge left behind**
       // (decisions.md#merge-refreshes-the-rest): the open pull requests, read
       // as they are now.
@@ -8353,10 +8361,14 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
 
 /**
  * An issue a merged pull request closes (decisions.md#closes-its-issues),
- * closed as the app with a line in its plan's "Built"; the line `plans
- * github` says of it.
+ * closed as the app with a line in its plan's "Built". `{ said, why }`:
+ * the line `plans github` says of it, and why it was not closed, "" when it
+ * was or in a dry run: `plans gh`'s own refusal whole, on one line, else gh's last line
+ * of words (cut at 200), else "gh said nothing", with no full stop at its
+ * end, for the `unclosed` note the assistant closes it from.
  */
 async function closeIssue(event, issue, plans, dry) {
+  let ran = null;
   const done = dry
     ? { status: 0 }
     : await ghCommand(
@@ -8370,7 +8382,13 @@ async function closeIssue(event, issue, plans, dry) {
           `Merged as #${event.number}.`,
         ],
         {
-          run: (bin, args, options) => spawnSync(bin, args, { ...options, stdio: "ignore" }),
+          // gh's stderr is kept: its words are the cause of a failed close.
+          run: (bin, args, options) =>
+            (ran = spawnSync(bin, args, {
+              ...options,
+              stdio: ["ignore", "ignore", "pipe"],
+              encoding: "utf8",
+            })),
           // Read here, since the run above keeps no output for `repoHere` to read.
           repo: repoHere(spawnSync, process.env, false),
         },
@@ -8385,9 +8403,22 @@ async function closeIssue(event, issue, plans, dry) {
       writeFileSync(plan.file, lines.join("\n"));
     }
   }
-  return done.status === 0
-    ? `GitHub: #${issue} closed, merged as #${event.number}.`
-    : `GitHub: #${issue} was not closed: ${done.said || "plans gh failed"}`;
+  if (done.status === 0)
+    return { said: `GitHub: #${issue} closed, merged as #${event.number}.`, why: "" };
+  // One line, whatever it says, since the note indents only its first.
+  const words = String(ran?.stderr || "")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const why = (
+    done.said.replace(/\s+/g, " ").trim() ||
+    words.at(-1)?.slice(0, 200) ||
+    "gh said nothing"
+  ).replace(/\.$/, "");
+  return {
+    said: `GitHub: #${issue} was not closed, merged as #${event.number}, noted: ${why}.`,
+    why,
+  };
 }
 
 /**
@@ -8432,8 +8463,12 @@ export function notesWaiting(dir = join(root, "plans", "github")) {
     .map((one) => one.path);
 }
 
-/** A note's event line, as `noteFor` writes it: what `noteState` reads for `notesWaiting` and `writtenAt`. */
-const NOTE_EVENT = /^(?:plan|mention|comment|review|ready|failed|merged), /;
+/**
+ * A note's event line, as `noteFor` writes it: what `noteState` reads for
+ * `notesWaiting` and `writtenAt`. `unclosed`, an issue a merge did not close,
+ * waits as any event (decisions.md#closes-its-issues).
+ */
+const NOTE_EVENT = /^(?:plan|mention|comment|review|ready|failed|merged|unclosed), /;
 
 /**
  * "waiting" when a note's last event line comes after its last `## Handled`

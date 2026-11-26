@@ -651,7 +651,8 @@ on the owner's word, or its own for a chat that is stuck.
 
 **A hiccup is fixed, not asked about**: a stuck or stale executor, a
 plan the queue leased wrongly, a run that fails on what the diff does
-not explain or a refused upload is fixed by the assistant by whatever
+not explain, a refused upload or an issue a merge did not close is
+fixed by the assistant by whatever
 works, `plans end <id> --now`, `plans start`, a rerun or the command
 again, and the owner is neither asked nor told. The same fix is tried
 twice at most for one fault, and one still there is told as a failure,
@@ -786,7 +787,8 @@ app's webhook**: `plans webhook` listens on the container behind the
 host's reverse proxy, checks each delivery's signature, notes each event in
 `plans/github/`, starts the assistant on it, or sends the open one its
 line, and closes each issue a merged pull request's description
-closes; a comment from a person **People** names by login
+closes; a close that fails is noted for the assistant, as a failed run
+is; a comment from a person **People** names by login
 is an event on any issue or pull request, another writer's only where it
 mentions the app, on an issue a plan carries or on one of the queue's own
 pull requests; a failed run and a merge arrive the same way in

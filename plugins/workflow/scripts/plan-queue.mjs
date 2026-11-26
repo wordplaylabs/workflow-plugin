@@ -3064,7 +3064,11 @@ const START_WAIT = 10;
  * once, and where no trust dialog can appear it exits with `Workspace not
  * trusted`. Its output goes to `.claude/<kind>.started`, and `claude agents`
  * is asked once a second for ten seconds for a row of the new name. True when
- * seen; else the line to say, and nothing is logged.
+ * seen, or when a line of the output is `claude --bg`'s own confirmation for
+ * this name, `backgrounded · <id> · <name>`, which counts as seeing the
+ * session though `claude agents` lists no row yet (another start's line, in
+ * the same file, does not); else the line to say, its first, and nothing is
+ * logged.
  */
 function launch(args, name, kind, cwd = root) {
   const out = join(root, ".claude", `${kind}.started`);
@@ -3095,18 +3099,22 @@ function launch(args, name, kind, cwd = root) {
     if (rows) read = true;
     if (rows?.some((row) => row.name === name)) return true;
   }
-  // Nothing could be read: the start is not known to have failed.
-  if (!read) return "unread";
-  let said = "";
+  let lines = [];
   try {
-    said =
-      readFileSync(out, "utf8")
-        .split("\n")
-        .map((line) => line.trim())
-        .find(Boolean) || "";
+    lines = readFileSync(out, "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
   } catch {
     // No output file: as if it said nothing.
   }
+  // The launcher's own report that the session exists, read or not, after
+  // any warning it printed first.
+  if (lines.some((line) => /^backgrounded\s*·\s*\S+\s*·\s*(.+)$/.exec(line)?.[1] === name))
+    return true;
+  const said = lines[0] || "";
+  // Nothing could be read: the start is not known to have failed.
+  if (!read) return "unread";
   return said
     ? `${name} was not started: ${said.replace(/[.\s]+$/, "")}.`
     : `${name} was started, but has not appeared in claude agents after ten seconds; its output is in .claude/${kind}.started.`;

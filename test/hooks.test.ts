@@ -239,7 +239,10 @@ const fixture = (name: string, front = "", body = "") => {
  * the rows in `rows` (`STUB_ROWS` when set), a `--bg` start adds its session
  * there, `<prefix>-<time>` (`<prefix>-<n>-<time>` when `numbered`), with
  * `status` when given, and says so; with
- * `STUB=untrusted` it fails as an untrusted folder does. `calls` logs each call.
+ * `STUB=untrusted` it fails as an untrusted folder does, and with
+ * `STUB=backgrounded` it prints `claude --bg`'s confirmation and adds no row,
+ * as a session `claude agents` does not list yet, after `STUB_WARNING` when
+ * set and under `STUB_BG_NAME` when set. `calls` logs each call.
  */
 const fakeClaude = (
   dir: string,
@@ -264,6 +267,9 @@ if (args[0] === "agents") process.stdout.write(fs.readFileSync(rows, "utf8"));
 else if (process.env.STUB === "untrusted") {
   console.error("Workspace not trusted. Run claude in " + process.cwd() + " once and accept the trust prompt, then retry.");
   process.exit(1);
+} else if (process.env.STUB === "backgrounded") {
+  if (process.env.STUB_WARNING) console.error(process.env.STUB_WARNING);
+  console.log("backgrounded · 1234abcd · " + (process.env.STUB_BG_NAME || args[args.indexOf("--name") + 1]));
 } else if (args.includes("--bg")) {
   const name = args[args.indexOf("--name") + 1];
   const all = JSON.parse(fs.readFileSync(rows, "utf8"));
@@ -5200,6 +5206,45 @@ describe("the queue's faults, closed", () => {
       expect(said).toContain("Untrusted Executor 1 (lab) was not started: Workspace not trusted.");
       expect(existsSync(join(dir, ".claude", "starts.log"))).toBe(false);
     });
+    it(
+      "a start whose launcher prints a backgrounded line is said as started, though claude agents has no row yet",
+      { timeout: 30_000 },
+      () => {
+        const dir = fixture("Backgrounded");
+        const { script, rows } = stub();
+        // A warning printed before the confirmation hides nothing (Codex C2).
+        const said = startIn(dir, {
+          WORKFLOW_CLAUDE: script,
+          STUB_ROWS: rows,
+          STUB: "backgrounded",
+          STUB_WARNING: "A newer version is available.",
+        });
+        expect(said).not.toContain("was not started");
+        expect(said).toContain("Backgrounded Executor 1 (lab) was started on: plans/x.md");
+        expect(readFileSync(join(dir, ".claude", "starts.log"), "utf8")).toContain(
+          '"name":"Backgrounded Executor 1 (lab)"',
+        );
+      },
+    );
+    it(
+      "a backgrounded line naming another session is no confirmation of this start",
+      { timeout: 30_000 },
+      () => {
+        // Another start's line in the same output file (Codex C1).
+        const dir = fixture("Other");
+        const { script, rows } = stub();
+        const said = startIn(dir, {
+          WORKFLOW_CLAUDE: script,
+          STUB_ROWS: rows,
+          STUB: "backgrounded",
+          STUB_BG_NAME: "Other Executor 2 (lab)",
+        });
+        expect(said).toContain(
+          "Other Executor 1 (lab) was not started: backgrounded · 1234abcd · Other Executor 2 (lab).",
+        );
+        expect(existsSync(join(dir, ".claude", "starts.log"))).toBe(false);
+      },
+    );
     it("logs a start whose session appears", { timeout: 30_000 }, () => {
       const dir = fixture("Seen");
       const { script, rows } = stub();

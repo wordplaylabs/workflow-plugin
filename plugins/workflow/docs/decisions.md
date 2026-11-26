@@ -656,15 +656,16 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   start numbers, could share its name, a known limit. A chat runs its
   hooks and timers from the copy it began with, so a start by one begun
   before the names were held holds none: a start beside it that finds
-  its name on another session within its ten seconds stops its own
-  session and says so; a session listed later than that shares the name
-  until one is ended, a known limit. The assistant is his one chat, so
+  its name on another session, in any checkout, within its ten seconds
+  stops its own session and says so, and a confirmed start claims its
+  plan for the row of its own id; a session listed later than that
+  shares the name until one is ended, a known limit. The assistant is his one chat, so
   it has no number. GitHub Actions tells a person that a run
   of theirs ended, never that it started.
   plans/session-names-across-machines.md, plans/one-assistant-chat.md,
   plans/quiet-worker-starts.md, plans/overlapping-starts-own-names.md,
   plans/names-guard-taken.md, plans/late-session-keeps-its-name.md,
-  plans/duplicate-executor-name-seen.md.
+  plans/duplicate-executor-name-seen.md, plans/claim-goes-to-own-row.md.
   - ~~Every session the queue starts is a Remote Control chat.~~
     (Javi, 24 November)
 - `chat-ends-after-an-hour` **A finished chat ends an hour after it goes

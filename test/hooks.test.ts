@@ -254,7 +254,11 @@ const fixture = (name: string, front = "", body = "") => {
  * at once, a row of the start's name under that id, as another start's
  * session that took the name (busy, or with no process when
  * `STUB_OTHER_STOPPED` is set), and `STUB_BG_AFTER=<ms>` prints the line that
- * many milliseconds later. `stop` exits 1 when `STUB_STOP_FAILS` is set,
+ * many milliseconds later, with `STUB_OTHER_CWD` the other row's folder in
+ * place of the start's. With `STUB_LATER=<rows>` a `backgrounded` start marks
+ * itself launched, and `agents` lists those rows too once it has and no
+ * `.started` file is left beside the rows: after the start is confirmed.
+ * `stop` exits 1 when `STUB_STOP_FAILS` is set,
  * else 0, printing nothing. `calls` logs each call.
  */
 const fakeClaude = (
@@ -277,7 +281,15 @@ const args = process.argv.slice(2);
 const rows = process.env.STUB_ROWS || ${JSON.stringify(rows)};
 ${calls ? `fs.appendFileSync(${JSON.stringify(calls)}, args.join(" ").slice(0, 80) + "\\n");` : ""}
 if (args[0] === "stop") process.exit(process.env.STUB_STOP_FAILS ? 1 : 0);
-else if (args[0] === "agents") process.stdout.write(fs.readFileSync(rows, "utf8"));
+else if (args[0] === "agents") {
+  const dir = require("node:path").dirname(rows);
+  const later =
+    process.env.STUB_LATER &&
+    fs.existsSync(rows + ".launched") &&
+    !fs.readdirSync(dir).some((file) => file.endsWith(".started"));
+  const listed = fs.readFileSync(rows, "utf8");
+  process.stdout.write(later ? JSON.stringify([...JSON.parse(listed), ...JSON.parse(process.env.STUB_LATER)]) : listed);
+}
 else if (process.env.STUB === "untrusted") {
   console.error("Workspace not trusted. Run claude in " + process.cwd() + " once and accept the trust prompt, then retry.");
   process.exit(1);
@@ -287,9 +299,10 @@ else if (process.env.STUB === "untrusted") {
   const id = JSON.parse(process.env.STUB_BG_IDS || "{}")[require("node:path").basename(process.cwd())];
   if (process.env.STUB_OTHER) {
     const all = JSON.parse(fs.readFileSync(rows, "utf8"));
-    all.push({ sessionId: process.env.STUB_OTHER, name, kind: "background", ...(process.env.STUB_OTHER_STOPPED ? {} : { status: "busy" }), cwd: process.cwd() });
+    all.push({ sessionId: process.env.STUB_OTHER, name, kind: "background", ...(process.env.STUB_OTHER_STOPPED ? {} : { status: "busy" }), cwd: process.env.STUB_OTHER_CWD || process.cwd() });
     fs.writeFileSync(rows, JSON.stringify(all));
   }
+  if (process.env.STUB_LATER) fs.writeFileSync(rows + ".launched", "");
   const say = () => console.log("backgrounded · " + (id || "1234abcd") + " · " + name);
   const after = Number(process.env.STUB_BG_AFTER || 0);
   if (after) setTimeout(say, after);
@@ -16086,6 +16099,45 @@ describe("several executors build at once", () => {
     );
     expect(readFileSync(join(claude, "stops.log"), "utf8")).toBe("1234abcd\n");
   });
+
+  // plans/claim-goes-to-own-row.md: the clash is read in every checkout,
+  // and the claim goes to the row of the start's own id.
+  it("a start sees a clash with another checkout's session", { timeout: 30_000 }, () => {
+    const { said, claude } = pair({ STUB_OTHER_CWD: temp("pair-other-checkout-") });
+    expect(said).toContain(
+      `${taken}this start's own [1234abcd] was stopped, and plans shows the queue.`,
+    );
+    expect(readFileSync(join(claude, "stops.log"), "utf8")).toBe("1234abcd\n");
+  });
+
+  it(
+    "a confirmed start claims for its own row, not one listed after it",
+    { timeout: 30_000 },
+    () => {
+      const one = pool("Pair", { "a.md": plan("A", "Change src/a.js.") });
+      const row = (sessionId: string) => ({
+        sessionId,
+        name: "Pair Executor 1 (lab)",
+        kind: "background",
+        status: "busy",
+        cwd: one.dir,
+      });
+      const own = "1234abcd-0000-4000-8000-000000000001";
+      const said = one.queue(
+        ["start", "plans/a.md"],
+        {},
+        {
+          STUB: "backgrounded",
+          STUB_LATER: JSON.stringify([row("9999ffff-0000-4000-8000-000000000002"), row(own)]),
+        },
+      );
+      expect(said).toContain("Pair Executor 1 (lab) was started on: plans/a.md, in executor-1.");
+      const claims = JSON.parse(
+        readFileSync(join(one.dir, ".claude", "executor.claims.json"), "utf8"),
+      );
+      expect(claims["plans/a.md"].holder).toBe(own);
+    },
+  );
 
   it(
     "a row listed before the launcher speaks is not taken as the start's own",

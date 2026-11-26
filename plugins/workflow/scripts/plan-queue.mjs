@@ -3254,11 +3254,14 @@ const startOutput = (kind) => join(root, ".claude", `${kind}.${process.pid}.star
  * printing none, once it has said a line naming this start (a warning it
  * prints first is not that): under load another session's row can be
  * listed before this launcher's line, and waits for it to the ten seconds'
- * end. A row with no process is a stopped session's, never another's. A row of the name with another id is another start's
+ * end. A row with no process is a stopped session's, never another's. A
+ * row of the name with another id, in any checkout's rows (`liveAll`), since
+ * no two sessions on the machine share a name, is another start's
  * session, taken by a start that holds no name (a chat begun before the
  * names were held runs the copy it began with): this start stops its own
  * session, gives the plan back as a failed launch does, and says so; the
- * other session goes on (plans/duplicate-executor-name-seen.md). The
+ * other session goes on (plans/duplicate-executor-name-seen.md,
+ * plans/claim-goes-to-own-row.md). The
  * assistant's chat has one name by design, and any new row of it is taken.
  */
 function launch(args, name, kind, cwd = root, known = []) {
@@ -3326,41 +3329,57 @@ function launch(args, name, kind, cwd = root, known = []) {
       ? `${words} was stopped, and plans shows the queue.`
       : `${words} could not be stopped: end it with plans end ${own.slice(0, 8)} --now.`;
   };
+  // The rows of the name, less those listed before the launch.
+  const ofName = (rows) =>
+    (rows || []).filter((one) => one.name === name && !known.includes(one.sessionId));
   // Ten seconds by the clock, each ask cut to the time left, so a slow
   // `claude agents` cannot hold the Stop hook past its own timeout.
   const deadline = Date.now() + START_WAIT * 1000;
   let read = false;
   // A row of the name listed before the launcher spoke.
   let kept = null;
+  // Every checkout's rows at the last read that answered, so a read that
+  // fails at the end loses no clash seen before it (Codex C1).
+  let all = [];
   for (;;) {
     sleep(Math.max(0, Math.min(1000, deadline - Date.now())));
     const left = deadline - Date.now();
     if (left <= 0) break;
     const rows = liveSessions({ fresh: true, timeout: left });
     if (rows) read = true;
-    const named = (rows || []).filter((one) => one.name === name && !known.includes(one.sessionId));
-    if (!named.length) continue;
-    if (kind === "assistant") return seen({ id: named[0].sessionId });
+    if (liveAll) all = ofName(liveAll);
+    const named = ofName(rows);
+    if (kind === "assistant") {
+      if (named.length) return seen({ id: named[0].sessionId });
+      continue;
+    }
     const lines = said();
     const own = ownIn(lines);
     if (own) {
-      const other = named.find((one) => !sameSession(own, one.sessionId) && running(one));
+      // Every checkout's rows: no two sessions on the machine share a name.
+      const other = all.find((one) => !sameSession(own, one.sessionId) && running(one));
       if (other) return taken(own, other.sessionId);
+      // Its own row is this checkout's, as the claim reads it (/code-review).
       const mine = named.find((one) => sameSession(own, one.sessionId));
       if (mine) return seen({ id: mine.sessionId });
       // Only a stopped row of the name: this start's own is not listed yet.
       continue;
     }
+    if (!named.length) continue;
     if (spoke(lines)) return seen({ id: named[0].sessionId });
     kept = named[0];
   }
   const lines = said();
   const confirmed = confirmedIn(lines);
   if (confirmed) {
-    // A row kept unspoken for is another's when the line names another id.
+    // A row kept unspoken for, or one of any checkout at the last read that
+    // answered, is another's when the line names another id.
     const own = ownIn(lines);
-    if (own && kept && running(kept) && !sameSession(own, kept.sessionId))
-      return taken(own, kept.sessionId);
+    const other =
+      own &&
+      kind !== "assistant" &&
+      [kept, ...all].find((one) => one && running(one) && !sameSession(own, one.sessionId));
+    if (other) return taken(own, other.sessionId);
     return seen({ id: confirmed[1], launched: true });
   }
   // A row listed, the launcher silent for ten seconds: the row is its session.
@@ -5235,13 +5254,8 @@ function startHere(
     }
   }
   // The rows of the name this start's own read listed are not its session.
-  const seen = launch(
-    args,
-    name,
-    kind,
-    tree || root,
-    (live || []).filter((row) => row.name === name).map((row) => row.sessionId),
-  );
+  const known = (live || []).filter((row) => row.name === name).map((row) => row.sessionId);
+  const seen = launch(args, name, kind, tree || root, known);
   if (tree) unclaim(`slot:${number}`, starter);
   if (kind === "assistant") unclaim("slot:assistant", starter);
   // A launch that failed keeps the deferral, and with it the timer's pid.
@@ -5326,12 +5340,20 @@ function startHere(
   // takes it before its Building line.
   out.started = { name, path: paths[0], number: tree ? number : 0 };
   if (tree) {
-    const row = liveSessions({ fresh: true })?.find((one) => one.name === name);
+    // The row of the id the launch read, never one listed before the launch
+    // or another session listed since under the name
+    // (plans/claim-goes-to-own-row.md); a launch that read no id long enough
+    // to tell a row by takes the first row of the name.
+    const own = seen?.id?.length >= 8 ? seen.id : "";
+    const listed = (liveSessions({ fresh: true }) || []).filter(
+      (one) => one.name === name && !known.includes(one.sessionId),
+    );
+    const row = own ? listed.find((one) => sameSession(own, one.sessionId)) : listed[0];
     // Not listed yet: held by the id the launch read, else by its name, until
     // it is listed, or for the start's span ("A start sees its session"). The
     // start's own claim is handed over in the same write, so no other takes
     // the plan between.
-    const id = row ? row.sessionId : seen?.id?.length >= 8 ? seen.id : "";
+    const id = row ? row.sessionId : own;
     claim(paths[0], {
       holder: id || `name:${name}`,
       name,

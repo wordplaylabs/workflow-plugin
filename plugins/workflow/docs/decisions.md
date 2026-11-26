@@ -634,11 +634,15 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   sessions on any machine share a name. A start holds its name beside
   the starts log from its numbering until it is logged, so two starts
   at one moment, in one checkout or two, a planner's as an
-  executor's, number apart. The assistant is his one
+  executor's, number apart. It waits for the names' guard past the ten
+  seconds at which a crashed holder's is removed; only a names file
+  that cannot be written leaves a start with an unheld name, a known
+  limit. The assistant is his one
   chat, so it has no number. GitHub Actions tells a person that a run
   of theirs ended, never that it started.
   plans/session-names-across-machines.md, plans/one-assistant-chat.md,
-  plans/quiet-worker-starts.md, plans/overlapping-starts-own-names.md.
+  plans/quiet-worker-starts.md, plans/overlapping-starts-own-names.md,
+  plans/names-guard-taken.md.
   - ~~Every session the queue starts is a Remote Control chat.~~
     (Javi, 24 November)
 - `chat-ends-after-an-hour` **A finished chat ends an hour after it goes

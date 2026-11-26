@@ -2916,15 +2916,17 @@ function readLog() {
  * in flight is in the file or in the log whenever the guard is held, and a
  * second start at the same moment, in this checkout or another, numbers
  * past it. `claude agents` is not asked under the guard: it can take
- * seconds. "" when the guard is not taken or the file cannot be written:
- * the start goes on with `canStart`'s name, unheld
- * (plans/overlapping-starts-own-names.md).
+ * seconds. "" only when the file or its guard cannot be written, the start
+ * then going on with `canStart`'s name, unheld
+ * (plans/overlapping-starts-own-names.md, plans/names-guard-taken.md).
  */
 function holdName(kind, taken) {
   const path = files.names();
   const guard = `${path}.guard`;
   try {
-    if (!takeGuard(guard)) return "";
+    // A crashed holder's guard is removed at ten seconds, so twelve take it,
+    // and a start is never left unheld by a guard alone.
+    if (!takeGuard(guard, 12_000)) return "";
   } catch {
     return "";
   }
@@ -6520,12 +6522,13 @@ export function takeLock(sessionId, live, { path = files.lock(), alive = null } 
 }
 
 /**
- * The lock's guard, created exclusively; waits up to three seconds for
- * another claimant to finish. A guard older than ten seconds is a crashed
- * claimant's and is removed (the critical section takes milliseconds).
+ * The lock's guard, created exclusively; waits up to `wait` milliseconds,
+ * three seconds unless the caller names a wait, for another claimant to
+ * finish. A guard older than ten seconds is a crashed claimant's and is
+ * removed (the critical section takes milliseconds).
  */
-function takeGuard(guard) {
-  const deadline = Date.now() + 3000;
+function takeGuard(guard, wait = 3000) {
+  const deadline = Date.now() + wait;
   for (;;) {
     try {
       writeFileSync(guard, String(process.pid), { flag: "wx" });
@@ -6538,9 +6541,10 @@ function takeGuard(guard) {
         unlinkSync(guard);
         continue;
       }
-    } catch {
-      // Released between the create and the look: try again.
-      continue;
+    } catch (error) {
+      // Released between the create and the look: try again. A guard that
+      // cannot be removed waits out the deadline like a live one.
+      if (error.code === "ENOENT") continue;
     }
     if (Date.now() > deadline) return false;
     sleep(25);

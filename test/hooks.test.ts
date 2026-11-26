@@ -15662,6 +15662,28 @@ describe("several executors build at once", () => {
     expect(existsSync(names)).toBe(false);
   });
 
+  // plans/names-guard-taken.md: a crashed holder's guard is removed at ten
+  // seconds, and a start waits twelve for it, so it never goes on unheld.
+  it("a start waits out a crashed holder's guard and holds its name", { timeout: 60_000 }, () => {
+    const one = pool("Guard", { "a.md": plan("A", "Change src/a.js.") });
+    const names = join(one.dir, ".claude", "starts.log.names.json");
+    const guard = `${names}.guard`;
+    // Written now, it is removed ten seconds on: a start that gave up at three
+    // went on unheld, however long it took to reach the guard.
+    writeFileSync(guard, "999999");
+    writeFileSync(
+      names,
+      JSON.stringify({ "Guard Executor 1 (lab)": { pid: 999999, at: Date.now() } }),
+    );
+    expect(one.queue(["start", "plans/a.md"])).toContain(
+      "Guard Executor 2 (lab) was started on: plans/a.md, in executor-1.",
+    );
+    expect(existsSync(guard)).toBe(false);
+    expect(Object.keys(JSON.parse(readFileSync(names, "utf8")))).toEqual([
+      "Guard Executor 1 (lab)",
+    ]);
+  });
+
   it("a start that fails holds no name", { timeout: 60_000 }, () => {
     const one = pool("Overlap", { "a.md": plan("A", "Change src/a.js.") });
     const names = join(one.dir, ".claude", "starts.log.names.json");

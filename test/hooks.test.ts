@@ -10642,6 +10642,10 @@ else if (args[0] === "api" && args[1] === "user") {
   process.stdout.write("javi\\n");
 }
 else if (args[0] === "api" && /collaborators/.test(args[1])) process.stdout.write("write");
+else if (args[0] === "api" && /\\/issues\\/\\d+$/.test(args[1]))
+  process.stdout.write(
+    String((process.env.STUB_PULLS || "").split(",").includes(args[1].split("/").pop())) + "\\n",
+  );
 else if (args[0] === "issue" && args[1] === "close" && args[2] === process.env.STUB_NOT_CLOSED) {
   process.stderr.write("GraphQL: Resource not accessible by integration (closeIssue)\\n");
   process.exit(1);
@@ -10873,6 +10877,39 @@ else say([]);
             expect(readFileSync(file, "utf8").match(/^unclosed, /gm)).toHaveLength(1);
             const asked = readFileSync(join(dir, "asked.log"), "utf8");
             expect(asked.match(/^issue close 13 /gm)).toHaveLength(1);
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        },
+      );
+
+      // plans/merge-closes-no-pull-request.md: a Closes line naming a pull request closes nothing.
+      it(
+        "a merge whose description closes a pull request's number closes nothing for it",
+        { timeout: 60_000 },
+        () => {
+          const dir = project(true);
+          try {
+            appToken(dir);
+            deliver(dir, "m1", closesTwo);
+            const said = run(dir, ["github", "--inbox"], {
+              WORKFLOW_APP_ID: "12",
+              WORKFLOW_APP_KEY: "key",
+              STUB_PULLS: "13",
+            });
+            expect(said).toContain("GitHub: #12 closed, merged as #41.");
+            expect(
+              said.match(/^GitHub: #13 is a pull request, so merging #41 left it open\.$/gm),
+            ).toHaveLength(1);
+            const asked = readFileSync(join(dir, "asked.log"), "utf8");
+            expect(asked).toContain(
+              "api repos/{owner}/{repo}/issues/13 --jq .pull_request != null",
+            );
+            expect(asked).toContain("issue close 12 --reason completed --comment Merged as #41.");
+            expect(asked).not.toContain("issue close 13");
+            expect(readFileSync(join(dir, "plans", "github", "41.md"), "utf8")).not.toContain(
+              "unclosed, ",
+            );
           } finally {
             rmSync(dir, { recursive: true, force: true });
           }

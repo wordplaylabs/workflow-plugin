@@ -803,8 +803,10 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   him of one still open: nothing tried it again, and its one line was
   printed where nobody reads. The queue itself tries once, since gh posts
   the `Merged as` comment before it closes and a blind second try would
-  post it twice. plans/prs-close-their-issues.md and
-  plans/merge-close-retried.md.
+  post it twice. A number that is a pull request is left open, since gh
+  closes a pull request given its number and a typo or a person's own
+  line would close somebody's. plans/prs-close-their-issues.md,
+  plans/merge-close-retried.md and plans/merge-closes-no-pull-request.md.
   - ~~The executor writes `For #<n>` on the pull request, with no
     closing keyword.~~ (Javi, 3 November)
 - `project-app` **The queue writes issues, comments, labels and pull

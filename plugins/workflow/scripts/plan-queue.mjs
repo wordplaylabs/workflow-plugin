@@ -8371,36 +8371,64 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
  * An issue a merged pull request closes (decisions.md#closes-its-issues),
  * closed as the app with a line in its plan's "Built". `{ said, why }`:
  * the line `plans github` says of it, and why it was not closed, "" when it
- * was or in a dry run: `plans gh`'s own refusal whole, on one line, else gh's last line
- * of words (cut at 200), else "gh said nothing", with no full stop at its
- * end, for the `unclosed` note the assistant closes it from.
+ * was, when the number is a pull request's, or in a dry run: `plans gh`'s own
+ * refusal whole, on one line, else gh's last line of words (cut at 200), else
+ * "gh said nothing", with no full stop at its end, for the `unclosed` note
+ * the assistant closes it from.
  */
 async function closeIssue(event, issue, plans, dry) {
   let ran = null;
-  const done = dry
-    ? { status: 0 }
-    : await ghCommand(
-        [
-          "issue",
-          "close",
-          String(issue),
-          "--reason",
-          "completed",
-          "--comment",
-          `Merged as #${event.number}.`,
-        ],
-        {
-          // gh's stderr is kept: its words are the cause of a failed close.
-          run: (bin, args, options) =>
-            (ran = spawnSync(bin, args, {
-              ...options,
-              stdio: ["ignore", "ignore", "pipe"],
-              encoding: "utf8",
-            })),
-          // Read here, since the run above keeps no output for `repoHere` to read.
-          repo: repoHere(spawnSync, process.env, false),
-        },
-      );
+  // Read here, since the runs below keep no output for `repoHere` to read.
+  const repo = dry ? "" : repoHere(spawnSync, process.env, false);
+  // gh's output is kept: its words are the read's answer, or the cause of a
+  // failed read or close.
+  const gh = (args) =>
+    ghCommand(args, {
+      run: (bin, given, options) =>
+        (ran = spawnSync(bin, given, {
+          ...options,
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+          // A stalled gh would hold the read's guard and every delivery after it.
+          timeout: 30_000,
+        })),
+      repo,
+    });
+  // What the number is, first: `gh issue close` closes a pull request given
+  // its number, and a Closes line closes issues only, so a typo or a person's
+  // own line closes nobody's pull request (plans/merge-closes-no-pull-request.md).
+  // GitHub's issues endpoint gives a pull request its `pull_request` key; a
+  // read with no answer is a failed close, the number's kind not known.
+  let done = { status: 0, said: "" };
+  if (!dry) {
+    done = await gh([
+      "api",
+      `repos/{owner}/{repo}/issues/${issue}`,
+      "--jq",
+      ".pull_request != null",
+    ]);
+    const kind = done.status === 0 ? String(ran?.stdout || "").trim() : "";
+    if (kind === "true")
+      return {
+        said: `GitHub: #${issue} is a pull request, so merging #${event.number} left it open.`,
+        why: "",
+      };
+    if (kind === "false")
+      done = await gh([
+        "issue",
+        "close",
+        String(issue),
+        "--reason",
+        "completed",
+        "--comment",
+        `Merged as #${event.number}.`,
+      ]);
+    else if (done.status === 0)
+      done = {
+        status: 1,
+        said: `the read of whether #${issue} is a pull request answered ${kind ? `"${kind.slice(0, 80)}"` : "nothing"}`,
+      };
+  }
   const plan = plans.find((p) => p.issue === issue && p.state === "built");
   if (plan && done.status === 0 && !dry) {
     const lines = plan.text.split("\n");

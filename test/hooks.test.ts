@@ -10299,6 +10299,16 @@ describe("github webhook", () => {
     expect(noteFor(events[0])).not.toContain("# GitHub");
   });
 
+  // plans/github-note-crlf.md: a comment written with CRLF line endings is noted line by line.
+  it("a CRLF comment's note keeps no carriage return", () => {
+    const [, event, payload] = deliveries[1] as [string, string, { comment: object }];
+    const crlf = { ...payload, comment: { ...payload.comment, body: "first\r\nsecond" } };
+    const { events } = githubEvents(seen, itemsOfDelivery(event, crlf, "d2"), context);
+    const note = noteFor(events[0]);
+    expect(note).toContain("\n    first\n    second\n");
+    expect(note).not.toContain("\r");
+  });
+
   // plans/merged-pr-refreshes-the-rest.md, parts 1 to 3: a merge is one event, noted with what it
   // leaves behind, and a delivery the queue takes nothing from is not kept.
   describe("a merge", () => {

@@ -490,7 +490,7 @@ function noteTime(at) {
 export function noteFor(event, { first = false } = {}) {
   const head = first ? `# GitHub #${event.number}: ${event.title}\n\n` : "";
   const text = (event.text || "")
-    .split("\n")
+    .split(/\r\n?|\n/)
     .map((line) => (line.trim() ? `    ${line}` : ""))
     .join("\n")
     .replace(/\n+$/, "");

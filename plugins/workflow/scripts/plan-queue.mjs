@@ -202,9 +202,10 @@ const files = {
   deferred: (kind = "executor") => join(root, ".claude", `${kind}.deferred`),
   usage: () => process.env.WORKFLOW_USAGE_FILE || join(data(), "usage.json"),
   starts: () => process.env.WORKFLOW_STARTS_LOG || join(data(), "starts.log"),
-  // The names starts hold from their numbering until they are logged, beside
-  // the log, so for every checkout and kind: `{ "<name>": { pid, at } }`
-  // (`holdName`, plans/overlapping-starts-own-names.md).
+  // The names starts hold from their numbering until they are logged, or,
+  // their launch failed, until their span lapses, beside the log, so for
+  // every checkout and kind: `{ "<name>": { pid, at } }` (`holdName`,
+  // plans/overlapping-starts-own-names.md, plans/late-session-keeps-its-name.md).
   names: () => `${files.starts()}.names.json`,
   state: (sessionId) => join(tmpdir(), `workflow-queue-${sessionId || "unknown"}.json`),
   // The project's app's installation token and its end.
@@ -2764,9 +2765,10 @@ export function canStart({
   if (findings.length && !said) return { refuse: true, why: `${findings[0]} ${decides}` };
   // From 1 in a project with none started yet. The live list counts too: the
   // log can be reset (a marketplace move) while a session it named is still
-  // alive. **A start holds its name** from here until it is logged
-  // (`holdName`), so a second start at the same moment, numbering again
-  // under its guard, never takes it (plans/overlapping-starts-own-names.md).
+  // alive. **A start holds its name** from here until it is logged, or for
+  // its span when its launch fails (`holdName`), so a second start at the
+  // same moment, numbering again under its guard, never takes it
+  // (plans/overlapping-starts-own-names.md, plans/late-session-keeps-its-name.md).
   const besideNote = beside
     .map(
       (one) =>
@@ -2915,7 +2917,10 @@ function readLog() {
  * this process. Since a start is logged before it lets its name go, a name
  * in flight is in the file or in the log whenever the guard is held, and a
  * second start at the same moment, in this checkout or another, numbers
- * past it. `claude agents` is not asked under the guard: it can take
+ * past it. A start whose launch failed does not let it go: it lapses with
+ * its span, `STARTING_SPAN` from its numbering, since the session may still
+ * come up under it (plans/late-session-keeps-its-name.md). `claude agents`
+ * is not asked under the guard: it can take
  * seconds. "" only when the file or its guard cannot be written, the start
  * then going on with `canStart`'s name, unheld
  * (plans/overlapping-starts-own-names.md, plans/names-guard-taken.md).
@@ -2955,7 +2960,13 @@ function holdName(kind, taken) {
   }
 }
 
-/** Lets go of a name `holdName` held for this process, and of the file once it holds none; a failed removal holds back nothing. */
+/**
+ * Lets go of a name `holdName` held for this process, and of the file once
+ * it holds none; a failed removal holds back nothing. Called once the start
+ * is logged, or when another start took its plan or number; never on a
+ * failed launch, whose name lapses with its span
+ * (plans/late-session-keeps-its-name.md).
+ */
 function dropName(name) {
   const path = files.names();
   const guard = `${path}.guard`;
@@ -3223,8 +3234,9 @@ const startOutput = (kind) => join(root, ".claude", `${kind}.${process.pid}.star
  * (plans/start-output-per-start.md); a later start in the same process, as
  * a usage reset's timer makes one after another, writes it afresh. `claude agents` is asked once a second
  * for ten seconds for a row of the new name, the start's own: a start holds
- * its name until it is logged (`holdName`), so no start beside it at the
- * same moment is given it (plans/overlapping-starts-own-names.md). `{ id }` when seen, the row's
+ * its name until it is logged, or for its span when this launch fails
+ * (`holdName`), so no start beside it at the same moment is given it
+ * (plans/overlapping-starts-own-names.md, plans/late-session-keeps-its-name.md). `{ id }` when seen, the row's
  * session id, or when a line of the output is `claude --bg`'s own
  * confirmation for this name, `backgrounded · <id> · <name>`, which counts
  * as seeing the session though `claude agents` lists no row yet (a line
@@ -5049,9 +5061,10 @@ function startHere(
     // The one lock of before the numbers goes with the first start.
     rmSync(join(root, ".claude", "executor.lock"), { force: true });
   }
-  // **A start holds its name** until it is logged, numbered again under the
-  // names' guard, so two starts at once never share one; the assistant has
-  // one name and its own slot (plans/overlapping-starts-own-names.md).
+  // **A start holds its name** until it is logged, or for its span when its
+  // launch fails, numbered again under the names' guard, so two starts at
+  // once never share one; the assistant has one name and its own slot
+  // (plans/overlapping-starts-own-names.md, plans/late-session-keeps-its-name.md).
   const name = (kind !== "assistant" && holdName(kind, liveNames())) || decision.name;
   const args = argsFor(name);
   // **A stale idle session is replaced**: retired and its lock released
@@ -5101,7 +5114,10 @@ function startHere(
   if (kind === "assistant") unclaim("slot:assistant", starter);
   // A launch that failed keeps the deferral, and with it the timer's pid.
   if (typeof seen === "string" && seen !== "unread") {
-    dropName(name);
+    // A launch that failed may still bring its session up under the name, a
+    // slow launcher's as a silent one's, so the name stays held until its
+    // span lapses and no start numbers it again meanwhile
+    // (plans/late-session-keeps-its-name.md).
     if (tree) unclaim(paths[0], starter);
     for (const { old, state, lock } of replaced) {
       writeJson(files.state(old.sessionId), state);

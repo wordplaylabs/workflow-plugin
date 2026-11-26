@@ -637,12 +637,16 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   executor's, number apart. It waits for the names' guard past the ten
   seconds at which a crashed holder's is removed; only a names file
   that cannot be written leaves a start with an unheld name, a known
-  limit. The assistant is his one
+  limit. A start whose launch fails keeps its name for two minutes
+  from its numbering, since its session may still come up under it;
+  one that comes up later still, and is not yet listed when the next
+  start numbers, could share its name, a known limit. The assistant is
+  his one
   chat, so it has no number. GitHub Actions tells a person that a run
   of theirs ended, never that it started.
   plans/session-names-across-machines.md, plans/one-assistant-chat.md,
   plans/quiet-worker-starts.md, plans/overlapping-starts-own-names.md,
-  plans/names-guard-taken.md.
+  plans/names-guard-taken.md, plans/late-session-keeps-its-name.md.
   - ~~Every session the queue starts is a Remote Control chat.~~
     (Javi, 24 November)
 - `chat-ends-after-an-hour` **A finished chat ends an hour after it goes

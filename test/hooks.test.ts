@@ -22,7 +22,7 @@ import {
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { QUEUE_IGNORES, checkoutOf, executorsOf } from "../plugins/workflow/scripts/project.mjs";
 import {
   listToJudge,
@@ -247,7 +247,9 @@ const fixture = (name: string, front = "", body = "") => {
  * JSON map) gives the name of the folder it runs in, else 1234abcd. With
  * `STUB_ROW_AFTER=<ms>` a `--bg` start adds its row that many milliseconds
  * later, its id the one `STUB_BG_IDS` gives the folder when set, quietly
- * when the folder is gone by then. `calls` logs each call.
+ * when the folder is gone by then. With `STUB_SILENT` set a `--bg` start
+ * prints no `Started` line, its row added as before, at once or
+ * `STUB_ROW_AFTER` later. `calls` logs each call.
  */
 const fakeClaude = (
   dir: string,
@@ -296,7 +298,7 @@ else if (process.env.STUB === "untrusted") {
       }
     }, after);
   else add();
-  console.log("Started " + name);
+  if (!process.env.STUB_SILENT) console.log("Started " + name);
 }
 `,
   );
@@ -8204,6 +8206,9 @@ describe("a finished chat ends", () => {
       );
       writeFileSync(stateFile(lone), JSON.stringify({ agent: "planner", plans: [] }));
     });
+    // Each case starts with no name held by the case before it: a failed
+    // start keeps its name for two minutes (plans/late-session-keeps-its-name.md).
+    beforeEach(() => rmSync(join(dir, ".claude", "starts.log.names.json"), { force: true }));
     afterAll(() => {
       for (const id of [exec, planner, asker, lone, tty]) rmSync(stateFile(id), { force: true });
       rmSync(dir, { recursive: true, force: true });
@@ -15684,15 +15689,45 @@ describe("several executors build at once", () => {
     ]);
   });
 
-  it("a start that fails holds no name", { timeout: 60_000 }, () => {
+  // plans/late-session-keeps-its-name.md: a failed launch may still bring
+  // its session up under the name, so the name lapses with its span.
+  it("a start whose launch fails keeps its name for two minutes", { timeout: 60_000 }, () => {
     const one = pool("Overlap", { "a.md": plan("A", "Change src/a.js.") });
     const names = join(one.dir, ".claude", "starts.log.names.json");
+    const held = () => Object.keys(JSON.parse(readFileSync(names, "utf8")));
     const refused = one.queue(["start", "plans/a.md"], {}, { STUB: "untrusted" });
     expect(refused).toContain("Overlap Executor 1 (lab) was not started: Workspace not trusted");
-    expect(existsSync(names)).toBe(false);
+    expect(held()).toEqual(["Overlap Executor 1 (lab)"]);
     expect(one.queue(["start", "plans/a.md"])).toContain(
-      "Overlap Executor 1 (lab) was started on: plans/a.md, in executor-1.",
+      "Overlap Executor 2 (lab) was started on: plans/a.md, in executor-1.",
     );
+    expect(held()).toEqual(["Overlap Executor 1 (lab)"]);
+  });
+
+  it("a session that comes up late shares no name", { timeout: 90_000 }, async () => {
+    const one = pool("Late", { "a.md": plan("A", "Change src/a.js.") });
+    const names = join(one.dir, ".claude", "starts.log.names.json");
+    // The launcher says nothing, and its session is listed twenty seconds on.
+    const late = one.queue(
+      ["start", "plans/a.md"],
+      {},
+      { STUB_SILENT: "1", STUB_ROW_AFTER: "20000" },
+    );
+    expect(late).toContain(
+      "Late Executor 1 (lab) was started, but has not appeared in claude agents after ten seconds",
+    );
+    expect(Object.keys(JSON.parse(readFileSync(names, "utf8")))).toEqual(["Late Executor 1 (lab)"]);
+    expect(one.queue(["start", "plans/a.md"])).toContain(
+      "Late Executor 2 (lab) was started on: plans/a.md, in executor-1.",
+    );
+    const by = Date.now() + 30_000;
+    while (one.read().length < 2 && Date.now() < by) await new Promise((r) => setTimeout(r, 500));
+    expect(
+      one
+        .read()
+        .map((row: { name: string }) => row.name)
+        .sort(),
+    ).toEqual(["Late Executor 1 (lab)", "Late Executor 2 (lab)"]);
   });
 
   it("nextName numbers one above the highest of its kind and project", () => {

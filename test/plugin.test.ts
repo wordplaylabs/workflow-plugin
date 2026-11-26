@@ -3956,7 +3956,7 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
       "closes each issue a merged pull request's description closes; a close that fails is noted for the assistant, as a failed run is;",
     );
     expect(flat("docs/decisions.md")).toContain(
-      "A close that fails is noted for the assistant, which closes the issue by hand as any hiccup, twice at most, and tells him of one still open: nothing tried it again, and its one line was printed where nobody reads. The queue itself tries once, since gh posts the `Merged as` comment before it closes and a blind second try would post it twice. A number that is a pull request is left open, since gh closes a pull request given its number and a typo or a person's own line would close somebody's. plans/prs-close-their-issues.md, plans/merge-close-retried.md and plans/merge-closes-no-pull-request.md.",
+      "A close that fails is noted for the assistant, which closes the issue by hand as any hiccup, twice at most, and tells him of one still open: nothing tried it again, and its one line was printed where nobody reads. The queue itself tries once, since gh posts the `Merged as` comment before it closes and a blind second try would post it twice. A number that is a pull request is left open, since gh closes a pull request given its number and a typo or a person's own line would close somebody's. A `Closes` line in an HTML comment or a fence is not read, since the description does not show it, and lines ending in CRLF, as GitHub's web editor can save them, are read as any. plans/prs-close-their-issues.md, plans/merge-close-retried.md, plans/merge-closes-no-pull-request.md and plans/closes-skips-comments-and-crlf.md.",
     );
   });
 

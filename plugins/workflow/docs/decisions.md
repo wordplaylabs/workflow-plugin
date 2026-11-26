@@ -805,8 +805,12 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   the `Merged as` comment before it closes and a blind second try would
   post it twice. A number that is a pull request is left open, since gh
   closes a pull request given its number and a typo or a person's own
-  line would close somebody's. plans/prs-close-their-issues.md,
-  plans/merge-close-retried.md and plans/merge-closes-no-pull-request.md.
+  line would close somebody's. A `Closes` line in an HTML comment or a
+  fence is not read, since the description does not show it, and lines
+  ending in CRLF, as GitHub's web editor can save them, are read as any.
+  plans/prs-close-their-issues.md, plans/merge-close-retried.md,
+  plans/merge-closes-no-pull-request.md and
+  plans/closes-skips-comments-and-crlf.md.
   - ~~The executor writes `For #<n>` on the pull request, with no
     closing keyword.~~ (Javi, 3 November)
 - `project-app` **The queue writes issues, comments, labels and pull

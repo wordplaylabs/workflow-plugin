@@ -201,14 +201,19 @@ export function keeps(event, rawBody) {
  * **The issues a pull request closes** (decisions.md#closes-its-issues): the
  * numbers of the whole `Closes #<n>.` lines and of an older `For #<n>.` line
  * above the description's first `## ` heading, where the template puts them,
- * outside a fenced block, the full stop optional, in order, each once; `[]`
- * with none.
+ * outside a fenced block or an HTML comment, the full stop optional, in order,
+ * each once; `[]` with none. Lines end in `\n`, `\r\n` or `\r`. A comment
+ * (`<!--` to `-->`, `<!-->` and `<!--->` empty ones, on one line or over
+ * several) is read as nothing, a `## ` in it included, and a line holding one
+ * is read with it taken out; a `<!--` in a code span, in indented code or on a
+ * fence's line opens none.
  */
 export function closesOf(text = "") {
   const numbers = [];
   let fence = "";
-  for (const line of String(text).split("\n")) {
-    const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+  let comment = false;
+  for (const raw of String(text).split(/\r\n?|\n/)) {
+    const mark = comment ? "" : /^ {0,3}(`{3,}|~{3,})/.exec(raw)?.[1];
     if (fence) {
       if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = "";
       continue;
@@ -217,11 +222,42 @@ export function closesOf(text = "") {
       fence = mark;
       continue;
     }
+    const line = comment || !/^(?: {4}|\t)/.test(raw) ? uncommented(raw) : raw;
     if (/^## /.test(line)) break;
     const m = /^(?:Closes|For) #(\d+)\.?[ \t]*$/.exec(line);
     if (m && !numbers.includes(Number(m[1]))) numbers.push(Number(m[1]));
   }
   return numbers;
+
+  // The line with its comments taken out, `comment` left open when one runs on.
+  function uncommented(raw) {
+    let line = "";
+    let rest = raw;
+    while (rest) {
+      if (comment) {
+        const end = rest.indexOf("-->");
+        if (end < 0) break;
+        comment = false;
+        rest = rest.slice(end + 3);
+        continue;
+      }
+      // Code spans are blanked to their length, so a `<!--` in one is found nowhere.
+      const masked = rest.replace(/(?<!`)(`+)(?!`)[^]*?(?<!`)\1(?!`)/g, (span) =>
+        " ".repeat(span.length),
+      );
+      const start = masked.indexOf("<!--");
+      if (start < 0) {
+        line += rest;
+        break;
+      }
+      line += rest.slice(0, start);
+      rest = rest.slice(start + 4);
+      const empty = /^-?>/.exec(rest);
+      if (empty) rest = rest.slice(empty[0].length);
+      else comment = true;
+    }
+    return line;
+  }
 }
 
 /**

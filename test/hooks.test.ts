@@ -10401,6 +10401,28 @@ describe("github webhook", () => {
       expect(closesOf()).toEqual([]);
     });
 
+    // plans/closes-skips-comments-and-crlf.md: nothing in an HTML comment is read, a `## ` in it
+    // included, and CRLF line endings read as LF.
+    it("closesOf reads no line inside an HTML comment and reads CRLF lines", () => {
+      expect(closesOf("<!-- Closes #160. -->\nCloses #161.\n\n## Changes")).toEqual([161]);
+      expect(closesOf("<!--\nCloses #160.\n## x\n-->\nCloses #161.\n## Changes")).toEqual([161]);
+      expect(closesOf("Closes #161.\r\nCloses #163.\r\n\r\n## Changes\r\n")).toEqual([161, 163]);
+      expect(
+        closesOf("Closes #5. <!-- the login bug -->\n<!-- x --> <!-- y\nCloses #6.\n-->\n"),
+      ).toEqual([5]);
+      // A `<!--` in a code span, in indented code or on a fence's line opens no comment, and an
+      // empty comment closes at once (Codex C1 and C2, /code-review).
+      expect(
+        closesOf("Use `<!--` to open a comment.\n\n## Changes\n\nUse `-->`.\n\nCloses #42."),
+      ).toEqual([]);
+      expect(closesOf("Closes #5.\nThe marker `<!--` hides text.\nCloses #6.\n")).toEqual([5, 6]);
+      expect(closesOf("~~~ example <!--\nCloses #91.\n~~~\nCloses #42.\n## Changes")).toEqual([42]);
+      expect(closesOf("<!-- x -->```\nCloses #9.\n")).toEqual([9]);
+      expect(closesOf("<!---->\n<!--->\n<!-->\nCloses #8.\n")).toEqual([8]);
+      expect(closesOf("    <!-- x\nCloses #3.\n-->\n")).toEqual([3]);
+      expect(closesOf("Closes #5.\rCloses #7.\r")).toEqual([5, 7]);
+    });
+
     it("githubEvents gives a merge no issues with issues off", () => {
       const body = { ...merged.pull_request, body: "Closes #12.\nCloses #13.\n" };
       const items = itemsOfDelivery("pull_request", { ...merged, pull_request: body }, "m2");

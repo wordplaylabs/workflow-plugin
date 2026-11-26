@@ -3069,20 +3069,37 @@ function sleep(ms) {
 
 const START_WAIT = 10;
 
+/** A start's own output file, `.claude/<kind>.<pid>.started`: one per `plans` process (plans/start-output-per-start.md). */
+const startOutput = (kind) => join(root, ".claude", `${kind}.${process.pid}.started`);
+
 /**
  * **A start sees its session, or says why not**: `claude --bg` returns at
  * once, and where no trust dialog can appear it exits with `Workspace not
- * trusted`. Its output goes to `.claude/<kind>.started`, and `claude agents`
- * is asked once a second for ten seconds for a row of the new name.
- * `{ id }` when seen, the row's session id, or when a line of the output is
- * `claude --bg`'s own confirmation for this name, `backgrounded · <id> ·
- * <name>`, which counts as seeing the session though `claude agents` lists
- * no row yet (another start's line, in the same file, does not), the id that
- * line printed, `{ id, launched: true }`; the start claims the plan for it.
- * Else the line to say, its first, and nothing is logged.
+ * trusted`. Its output goes to `.claude/<kind>.<pid>.started`, a file of
+ * this `plans` process's own, `<pid>` its pid, so a start by another
+ * process at the same moment cannot truncate it or be read in its place
+ * (plans/start-output-per-start.md); a later start in the same process, as
+ * a usage reset's timer makes one after another, writes it afresh. `claude agents` is asked once a second
+ * for ten seconds for a row of the new name. `{ id }` when seen, the row's
+ * session id, or when a line of the output is `claude --bg`'s own
+ * confirmation for this name, `backgrounded · <id> · <name>`, which counts
+ * as seeing the session though `claude agents` lists no row yet (a line
+ * naming another session does not), the id that line printed, `{ id,
+ * launched: true }`; the start claims the plan for it. Seen either way, the
+ * file is removed. Else the line to say, its first, and nothing is logged;
+ * the file stays, and every line a start says unconfirmed names it, the
+ * `unread` note `start` adds included.
  */
 function launch(args, name, kind, cwd = root) {
-  const out = join(root, ".claude", `${kind}.started`);
+  const out = startOutput(kind);
+  const seen = (one) => {
+    try {
+      rmSync(out, { force: true });
+    } catch {
+      // A file that cannot be removed holds back no confirmed start (Codex C2).
+    }
+    return one;
+  };
   const fd = openSync(out, "w");
   try {
     const child = spawn(claudeBin(), args, {
@@ -3109,7 +3126,7 @@ function launch(args, name, kind, cwd = root) {
     const rows = liveSessions({ fresh: true, timeout: left });
     if (rows) read = true;
     const row = rows?.find((one) => one.name === name);
-    if (row) return { id: row.sessionId };
+    if (row) return seen({ id: row.sessionId });
   }
   let lines = [];
   try {
@@ -3125,13 +3142,13 @@ function launch(args, name, kind, cwd = root) {
   const confirmed = lines
     .map((line) => /^backgrounded\s*·\s*(\S+)\s*·\s*(.+)$/.exec(line))
     .find((match) => match?.[2] === name);
-  if (confirmed) return { id: confirmed[1], launched: true };
+  if (confirmed) return seen({ id: confirmed[1], launched: true });
   const said = lines[0] || "";
   // Nothing could be read: the start is not known to have failed.
   if (!read) return "unread";
   return said
-    ? `${name} was not started: ${said.replace(/[.\s]+$/, "")}.`
-    : `${name} was started, but has not appeared in claude agents after ten seconds; its output is in .claude/${kind}.started.`;
+    ? `${name} was not started: ${said.replace(/[.\s]+$/, "")}; its output is in .claude/${basename(out)}.`
+    : `${name} was started, but has not appeared in claude agents after ten seconds; its output is in .claude/${basename(out)}.`;
 }
 
 function detached(command, args, env = process.env) {
@@ -4844,7 +4861,9 @@ function startHere(
   // free, the new planner's at its stops as any planner's.
   if (kind === "planner") releaseLease([...paths, ...due]);
   const unread =
-    seen === "unread" ? " claude agents could not be read, so it is not confirmed." : "";
+    seen === "unread"
+      ? ` claude agents could not be read, so it is not confirmed; its output is in .claude/${basename(startOutput(kind))}.`
+      : "";
   const retiredWords = replaced.map(
     ({ old }) => `${old.name} [${String(old.sessionId).slice(0, 8)}] was retired: ${old.why}.`,
   );

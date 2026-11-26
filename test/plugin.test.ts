@@ -212,16 +212,21 @@ catalogue: docs/patterns
     // The names plan-queue.mjs writes there: its literal files and one per kind.
     const source = readFileSync(join(scripts, "plan-queue.mjs"), "utf8");
     const literal = [...source.matchAll(/join\(root, "\.claude", "([^"]+)"\)/g)].map((m) => m[1]);
-    const perKind = [...source.matchAll(/join\(root, "\.claude", `\$\{kind\}(\.[a-z]+)`\)/g)].map(
-      (m) => m[1],
-    );
+    // A start's output is its own, `<kind>.<pid>.started` (plans/start-output-per-start.md).
+    const perKind = [
+      ...source.matchAll(
+        /join\(root, "\.claude", `\$\{kind\}((?:\.\$\{process\.pid\})?\.[a-z]+)`\)/g,
+      ),
+    ].map((m) => m[1]);
     expect(literal).toEqual(expect.arrayContaining(["executor.lock", "executor.pause"]));
-    expect(perKind).toEqual(expect.arrayContaining([".deferred", ".started"]));
+    expect(perKind).toEqual(expect.arrayContaining([".deferred", ".${process.pid}.started"]));
     const names = [
       ...literal.map((name) => (name === "worktrees" ? "worktrees/x/f" : name)),
-      ...QUEUE_KINDS.flatMap((kind) => perKind.map((ext) => `${kind}${ext}`)),
+      ...QUEUE_KINDS.flatMap((kind) =>
+        perKind.map((ext) => `${kind}${ext.replace("${process.pid}", "4242")}`),
+      ),
       // An assistant chat's start (plans/project-follow-ups-reach-the-project.md).
-      "assistant.started",
+      "assistant.4242.started",
       // The agent a plain chat opens as (plans/agent-set-by-the-project.md).
       "settings.local.json",
     ];

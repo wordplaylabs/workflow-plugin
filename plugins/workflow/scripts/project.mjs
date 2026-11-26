@@ -630,7 +630,7 @@ Which tools read code and docs here, if the project has a rule.
  * **The queue's kinds of file**, its deferrals: `<kind>.deferred` in a
  * project's `.claude/` for each (`plan-queue.mjs` reads, pauses and re-arms
  * every one), with `executor.<n>.lock`, `executor.pause` and the agents'
- * `executor.started` and `planner.started` under the same names. A kind
+ * `executor.<pid>.started` and `planner.<pid>.started` under the same names. A kind
  * here is a deferral; `QUEUE_IGNORES` keeps all of their files out of git.
  */
 export const QUEUE_KINDS = ["executor", "planner", "asking", "handed"];
@@ -642,7 +642,7 @@ export const QUEUE_KINDS = ["executor", "planner", "asking", "handed"];
  */
 export const QUEUE_IGNORES = [
   ...QUEUE_KINDS.map((kind) => `.claude/${kind}.*`),
-  // An assistant chat's start writes `assistant.started`; it has no deferral.
+  // An assistant chat's start writes `assistant.<pid>.started`; it has no deferral.
   ".claude/assistant.*",
   ".claude/worktrees/",
   // The project's app's token.

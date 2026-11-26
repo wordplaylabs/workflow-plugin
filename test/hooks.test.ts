@@ -242,7 +242,9 @@ const fixture = (name: string, front = "", body = "") => {
  * `STUB=untrusted` it fails as an untrusted folder does, and with
  * `STUB=backgrounded` it prints `claude --bg`'s confirmation and adds no row,
  * as a session `claude agents` does not list yet, after `STUB_WARNING` when
- * set and under `STUB_BG_NAME` when set. `calls` logs each call.
+ * set and under `STUB_BG_NAME` when set, its id the one `STUB_BG_IDS` (a
+ * JSON map) gives the name of the folder it runs in, else 1234abcd. `calls`
+ * logs each call.
  */
 const fakeClaude = (
   dir: string,
@@ -269,7 +271,9 @@ else if (process.env.STUB === "untrusted") {
   process.exit(1);
 } else if (process.env.STUB === "backgrounded") {
   if (process.env.STUB_WARNING) console.error(process.env.STUB_WARNING);
-  console.log("backgrounded · 1234abcd · " + (process.env.STUB_BG_NAME || args[args.indexOf("--name") + 1]));
+  const name = process.env.STUB_BG_NAME || args[args.indexOf("--name") + 1];
+  const id = JSON.parse(process.env.STUB_BG_IDS || "{}")[require("node:path").basename(process.cwd())];
+  console.log("backgrounded · " + (id || "1234abcd") + " · " + name);
 } else if (args.includes("--bg")) {
   const name = args[args.indexOf("--name") + 1];
   const all = JSON.parse(fs.readFileSync(rows, "utf8"));
@@ -5203,7 +5207,9 @@ describe("the queue's faults, closed", () => {
       const dir = fixture("Untrusted");
       const { script, rows } = stub();
       const said = startIn(dir, { WORKFLOW_CLAUDE: script, STUB_ROWS: rows, STUB: "untrusted" });
-      expect(said).toContain("Untrusted Executor 1 (lab) was not started: Workspace not trusted.");
+      expect(said).toMatch(
+        /Untrusted Executor 1 \(lab\) was not started: Workspace not trusted\. .*, then retry; its output is in \.claude\/executor\.\d+\.started\./,
+      );
       expect(existsSync(join(dir, ".claude", "starts.log"))).toBe(false);
     });
     it(
@@ -5240,7 +5246,7 @@ describe("the queue's faults, closed", () => {
           STUB_BG_NAME: "Other Executor 2 (lab)",
         });
         expect(said).toContain(
-          "Other Executor 1 (lab) was not started: backgrounded · 1234abcd · Other Executor 2 (lab).",
+          "Other Executor 1 (lab) was not started: backgrounded · 1234abcd · Other Executor 2 (lab); its output is in .claude/executor.",
         );
         expect(existsSync(join(dir, ".claude", "starts.log"))).toBe(false);
       },
@@ -5253,10 +5259,46 @@ describe("the queue's faults, closed", () => {
       expect(readFileSync(join(dir, ".claude", "starts.log"), "utf8")).toContain(
         '"name":"Seen Executor 1 (lab)"',
       );
-      expect(readFileSync(join(dir, ".claude", "executor.started"), "utf8")).toContain(
-        "Started Seen Executor 1 (lab)",
-      );
     });
+    // plans/start-output-per-start.md: each start's output is its own file,
+    // gone once the start is confirmed, kept and named when it is not.
+    it("a confirmed start leaves no output file", { timeout: 60_000 }, () => {
+      const outputs = (dir: string) =>
+        readdirSync(join(dir, ".claude")).filter((file) => /^executor\.(.*\.)?started$/.test(file));
+      const seen = fixture("Gone");
+      const listed = stub();
+      expect(startIn(seen, { WORKFLOW_CLAUDE: listed.script, STUB_ROWS: listed.rows })).toContain(
+        "Gone Executor 1 (lab) was started on: plans/x.md, in executor-1.",
+      );
+      expect(outputs(seen)).toEqual([]);
+      // Confirmed by claude --bg's line alone, as well.
+      const printed = fixture("Printed");
+      const bg = stub();
+      expect(
+        startIn(printed, { WORKFLOW_CLAUDE: bg.script, STUB_ROWS: bg.rows, STUB: "backgrounded" }),
+      ).toContain("Printed Executor 1 (lab) was started on: plans/x.md");
+      expect(outputs(printed)).toEqual([]);
+    });
+    it(
+      "a start not confirmed for want of claude agents keeps its output file and names it",
+      { timeout: 60_000 },
+      () => {
+        const dir = fixture("Unread");
+        const script = join(temp("unread-claude-"), "claude");
+        writeFileSync(
+          script,
+          `#!/usr/bin/env node\nif (process.argv[2] === "agents") process.exit(1);\nconsole.log("Starting.");\n`,
+        );
+        chmodSync(script, 0o755);
+        const said = startIn(dir, { WORKFLOW_CLAUDE: script });
+        const kept =
+          /claude agents could not be read, so it is not confirmed; its output is in \.claude\/(executor\.\d+\.started)\./.exec(
+            said,
+          );
+        expect(kept).not.toBeNull();
+        expect(readFileSync(join(dir, ".claude", kept![1]), "utf8")).toContain("Starting.");
+      },
+    );
     // plans/loop-guard-counts-failures.md, parts 2 to 4.
     describe("the owner's word past five executors with nothing built", () => {
       const words = "Yes, we should continue";
@@ -5571,9 +5613,12 @@ describe("the queue's faults, closed", () => {
           expect(readFileSync(join(dir, ".claude", "starts.log"), "utf8")).toContain(
             '"name":"Lease Planner 2 (lab)","paths":["plans/b.md"]',
           );
-          expect(readFileSync(join(dir, ".claude", "planner.started"), "utf8")).toContain(
-            "Started Lease Planner 2 (lab)",
-          );
+          // Seen, the start leaves no output file of its own.
+          expect(
+            readdirSync(join(dir, ".claude")).filter((file) =>
+              /^planner\.(.*\.)?started$/.test(file),
+            ),
+          ).toEqual([]);
           const left = read();
           expect(left.leases).toEqual({ "plans/c.md": c });
           expect(left.until).toBe(c.until);
@@ -8057,6 +8102,10 @@ else if (args.includes("--bg")) {
           env: { ...rest, WORKFLOW_CLAUDE: silent },
         });
         expect(failed).toContain("has not appeared in claude agents");
+        // Not seen, the start keeps its own output file and names it.
+        const kept = /its output is in \.claude\/(executor\.\d+\.started)\./.exec(failed);
+        expect(kept).not.toBeNull();
+        expect(existsSync(join(dir, ".claude", kept![1]))).toBe(true);
         expect(readFileSync(plan, "utf8")).toBe(building);
         expect(JSON.parse(readFileSync(lockFile, "utf8")).released).toBeFalsy();
         expect(JSON.parse(readFileSync(stateFile(gone), "utf8")).retired).toBeFalsy();
@@ -15045,6 +15094,61 @@ describe("several executors build at once", () => {
       rmSync(stateFile(started), { force: true });
       rmSync(stateFile(other), { force: true });
     }
+  });
+
+  // plans/start-output-per-start.md: a start reads its own output, never another's.
+  it("two overlapping starts each read their own output", { timeout: 60_000 }, async () => {
+    const one = pool("Overlap", {
+      "a.md": plan("A", "Change src/a.js."),
+      "b.md": plan("B", "Change src/b.js."),
+    });
+    const env = {
+      ...one.env,
+      STUB: "backgrounded",
+      // Each start's session by its worktree: the two may be given one name,
+      // both numbered before either is logged.
+      STUB_BG_IDS: JSON.stringify({ "executor-1": "1111aaaa", "executor-2": "2222bbbb" }),
+    };
+    const children: ReturnType<typeof spawn>[] = [];
+    const begin = (path: string) => {
+      const child = spawn("node", [join(here, "plan-queue.mjs"), "start", path], { env });
+      children.push(child);
+      let said = "";
+      child.stdout.on("data", (chunk) => (said += chunk));
+      child.stdin.end();
+      return new Promise<string>((done) => child.on("close", () => done(said)));
+    };
+    const claims = () => {
+      try {
+        return JSON.parse(readFileSync(join(one.dir, ".claude", "executor.claims.json"), "utf8"));
+      } catch {
+        return {};
+      }
+    };
+    let saidA = "";
+    let saidB = "";
+    try {
+      const first = begin("plans/a.md");
+      // The second starts while the first still waits on its session's row.
+      const by = Date.now() + 20_000;
+      while (!claims()["slot:1"] && Date.now() < by) await new Promise((r) => setTimeout(r, 100));
+      expect(claims()["slot:1"]).toBeTruthy();
+      const second = begin("plans/b.md");
+      [saidA, saidB] = await Promise.all([first, second]);
+    } finally {
+      // A failed wait leaves no start running beside the rest of the suite.
+      for (const child of children) if (child.exitCode === null) child.kill();
+    }
+    expect(saidA).not.toContain("was not started");
+    expect(saidB).not.toContain("was not started");
+    expect(saidA).toMatch(
+      /Overlap Executor \d \(lab\) was started on: plans\/a\.md, in executor-1\./,
+    );
+    expect(saidB).toMatch(
+      /Overlap Executor \d \(lab\) was started on: plans\/b\.md, in executor-2\./,
+    );
+    expect(claims()["plans/a.md"].holder).toBe("1111aaaa");
+    expect(claims()["plans/b.md"].holder).toBe("2222bbbb");
   });
 
   // plans/claim-carries-the-launched-id.md: a start's claim holds the

@@ -14887,6 +14887,73 @@ describe("several executors build at once", () => {
     expect(own.hookSpecificOutput?.permissionDecision).not.toBe("deny");
   });
 
+  // plans/name-claim-is-its-own.md: a start that saw no row yet claims the
+  // plan for the session's name, and that session's line is its own.
+  it("a session started under a name claim writes its own Building line", () => {
+    const one = pool("Named", { "a.md": plan("A", "Change src/a.js.") });
+    const started = "abcd1234-0000-4000-8000-000000000001";
+    const other = "ef015678-0000-4000-8000-000000000002";
+    const name = "Workflow Executor 9 (host)";
+    one.write(
+      [
+        [started, name],
+        [other, "Workflow Executor 10 (host)"],
+      ].map(([sessionId, n]) => ({
+        sessionId,
+        name: n,
+        kind: "background",
+        status: "busy",
+        cwd: one.dir,
+      })),
+    );
+    const at = Date.now();
+    writeFileSync(
+      join(one.dir, ".claude", "executor.claims.json"),
+      JSON.stringify({
+        "plans/a.md": { holder: `name:${name}`, name, at, until: at + 30 * 60_000 },
+      }),
+    );
+    const file = join(one.dir, "plans", "a.md");
+    const edit = (session: string) =>
+      JSON.parse(
+        one.queue(["tool"], {
+          session_id: session,
+          agent_type: "workflow:executor",
+          cwd: one.dir,
+          tool_name: "Edit",
+          tool_input: {
+            file_path: file,
+            old_string: "\n\nPlan only",
+            new_string: `\n\n## Building, 26 November 2026, session ${session}\n\nPlan only`,
+          },
+        }) || "{}",
+      );
+    expect(edit(other).hookSpecificOutput?.permissionDecisionReason).toBe(
+      `plans/a.md is ${name}'s [name:Wor], taken at ${new Date(at).toTimeString().slice(0, 5)}: leave it.`,
+    );
+    expect(edit(started).hookSpecificOutput?.permissionDecision).not.toBe("deny");
+    // Stopped before its line, it is named the plan it was started on, now
+    // claimed under its id, and not a plan that changes what that one changes (Codex C1, C2).
+    writeFileSync(join(one.dir, "plans", "b.md"), plan("B", "Change src/a.js."));
+    writeFileSync(stateFile(started), JSON.stringify({ agent: "executor" }));
+    try {
+      const stopped = JSON.parse(
+        one.queue(["stop"], { session_id: started, agent_type: "executor", cwd: one.dir }) || "{}",
+      );
+      expect(stopped.reason).toContain(
+        "A plan is waiting and this session can take it: plans/a.md",
+      );
+      expect(
+        JSON.parse(readFileSync(join(one.dir, ".claude", "executor.claims.json"), "utf8"))[
+          "plans/a.md"
+        ].holder,
+      ).toBe(started);
+    } finally {
+      rmSync(stateFile(started), { force: true });
+      rmSync(stateFile(other), { force: true });
+    }
+  });
+
   it("refuses a Building line on a built plan and lists it once, under Built", () => {
     const one = pool("Built", {
       "a.md": `${plan("A", "Change src/a.js.")}\n## Built, ${today()}\n\nCommit \`0123abcd\` on test.\n`,

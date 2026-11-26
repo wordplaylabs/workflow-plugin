@@ -2189,7 +2189,7 @@ function firstAhead(
       p.first &&
       (!mine || p.first.at > mine.at) &&
       !waiting.has(p.path) &&
-      !(claims[p.path] && claims[p.path].holder !== sessionId) &&
+      !(claims[p.path] && !holdsClaim(claims[p.path], sessionId, live)) &&
       !heldFromBuilding(p.path, p.text || "", live, { mtime: timeOf(p) }),
   );
 }
@@ -3784,6 +3784,23 @@ function readClaims(plans = [], live = null, now = Date.now()) {
   );
 }
 
+/**
+ * Whether claim `one` is `sessionId`'s: its holder is the session's id
+ * (`sameSession`), or `name:<n>` and the live row with that id is named
+ * `<n>`. A start that saw no row yet claims for the name of the session it
+ * started ("A start sees its session, or says why not";
+ * decisions.md#plan-waits-on), so that session's own Building line is let
+ * through. With no live rows read, a `name:` holder is nobody's.
+ */
+function holdsClaim(one, sessionId, live) {
+  const holder = one?.holder || "";
+  if (sameSession(holder, sessionId)) return true;
+  const named = /^name:(.+)$/.exec(holder);
+  return Boolean(
+    named && live?.some((row) => row.sessionId === sessionId && row.name === named[1]),
+  );
+}
+
 /** Whether a claim's holder is a session with its process running. */
 function holderRuns(one, live, now = Date.now()) {
   const holder = one?.holder || "";
@@ -3823,7 +3840,12 @@ function claim(path, { holder, name, now = Date.now(), live = null }) {
     const held = table[path];
     // A claim whose holder is gone from the sessions read ends, as `readClaims` reads it.
     const gone = live && held && !holderRuns(held, live, now);
-    if (held && held.holder !== holder && held.until > now && !gone) return false;
+    // A claim a start made for this session's name is its own to take again,
+    // so its stop names the plan it was started on, now under its id.
+    const own =
+      held &&
+      (held.holder === holder || (/^name:/.test(held.holder) && holdsClaim(held, holder, live)));
+    if (held && !own && held.until > now && !gone) return false;
     table[path] = { holder, name, at: now, until: now + ANSWER_WINDOW };
     writeJson(files.claims(), table);
     return true;
@@ -6910,9 +6932,10 @@ function takenWords(path, plans, live, sessionId) {
     return claimedWords(path, { holder: plan.session, name, at: plan.mtime || Date.now() });
   }
   const claims = readClaims(plans, live);
-  if (claims[path] && claims[path].holder !== sessionId) return claimedWords(path, claims[path]);
+  if (claims[path] && !holdsClaim(claims[path], sessionId, live))
+    return claimedWords(path, claims[path]);
   const others = Object.fromEntries(
-    Object.entries(claims).filter(([, one]) => one.holder !== sessionId),
+    Object.entries(claims).filter(([, one]) => !holdsClaim(one, sessionId, live)),
   );
   const own = plans.map((p) => (p.path === path ? { ...p, state: "ready" } : p));
   const waits = freePlans(own, { claims: others }).find((p) => p.path === path)?.waitsOn;
@@ -7557,7 +7580,9 @@ function hook(mode, input) {
     // executor's now.
     const mine = executorNumber(input) || 1;
     const claims = Object.fromEntries(
-      Object.entries(readClaims(plans, live)).filter(([, one]) => one.holder !== sessionId),
+      Object.entries(readClaims(plans, live)).filter(
+        ([, one]) => !holdsClaim(one, sessionId, live),
+      ),
     );
     const free = freePlans(withAsking(plans, live), { claims }).filter(
       (p) => !p.waitsOn && !claims[p.path],
@@ -7581,7 +7606,9 @@ function hook(mode, input) {
       // claimed a plan this one waits on meanwhile.
       .filter((p) => {
         const now = Object.fromEntries(
-          Object.entries(readClaims(plans, live)).filter(([, one]) => one.holder !== sessionId),
+          Object.entries(readClaims(plans, live)).filter(
+            ([, one]) => !holdsClaim(one, sessionId, live),
+          ),
         );
         const still = freePlans(withAsking(plans, live), { claims: now }).find(
           (one) => one.path === p.path,

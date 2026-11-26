@@ -3249,7 +3249,17 @@ const startOutput = (kind) => join(root, ".claude", `${kind}.${process.pid}.star
  * `unread` note `start` adds included. A row listed under the name before
  * the launch (`known`, its session ids) is not the session started, since a
  * stopped assistant chat keeps its row under the one name
- * (plans/assistant-takeover-never-leaves-none.md).
+ * (plans/assistant-takeover-never-leaves-none.md). A row of the name is this
+ * start's own when its id is the one the launcher printed, or, the launcher
+ * printing none, once it has said a line naming this start (a warning it
+ * prints first is not that): under load another session's row can be
+ * listed before this launcher's line, and waits for it to the ten seconds'
+ * end. A row with no process is a stopped session's, never another's. A row of the name with another id is another start's
+ * session, taken by a start that holds no name (a chat begun before the
+ * names were held runs the copy it began with): this start stops its own
+ * session, gives the plan back as a failed launch does, and says so; the
+ * other session goes on (plans/duplicate-executor-name-seen.md). The
+ * assistant's chat has one name by design, and any new row of it is taken.
  */
 function launch(args, name, kind, cwd = root, known = []) {
   const out = startOutput(kind);
@@ -3276,39 +3286,90 @@ function launch(args, name, kind, cwd = root, known = []) {
   } finally {
     closeSync(fd);
   }
+  // What the launcher has said so far, and its own report that the session
+  // exists, `backgrounded · <id> · <name>`, after any warning it printed first.
+  const said = () => {
+    try {
+      return readFileSync(out, "utf8")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+    } catch {
+      // No output file: as if it said nothing.
+      return [];
+    }
+  };
+  const confirmedIn = (lines) =>
+    lines
+      .map((line) => /^backgrounded\s*·\s*(\S+)\s*·\s*(.+)$/.exec(line))
+      .find((match) => match?.[2] === name);
+  // The id the launcher printed, when long enough to tell a row by (`sameSession`).
+  const ownIn = (lines) => {
+    const id = confirmedIn(lines)?.[1] || "";
+    return id.length >= 8 ? id : "";
+  };
+  // The launcher has spoken once a line names this start: a warning it
+  // prints first, or its refusal, does not (Codex C1).
+  const spoke = (lines) => lines.some((line) => line.includes(name));
+  // A row with no process is a stopped session's, listed for weeks, never
+  // another start's (/code-review).
+  const running = (row) => statusOf(row) !== "not running";
+  // Another start's session under this name: this start's own is stopped,
+  // and the line goes back as a failed launch's (plans/duplicate-executor-name-seen.md).
+  // The stop is held to five seconds, past the ten of the wait, so the Stop
+  // hook keeps its time (/code-review).
+  const taken = (own, other) => {
+    const stopped = stopNow(own, 5_000);
+    seen();
+    const words = `${name} was taken by another start at this moment, whose session is [${String(other).slice(0, 8)}]; this start's own [${own.slice(0, 8)}]`;
+    return stopped
+      ? `${words} was stopped, and plans shows the queue.`
+      : `${words} could not be stopped: end it with plans end ${own.slice(0, 8)} --now.`;
+  };
   // Ten seconds by the clock, each ask cut to the time left, so a slow
   // `claude agents` cannot hold the Stop hook past its own timeout.
   const deadline = Date.now() + START_WAIT * 1000;
   let read = false;
+  // A row of the name listed before the launcher spoke.
+  let kept = null;
   for (;;) {
     sleep(Math.max(0, Math.min(1000, deadline - Date.now())));
     const left = deadline - Date.now();
     if (left <= 0) break;
     const rows = liveSessions({ fresh: true, timeout: left });
     if (rows) read = true;
-    const row = rows?.find((one) => one.name === name && !known.includes(one.sessionId));
-    if (row) return seen({ id: row.sessionId });
+    const named = (rows || []).filter((one) => one.name === name && !known.includes(one.sessionId));
+    if (!named.length) continue;
+    if (kind === "assistant") return seen({ id: named[0].sessionId });
+    const lines = said();
+    const own = ownIn(lines);
+    if (own) {
+      const other = named.find((one) => !sameSession(own, one.sessionId) && running(one));
+      if (other) return taken(own, other.sessionId);
+      const mine = named.find((one) => sameSession(own, one.sessionId));
+      if (mine) return seen({ id: mine.sessionId });
+      // Only a stopped row of the name: this start's own is not listed yet.
+      continue;
+    }
+    if (spoke(lines)) return seen({ id: named[0].sessionId });
+    kept = named[0];
   }
-  let lines = [];
-  try {
-    lines = readFileSync(out, "utf8")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-  } catch {
-    // No output file: as if it said nothing.
+  const lines = said();
+  const confirmed = confirmedIn(lines);
+  if (confirmed) {
+    // A row kept unspoken for is another's when the line names another id.
+    const own = ownIn(lines);
+    if (own && kept && running(kept) && !sameSession(own, kept.sessionId))
+      return taken(own, kept.sessionId);
+    return seen({ id: confirmed[1], launched: true });
   }
-  // The launcher's own report that the session exists, read or not, after
-  // any warning it printed first.
-  const confirmed = lines
-    .map((line) => /^backgrounded\s*·\s*(\S+)\s*·\s*(.+)$/.exec(line))
-    .find((match) => match?.[2] === name);
-  if (confirmed) return seen({ id: confirmed[1], launched: true });
-  const said = lines[0] || "";
+  // A row listed, the launcher silent for ten seconds: the row is its session.
+  if (kept) return seen({ id: kept.sessionId });
+  const first = lines[0] || "";
   // Nothing could be read: the start is not known to have failed.
   if (!read) return "unread";
-  return said
-    ? `${name} was not started: ${said.replace(/[.\s]+$/, "")}; its output is in .claude/${basename(out)}.`
+  return first
+    ? `${name} was not started: ${first.replace(/[.\s]+$/, "")}; its output is in .claude/${basename(out)}.`
     : `${name} was started, but has not appeared in claude agents after ten seconds; its output is in .claude/${basename(out)}.`;
 }
 
@@ -3357,13 +3418,13 @@ function stopLater(sessionId, live) {
  * id instead. True when it stopped: a failed stop is said, never reported as
  * an end.
  */
-function stopNow(id) {
+function stopNow(id, timeout = 20_000) {
   if (process.env.WORKFLOW_STOP_LOG) {
     appendFileSync(process.env.WORKFLOW_STOP_LOG, `${id}\n`);
     return true;
   }
   try {
-    execFileSync(claudeBin(), ["stop", id], { stdio: "ignore", timeout: 20_000 });
+    execFileSync(claudeBin(), ["stop", id], { stdio: "ignore", timeout });
     return true;
   } catch {
     return false;

@@ -250,7 +250,12 @@ const fixture = (name: string, front = "", body = "") => {
  * later, its id the one `STUB_BG_IDS` gives the folder when set, quietly
  * when the folder is gone by then. With `STUB_SILENT` set a `--bg` start
  * prints no `Started` line, its row added as before, at once or
- * `STUB_ROW_AFTER` later. `calls` logs each call.
+ * `STUB_ROW_AFTER` later. With `STUB=backgrounded`, `STUB_OTHER=<id>` adds,
+ * at once, a row of the start's name under that id, as another start's
+ * session that took the name (busy, or with no process when
+ * `STUB_OTHER_STOPPED` is set), and `STUB_BG_AFTER=<ms>` prints the line that
+ * many milliseconds later. `stop` exits 1 when `STUB_STOP_FAILS` is set,
+ * else 0, printing nothing. `calls` logs each call.
  */
 const fakeClaude = (
   dir: string,
@@ -271,7 +276,8 @@ const fs = require("node:fs");
 const args = process.argv.slice(2);
 const rows = process.env.STUB_ROWS || ${JSON.stringify(rows)};
 ${calls ? `fs.appendFileSync(${JSON.stringify(calls)}, args.join(" ").slice(0, 80) + "\\n");` : ""}
-if (args[0] === "agents") process.stdout.write(fs.readFileSync(rows, "utf8"));
+if (args[0] === "stop") process.exit(process.env.STUB_STOP_FAILS ? 1 : 0);
+else if (args[0] === "agents") process.stdout.write(fs.readFileSync(rows, "utf8"));
 else if (process.env.STUB === "untrusted") {
   console.error("Workspace not trusted. Run claude in " + process.cwd() + " once and accept the trust prompt, then retry.");
   process.exit(1);
@@ -279,7 +285,15 @@ else if (process.env.STUB === "untrusted") {
   if (process.env.STUB_WARNING) console.error(process.env.STUB_WARNING);
   const name = process.env.STUB_BG_NAME || args[args.indexOf("--name") + 1];
   const id = JSON.parse(process.env.STUB_BG_IDS || "{}")[require("node:path").basename(process.cwd())];
-  console.log("backgrounded · " + (id || "1234abcd") + " · " + name);
+  if (process.env.STUB_OTHER) {
+    const all = JSON.parse(fs.readFileSync(rows, "utf8"));
+    all.push({ sessionId: process.env.STUB_OTHER, name, kind: "background", ...(process.env.STUB_OTHER_STOPPED ? {} : { status: "busy" }), cwd: process.cwd() });
+    fs.writeFileSync(rows, JSON.stringify(all));
+  }
+  const say = () => console.log("backgrounded · " + (id || "1234abcd") + " · " + name);
+  const after = Number(process.env.STUB_BG_AFTER || 0);
+  if (after) setTimeout(say, after);
+  else say();
 } else if (args.includes("--bg")) {
   const name = args[args.indexOf("--name") + 1];
   const cwd = process.cwd();
@@ -8722,7 +8736,9 @@ describe("a finished chat ends", () => {
           cwd: dir,
         },
       ];
-      // A stand-in for claude: `agents` lists the rows, `--bg` adds the chat it starts.
+      // A stand-in for claude: `agents` lists the rows, `--bg` adds the chat it
+      // starts and says so, since a row counts as the start's own once its
+      // launcher has spoken (plans/duplicate-executor-name-seen.md).
       const rowsFile = join(dir, "gone-rows.json");
       const script = join(dir, "gone-claude.js");
       writeFileSync(rowsFile, JSON.stringify(goneRows));
@@ -8736,6 +8752,7 @@ else if (args.includes("--bg")) {
   const all = JSON.parse(fs.readFileSync(${JSON.stringify(rowsFile)}, "utf8"));
   all.push({ sessionId: "gone-next", name: args[args.indexOf("--name") + 1], kind: "background", cwd: process.cwd() });
   fs.writeFileSync(${JSON.stringify(rowsFile)}, JSON.stringify(all));
+  console.log("Started " + args[args.indexOf("--name") + 1]);
 }
 `,
       );
@@ -16031,6 +16048,85 @@ describe("several executors build at once", () => {
         .sort(),
     ).toEqual(["Late Executor 1 (lab)", "Late Executor 2 (lab)"]);
   });
+
+  // plans/duplicate-executor-name-seen.md: a start that finds its name on
+  // another session, one a start that holds no name launched, stops its own.
+  const pair = (extra: Record<string, string> = {}) => {
+    const one = pool("Pair", { "a.md": plan("A", "Change src/a.js.") });
+    const said = one.queue(
+      ["start", "plans/a.md"],
+      {},
+      { STUB: "backgrounded", STUB_OTHER: "c9937a5b-0000", ...extra },
+    );
+    const claude = join(one.dir, ".claude");
+    const claims = existsSync(join(claude, "executor.claims.json"))
+      ? JSON.parse(readFileSync(join(claude, "executor.claims.json"), "utf8"))
+      : {};
+    expect(claims["plans/a.md"]).toBeUndefined();
+    expect(existsSync(join(claude, "starts.log"))).toBe(false);
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(claude, "starts.log.names.json"), "utf8"))),
+    ).toEqual(["Pair Executor 1 (lab)"]);
+    expect(
+      one
+        .read()
+        .filter((row: { name: string }) => row.name === "Pair Executor 1 (lab)")
+        .map((row: { sessionId: string }) => row.sessionId),
+    ).toEqual(["c9937a5b-0000"]);
+    expect(readdirSync(claude).filter((f) => /^executor\..*\.started$/.test(f))).toEqual([]);
+    return { one, said, claude };
+  };
+  const taken =
+    "Pair Executor 1 (lab) was taken by another start at this moment, whose session is [c9937a5b]; ";
+
+  it("a start whose name another session took stops its own", { timeout: 30_000 }, () => {
+    const { said, claude } = pair();
+    expect(said).toContain(
+      `${taken}this start's own [1234abcd] was stopped, and plans shows the queue.`,
+    );
+    expect(readFileSync(join(claude, "stops.log"), "utf8")).toBe("1234abcd\n");
+  });
+
+  it(
+    "a row listed before the launcher speaks is not taken as the start's own",
+    { timeout: 30_000 },
+    () => {
+      const { said, claude } = pair({ STUB_BG_AFTER: "3000" });
+      expect(said).toContain(
+        `${taken}this start's own [1234abcd] was stopped, and plans shows the queue.`,
+      );
+      expect(readFileSync(join(claude, "stops.log"), "utf8")).toBe("1234abcd\n");
+    },
+  );
+
+  it("a warning before the launcher's line is not taken as its word", { timeout: 30_000 }, () => {
+    const { said } = pair({ STUB_BG_AFTER: "3000", STUB_WARNING: "A newer version is available." });
+    expect(said).toContain(
+      `${taken}this start's own [1234abcd] was stopped, and plans shows the queue.`,
+    );
+  });
+
+  it("a stopped row of the name is not another start's", { timeout: 60_000 }, () => {
+    const one = pool("Pair", { "a.md": plan("A", "Change src/a.js.") });
+    const said = one.queue(
+      ["start", "plans/a.md"],
+      {},
+      { STUB: "backgrounded", STUB_OTHER: "c9937a5b-0000", STUB_OTHER_STOPPED: "1" },
+    );
+    expect(said).toContain("Pair Executor 1 (lab) was started on: plans/a.md, in executor-1.");
+    expect(existsSync(join(one.dir, ".claude", "stops.log"))).toBe(false);
+  });
+
+  it(
+    "a session that cannot be stopped is named with the command that ends it",
+    { timeout: 60_000 },
+    () => {
+      const { said } = pair({ WORKFLOW_STOP_LOG: "", STUB_STOP_FAILS: "1" });
+      expect(said).toContain(
+        `${taken}this start's own [1234abcd] could not be stopped: end it with plans end 1234abcd --now.`,
+      );
+    },
+  );
 
   it("nextName numbers one above the highest of its kind and project", () => {
     const at = { project: "Docs", machine: "lab" };

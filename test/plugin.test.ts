@@ -649,13 +649,13 @@ describe("the plugin's queue in any project", () => {
     ];
     const base = { kind: "assistant", log, name: "Docs", machine: "lab", brief: "plans/a.md" };
     expect(canStart(base)).toMatchObject({ start: true, name: "Docs Assistant" });
-    expect(canStart({ ...base, open: ["Docs Assistant"] })).toEqual({
+    expect(canStart({ ...base, open: ["Docs Assistant [44444444]"] })).toEqual({
       refuse: true,
-      why: "Docs Assistant is open: send it the message. Built: plans/a.md.",
+      why: "Docs Assistant [44444444] is open: send it the message. Built: plans/a.md.",
     });
-    expect(canStart({ ...base, brief: "", open: ["Docs Assistant"] })).toEqual({
+    expect(canStart({ ...base, brief: "", open: ["Docs Assistant [44444444]"] })).toEqual({
       refuse: true,
-      why: "Docs Assistant is open: send it the message.",
+      why: "Docs Assistant [44444444] is open: send it the message.",
     });
     expect(canStart({ ...base, paused: "today" })).toMatchObject({ refuse: true });
     const now = Date.UTC(2026, 9, 31, 12);
@@ -4057,6 +4057,48 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
     );
     expect(read("scripts/plain-words.mjs")).toContain(
       'refers to a choice by its place ("${placed}")',
+    );
+  });
+});
+
+// plans/one-assistant-after-handover.md, part 5.
+describe("one assistant chat is live after a hand-over", () => {
+  const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
+  const read = (path: string) => readFileSync(join(plugin, path), "utf8").replace(/\s+/g, " ");
+
+  it("the handbook, the assistant's file and the catalogue say so", () => {
+    const handbook = read("docs/workflow.md");
+    expect(handbook).toContain(
+      "One assistant chat is live: the handed-on one is stopped before the fresh one starts, or, when another is open already, as soon as it is quiet, the queue trying again every ten minutes until it is; none is opened while `claude agents` cannot be read; what the queue sends goes to the chat started last that is not handed on; and `plans end <id> --now` ends one he names.",
+    );
+    expect(handbook).toContain(
+      "starts a fresh session on it; an assistant chat named is stopped with nothing started in its place;",
+    );
+    const assistant = read("agents/assistant.md");
+    expect(assistant).toContain(
+      "and the paths of the plans in the queue; then `CronDelete` the heartbeat's job and stop.",
+    );
+    expect(assistant).toContain(
+      "which then sets the heartbeat again by 1 when work is under way. The queue stops this chat then, or as soon as another assistant chat is open; `plans end <id> --now` ends one ${user_config.owner} names.",
+    );
+    expect(assistant).toContain(
+      "and go on from it, setting the heartbeat by 1 when work is under way.",
+    );
+    expect(assistant).toContain(
+      "his message meanwhile keeps this one, which then sets the heartbeat again by 1 when work is under way.",
+    );
+    const decisions = read("docs/decisions.md");
+    expect(decisions).toContain(
+      "Three chats of the name were once live for hours: the takeover's timer tried once and gave up while a question stood, a second chat was opened while `claude agents` could not be read, and the old one, never stopped, kept the webhook's notes.",
+    );
+    expect(decisions).toContain(
+      "So the takeover is tried every ten minutes until the handed-on chat is stopped, with no fresh start when another is open, quiet read from the process's own status; none is opened on a list that cannot be read; and what the queue sends goes to the chat started last that is not handed on.",
+    );
+    expect(decisions).toContain(
+      "An assistant chat he names is ended the same way, with nothing started in its place: archiving it stopped nothing.",
+    );
+    expect(decisions).toContain(
+      "addressed by the chat's process, the one started last that is not handed on:",
     );
   });
 });

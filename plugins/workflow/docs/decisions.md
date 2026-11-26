@@ -124,9 +124,17 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   fortieth of what the first turn of a cold chat costs (`context-cost`).
   The workers keep nothing that was for him (a task list, files sent, a
   message written to be read): what one makes for him to see is kept
-  beside its plan and the assistant brings it up.
+  beside its plan and the assistant brings it up. Three chats of the
+  name were once live for hours: the takeover's timer tried once and
+  gave up while a question stood, a second chat was opened while `claude
+  agents` could not be read, and the old one, never stopped, kept the
+  webhook's notes. So the takeover is tried every ten minutes until the
+  handed-on chat is stopped, with no fresh start when another is open,
+  quiet read from the process's own status; none is opened on a list
+  that cannot be read; and what the queue sends goes to the chat started
+  last that is not handed on.
   plans/one-assistant-chat.md, plans/quiet-worker-starts.md,
-  plans/prs-close-their-issues.md.
+  plans/prs-close-their-issues.md, plans/one-assistant-after-handover.md.
   - ~~Planners and executors stay openable, in his chat list.~~
     (Javi, 24 November)
 - `new-topic-to-assistant` **Every new topic starts in the assistant's
@@ -644,9 +652,11 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   answer otherwise holds its executor's lock for good. The fresh
   executor starts in the ended one's number, and the hand-over names
   its worktree. The assistant's own came with `hiccups-fixed`; the rule
-  was the owner's word alone from 31 October.
+  was the owner's word alone from 31 October. An assistant chat he names
+  is ended the same way, with nothing started in its place: archiving it
+  stopped nothing.
   plans/end-a-stuck-chat.md, plans/parallel-executors.md,
-  plans/owner-requests-nov-25.md.
+  plans/owner-requests-nov-25.md, plans/one-assistant-after-handover.md.
 - `hiccups-fixed` **A hiccup of the queue is fixed by whatever works,
   never asked about or reported.** (Javi, 25 November) He was asked
   whether to close an idle executor holding a lease; such faults change
@@ -937,12 +947,14 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   the chat to find, and nothing in the chat said to look. The route is
   the one every worker uses (`handed-to-the-assistant`), sent by a
   one-shot run of Claude with the message tool alone, from the temp
-  folder, addressed by the chat's process: observed on Claude Code
+  folder, addressed by the chat's process, the one started last that is
+  not handed on: observed on Claude Code
   2.1.331, 15 seconds and under a cent a message. Not a hook in the
   chat, since a running chat keeps the hooks it started with. The
   message says what to read and do, so a chat with the name and not the
   instructions acts too, and is asked to tell the owner.
-  plans/open-assistant-reads-github-notes.md.
+  plans/open-assistant-reads-github-notes.md,
+  plans/one-assistant-after-handover.md.
 - `days-fixes` **The day's fixes are one pull request, `Small fixes, <d
   Month yyyy>`, never two in a day.** (Javi, 30 October) A daily pull
   request for the small fixes rather than a message for the group, which

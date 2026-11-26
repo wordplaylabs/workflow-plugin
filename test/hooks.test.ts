@@ -2663,172 +2663,371 @@ describe("the planner queue", () => {
   };
 
   // plans/one-assistant-chat.md, parts 1 and 2.
-  it("opens the one assistant chat on a built plan or on nothing, sends it the message when open, lists it, and hands it on past its ceiling", () => {
-    const live = (rows: object[]) => JSON.stringify(rows);
-    const env = (rows: object[] = []) => ({
-      ...process.env,
-      CLAUDE_PROJECT_DIR: repo,
-      CLAUDE_CODE_SESSION_ID: "",
-      WORKFLOW_STARTS_LOG: join(repo, ".claude", "starts-assistant.log"),
-      WORKFLOW_USAGE_FILE: join(repo, ".claude", "usage-assistant.json"),
-      WORKFLOW_LIVE: live(rows),
-    });
-    const start = (path: string, rows: object[] = []) =>
-      execFileSync(
-        "node",
-        [
-          join(here, "plan-queue.mjs"),
-          "start",
-          "--agent",
-          "assistant",
-          "--dry",
-          ...(path ? [path] : []),
-        ],
-        { encoding: "utf8", env: env(rows) },
-      ).trim();
-    put(
-      "q-built.md",
-      "# Built\n\nPlan only, 31 October 2026, for Javi.\n\n## Built, 31 October 2026\n\nPushed to test as commit 0123abcd.\n",
-    );
-    put("q-ready-a.md", "# Ready\n\nPlan only, 31 October 2026, for Javi.\n");
-    put("q-brief-a.md", brief("31 October 2026"));
-    // When none is listed: a chat named Test Assistant, with no number, on Built:.
-    const out = start("plans/q-built.md");
-    expect(out).toContain(
-      'Would run: claude "--bg" "--remote-control" "Test Assistant" "--name" "Test Assistant" "--agent" "workflow:assistant" "--effort" "medium" "Built: plans/q-built.md."',
-    );
-    expect(out).toContain(JSON.stringify(assistantPrompt("plans/q-built.md")));
-    // With no path: the opened prompt.
-    expect(start("")).toContain(
-      `"--name" "Test Assistant" "--agent" "workflow:assistant" "--effort" "medium" "Opened for Javi by a terminal: nothing is handed over. Say in a line that you are open, and wait for him."`,
-    );
-    for (const path of ["plans/q-ready-a.md", "plans/q-brief-a.md"])
-      expect(start(path)).toBe(`${path} is not a built plan; plans shows the built plans.`);
-    // With one listed, idle or busy: the line naming it and the message to send.
-    const open = {
-      sessionId: "a1",
-      name: "Test Assistant",
-      status: "busy",
-      kind: "interactive",
-      cwd: repo,
-    };
-    expect(start("plans/q-built.md", [open])).toBe(
-      "Test Assistant is open: send it the message. Built: plans/q-built.md.",
-    );
-    expect(start("", [open])).toBe("Test Assistant is open: send it the message.");
-    // Not beside another project's, a numbered one, nor another machine's chat.
-    for (const row of [
-      { sessionId: "a2", name: "Other Assistant", status: "idle", kind: "interactive", cwd: repo },
-      {
-        sessionId: "a4",
-        name: "Test Assistant 2 (lab)",
+  it(
+    "opens the one assistant chat on a built plan or on nothing, sends it the message when open, lists it, and hands it on past its ceiling",
+    { timeout: 60_000 },
+    () => {
+      const live = (rows: object[]) => JSON.stringify(rows);
+      const env = (rows: object[] = []) => ({
+        ...process.env,
+        CLAUDE_PROJECT_DIR: repo,
+        CLAUDE_CODE_SESSION_ID: "",
+        WORKFLOW_STARTS_LOG: join(repo, ".claude", "starts-assistant.log"),
+        WORKFLOW_USAGE_FILE: join(repo, ".claude", "usage-assistant.json"),
+        WORKFLOW_LIVE: live(rows),
+      });
+      const start = (path: string, rows: object[] = []) =>
+        execFileSync(
+          "node",
+          [
+            join(here, "plan-queue.mjs"),
+            "start",
+            "--agent",
+            "assistant",
+            "--dry",
+            ...(path ? [path] : []),
+          ],
+          { encoding: "utf8", env: env(rows) },
+        ).trim();
+      put(
+        "q-built.md",
+        "# Built\n\nPlan only, 31 October 2026, for Javi.\n\n## Built, 31 October 2026\n\nPushed to test as commit 0123abcd.\n",
+      );
+      put("q-ready-a.md", "# Ready\n\nPlan only, 31 October 2026, for Javi.\n");
+      put("q-brief-a.md", brief("31 October 2026"));
+      // When none is listed: a chat named Test Assistant, with no number, on Built:.
+      const out = start("plans/q-built.md");
+      expect(out).toContain(
+        'Would run: claude "--bg" "--remote-control" "Test Assistant" "--name" "Test Assistant" "--agent" "workflow:assistant" "--effort" "medium" "Built: plans/q-built.md."',
+      );
+      expect(out).toContain(JSON.stringify(assistantPrompt("plans/q-built.md")));
+      // With no path: the opened prompt.
+      expect(start("")).toContain(
+        `"--name" "Test Assistant" "--agent" "workflow:assistant" "--effort" "medium" "Opened for Javi by a terminal: nothing is handed over. Say in a line that you are open, and wait for him."`,
+      );
+      for (const path of ["plans/q-ready-a.md", "plans/q-brief-a.md"])
+        expect(start(path)).toBe(`${path} is not a built plan; plans shows the built plans.`);
+      // With one listed, idle or busy: the line naming it and the message to send.
+      const open = {
+        sessionId: "44444444-bbbb-0000-0000-000000000000",
+        name: "Test Assistant",
+        status: "busy",
+        kind: "interactive",
+        cwd: repo,
+      };
+      expect(start("plans/q-built.md", [open])).toBe(
+        "Test Assistant [44444444] is open: send it the message. Built: plans/q-built.md.",
+      );
+      expect(start("", [open])).toBe("Test Assistant [44444444] is open: send it the message.");
+      // Not beside another project's, a numbered one, nor another machine's chat.
+      for (const row of [
+        {
+          sessionId: "a2",
+          name: "Other Assistant",
+          status: "idle",
+          kind: "interactive",
+          cwd: repo,
+        },
+        {
+          sessionId: "a4",
+          name: "Test Assistant 2 (lab)",
+          status: "idle",
+          kind: "background",
+          cwd: repo,
+        },
+        {
+          sessionId: "a3",
+          name: "Test Assistant",
+          status: "idle",
+          kind: "remote-control",
+          cwd: repo,
+        },
+      ])
+        expect(start("plans/q-built.md", [row])).toContain("Would run: claude");
+      // The line, while the one chat is open.
+      const chat = {
+        sessionId: "44444444-aaaa-0000-0000-000000000000",
+        name: "Test Assistant",
         status: "idle",
         kind: "background",
         cwd: repo,
-      },
-      {
-        sessionId: "a3",
-        name: "Test Assistant",
-        status: "idle",
-        kind: "remote-control",
-        cwd: repo,
-      },
-    ])
-      expect(start("plans/q-built.md", [row])).toContain("Would run: claude");
-    // The line, while the one chat is open.
-    const chat = {
-      sessionId: "44444444-aaaa-0000-0000-000000000000",
-      name: "Test Assistant",
-      status: "idle",
-      kind: "background",
-      cwd: repo,
-    };
-    expect(listWith([chat])).toMatch(/\nThe assistant: Test Assistant \[44444444\], idle\.\n/);
-    expect(listWith([])).not.toContain("The assistant:");
-    // A quiet stop arms no end timer; past the ceiling the stop is held once,
-    // and a later stop with the hand-over written arms it ten minutes on.
+      };
+      expect(listWith([chat])).toMatch(/\nThe assistant: Test Assistant \[44444444\], idle\.\n/);
+      expect(listWith([])).not.toContain("The assistant:");
+      // A quiet stop arms no end timer; past the ceiling the stop is held once,
+      // and a later stop with the hand-over written arms it ten minutes on.
+      const log = process.env.WORKFLOW_STOP_LOG!;
+      rmSync(log, { force: true });
+      const releaseHeld = executorHeld();
+      const transcript = join(repo, ".claude", "assistant-transcript.jsonl");
+      const context = (tokens: number) =>
+        writeFileSync(
+          transcript,
+          `${JSON.stringify({ type: "assistant", timestamp: new Date().toISOString(), message: { model: "claude-opus-5-5", usage: { input_tokens: tokens } } })}\n`,
+        );
+      const hook = (mode: string, extra: object = {}) =>
+        execFileSync("node", [join(here, "plan-queue.mjs"), mode], {
+          input: JSON.stringify({
+            session_id: chat.sessionId,
+            agent_type: "workflow:assistant",
+            transcript_path: transcript,
+            ...extra,
+          }),
+          encoding: "utf8",
+          env: env([chat]),
+        });
+      const handover = join(plansDir(), "assistant-handover.md");
+      rmSync(handover, { force: true });
+      try {
+        context(40_000);
+        expect(hook("stop")).toBe("");
+        context(160_000);
+        expect(JSON.parse(hook("stop"))).toEqual({
+          decision: "block",
+          reason:
+            'This chat is over its ceiling (160k of 150k): write plans/assistant-handover.md by "Handing the chat on", then stop; a fresh chat takes over once this one is quiet.',
+        });
+        // Held once: the stop the hold continued into, with nothing written, passes.
+        expect(hook("stop", { stop_hook_active: true })).toBe("");
+        expect(existsSync(log) ? readFileSync(log, "utf8") : "").not.toContain(chat.sessionId);
+        writeFileSync(handover, "# Handing the assistant chat on\n\nOpen: nothing.\n");
+        utimesSync(handover, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+        expect(hook("stop")).toBe("");
+        const ends = readFileSync(log, "utf8");
+        const at = Number(new RegExp(`end ${chat.sessionId} at (\\d+)`).exec(ends)?.[1]);
+        expect(at).toBeGreaterThan(Date.now() + 9 * 60_000);
+        expect(at).toBeLessThan(Date.now() + 11 * 60_000);
+        expect(JSON.parse(readFileSync(stateFile(chat.sessionId), "utf8")).end.at).toBe(at);
+        // A heartbeat leaves the timer; his message clears it.
+        hook("prompt", { prompt: "Heartbeat." });
+        expect(JSON.parse(readFileSync(stateFile(chat.sessionId), "utf8")).end).toBeDefined();
+        hook("prompt", { prompt: "Anything new?" });
+        expect(JSON.parse(readFileSync(stateFile(chat.sessionId), "utf8")).end).toBeUndefined();
+        // The fresh chat's start, on the hand-over file, beside the one it replaces.
+        expect(takeOverPrompt("Test Assistant")).toBe(
+          "Taking over as Test Assistant: plans/assistant-handover.md.",
+        );
+        expect(start("plans/assistant-handover.md")).toContain(
+          '"Taking over as Test Assistant: plans/assistant-handover.md."',
+        );
+        // The hand-over file is no plan of the queue's.
+        expect(listWith([])).not.toContain("assistant-handover");
+        // When the timer fires and no fresh chat would start (paused), the old one stays.
+        writeFileSync(
+          stateFile(chat.sessionId),
+          JSON.stringify({ handing: { at: Date.now() - 20 * 60_000 } }),
+        );
+        const pause = join(repo, ".claude", "executor.pause");
+        writeFileSync(pause, JSON.stringify({ at: "15:00" }));
+        const armed = readFileSync(log, "utf8").length;
+        try {
+          execFileSync(
+            "node",
+            [join(here, "plan-queue.mjs"), "end", "--timer", String(Date.now()), chat.sessionId],
+            { encoding: "utf8", env: env([chat]) },
+          );
+        } finally {
+          rmSync(pause, { force: true });
+        }
+        expect(readFileSync(log, "utf8").split("\n")).not.toContain(chat.sessionId);
+        // The timer is armed again ten minutes on (plans/one-assistant-after-handover.md, part 3).
+        const again = Number(
+          new RegExp(`end ${chat.sessionId} at (\\d+)`).exec(
+            readFileSync(log, "utf8").slice(armed),
+          )?.[1],
+        );
+        expect(again).toBeGreaterThan(Date.now() + 9 * 60_000);
+        expect(again).toBeLessThan(Date.now() + 11 * 60_000);
+      } finally {
+        releaseHeld();
+        rmSync(handover, { force: true });
+        rmSync(transcript, { force: true });
+        rmSync(stateFile(chat.sessionId), { force: true });
+      }
+      for (const name of ["q-built.md", "q-ready-a.md", "q-brief-a.md"])
+        rmSync(join(plansDir(), name), { force: true });
+      rmSync(join(repo, ".claude", "handover.told.json"), { force: true });
+    },
+  );
+
+  // plans/one-assistant-after-handover.md: two rows named Test Assistant, the
+  // older handed on, the newer the one the queue addresses.
+  const oneChat = () => {
     const log = process.env.WORKFLOW_STOP_LOG!;
-    rmSync(log, { force: true });
-    const releaseHeld = executorHeld();
-    const transcript = join(repo, ".claude", "assistant-transcript.jsonl");
-    const context = (tokens: number) =>
-      writeFileSync(
-        transcript,
-        `${JSON.stringify({ type: "assistant", timestamp: new Date().toISOString(), message: { model: "claude-opus-5-5", usage: { input_tokens: tokens } } })}\n`,
-      );
-    const hook = (mode: string, extra: object = {}) =>
-      execFileSync("node", [join(here, "plan-queue.mjs"), mode], {
-        input: JSON.stringify({
-          session_id: chat.sessionId,
-          agent_type: "workflow:assistant",
-          transcript_path: transcript,
-          ...extra,
-        }),
-        encoding: "utf8",
-        env: env([chat]),
-      });
-    const handover = join(plansDir(), "assistant-handover.md");
-    rmSync(handover, { force: true });
+    const starts = join(repo, ".claude", "starts-one-chat.log");
+    const env = (rows: object[]) => ({
+      ...process.env,
+      CLAUDE_PROJECT_DIR: repo,
+      CLAUDE_CODE_SESSION_ID: "",
+      WORKFLOW_STARTS_LOG: starts,
+      WORKFLOW_USAGE_FILE: join(repo, ".claude", "usage-one-chat.json"),
+      WORKFLOW_LIVE: JSON.stringify(rows),
+    });
+    // An executor holds the lock, so the sweep after an end starts none.
+    const queue = (rows: object[], args: string[], extra: object = {}) => {
+      const release = executorHeld();
+      try {
+        return execFileSync("node", [join(here, "plan-queue.mjs"), ...args], {
+          encoding: "utf8",
+          env: { ...env(rows), ...extra },
+        });
+      } finally {
+        release();
+      }
+    };
+    const row = (id: string, startedAt: number, status = "idle") => ({
+      sessionId: id,
+      name: "Test Assistant",
+      kind: "background",
+      status,
+      pid: startedAt,
+      startedAt,
+      cwd: repo,
+    });
+    const old = row("81000000-aaaa-0000-0000-000000000000", 1000);
+    const fresh = row("82000000-aaaa-0000-0000-000000000000", 2000);
+    const lines = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n") : []);
+    const startLines = () => (existsSync(starts) ? readFileSync(starts, "utf8").trim() : "");
+    const clean = () => {
+      for (const one of [old, fresh]) rmSync(stateFile(one.sessionId), { force: true });
+      rmSync(log, { force: true });
+      rmSync(starts, { force: true });
+    };
+    return { log, env, queue, row, old, fresh, lines, startLines, clean };
+  };
+
+  it("a handed-on assistant chat is ended, with no fresh start, once another is open", () => {
+    const { queue, old, fresh, lines, startLines, clean } = oneChat();
+    clean();
     try {
-      context(40_000);
-      expect(hook("stop")).toBe("");
-      context(160_000);
-      expect(JSON.parse(hook("stop"))).toEqual({
-        decision: "block",
-        reason:
-          'This chat is over its ceiling (160k of 150k): write plans/assistant-handover.md by "Handing the chat on", then stop; a fresh chat takes over once this one is quiet.',
-      });
-      // Held once: the stop the hold continued into, with nothing written, passes.
-      expect(hook("stop", { stop_hook_active: true })).toBe("");
-      expect(existsSync(log) ? readFileSync(log, "utf8") : "").not.toContain(chat.sessionId);
-      writeFileSync(handover, "# Handing the assistant chat on\n\nOpen: nothing.\n");
-      utimesSync(handover, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
-      expect(hook("stop")).toBe("");
-      const ends = readFileSync(log, "utf8");
-      const at = Number(new RegExp(`end ${chat.sessionId} at (\\d+)`).exec(ends)?.[1]);
-      expect(at).toBeGreaterThan(Date.now() + 9 * 60_000);
-      expect(at).toBeLessThan(Date.now() + 11 * 60_000);
-      expect(JSON.parse(readFileSync(stateFile(chat.sessionId), "utf8")).end.at).toBe(at);
-      // A heartbeat leaves the timer; his message clears it.
-      hook("prompt", { prompt: "Heartbeat." });
-      expect(JSON.parse(readFileSync(stateFile(chat.sessionId), "utf8")).end).toBeDefined();
-      hook("prompt", { prompt: "Anything new?" });
-      expect(JSON.parse(readFileSync(stateFile(chat.sessionId), "utf8")).end).toBeUndefined();
-      // The fresh chat's start, on the hand-over file, beside the one it replaces.
-      expect(takeOverPrompt("Test Assistant")).toBe(
-        "Taking over as Test Assistant: plans/assistant-handover.md.",
-      );
-      expect(start("plans/assistant-handover.md")).toContain(
-        '"Taking over as Test Assistant: plans/assistant-handover.md."',
-      );
-      // The hand-over file is no plan of the queue's.
-      expect(listWith([])).not.toContain("assistant-handover");
-      // When the timer fires and no fresh chat would start (paused), the old one stays.
       writeFileSync(
-        stateFile(chat.sessionId),
-        JSON.stringify({ handing: { at: Date.now() - 20 * 60_000 } }),
+        stateFile(old.sessionId),
+        JSON.stringify({ agent: "assistant", handing: { at: Date.now() - 20 * 60_000 } }),
       );
+      queue([old, fresh], ["end", "--timer", String(Date.now()), old.sessionId]);
+      expect(lines()).toContain(old.sessionId);
+      expect(lines()).not.toContain(fresh.sessionId);
+      expect(lines().some((line) => line.startsWith(`end ${old.sessionId} at `))).toBe(false);
+      expect(startLines()).toBe("");
+      const state = JSON.parse(readFileSync(stateFile(old.sessionId), "utf8"));
+      expect(state.handing).toBeUndefined();
+      expect(state.end).toBeUndefined();
+      expect(state.agent).toBe("assistant");
+      // Its process gone, it is as quiet: ended the same way, not tried again (Codex C4).
+      clean();
+      writeFileSync(
+        stateFile(old.sessionId),
+        JSON.stringify({ agent: "assistant", handing: { at: Date.now() - 20 * 60_000 } }),
+      );
+      const gone = { ...old, pid: undefined, status: undefined };
+      queue([gone, fresh], ["end", "--timer", String(Date.now()), old.sessionId]);
+      expect(lines()).toContain(old.sessionId);
+      expect(lines().some((line) => line.startsWith(`end ${old.sessionId} at `))).toBe(false);
+      // The other handed on too: no successor, so the fresh start is tried (paused here) and
+      // neither is stopped (/code-review).
+      clean();
+      const handing = { agent: "assistant", handing: { at: Date.now() - 20 * 60_000 } };
+      for (const one of [old, fresh])
+        writeFileSync(stateFile(one.sessionId), JSON.stringify(handing));
       const pause = join(repo, ".claude", "executor.pause");
       writeFileSync(pause, JSON.stringify({ at: "15:00" }));
       try {
-        execFileSync(
-          "node",
-          [join(here, "plan-queue.mjs"), "end", "--timer", String(Date.now()), chat.sessionId],
-          { encoding: "utf8", env: env([chat]) },
-        );
+        queue([old, fresh], ["end", "--timer", String(Date.now()), old.sessionId]);
       } finally {
         rmSync(pause, { force: true });
       }
-      expect(readFileSync(log, "utf8").split("\n")).not.toContain(chat.sessionId);
+      expect(lines()).not.toContain(old.sessionId);
+      expect(lines().some((line) => line.startsWith(`end ${old.sessionId} at `))).toBe(true);
     } finally {
-      releaseHeld();
-      rmSync(handover, { force: true });
-      rmSync(transcript, { force: true });
-      rmSync(stateFile(chat.sessionId), { force: true });
+      clean();
     }
-    for (const name of ["q-built.md", "q-ready-a.md", "q-brief-a.md"])
-      rmSync(join(plansDir(), name), { force: true });
-    rmSync(join(repo, ".claude", "handover.told.json"), { force: true });
+  });
+
+  it("the takeover's timer tries again until the handed-on chat is ended", () => {
+    const { queue, row, old, fresh, lines, clean } = oneChat();
+    const cases: [string, object[], object][] = [
+      ["busy", [row(old.sessionId, 1000, "busy"), fresh], {}],
+      [
+        "a question open",
+        [{ ...row(old.sessionId, 1000, "waiting"), waitingFor: "input needed" }, fresh],
+        {},
+      ],
+      // claude agents cannot be read: a claude whose every call fails.
+      ["unread", [], { WORKFLOW_LIVE: "", WORKFLOW_CLAUDE: "/bin/false" }],
+    ];
+    for (const [what, rows, extra] of cases) {
+      clean();
+      try {
+        writeFileSync(
+          stateFile(old.sessionId),
+          JSON.stringify({ agent: "assistant", handing: { at: Date.now() - 20 * 60_000 } }),
+        );
+        queue(rows, ["end", "--timer", String(Date.now()), old.sessionId], extra);
+        expect(lines(), what).not.toContain(old.sessionId);
+        const at = Number(
+          lines()
+            .map((line) => new RegExp(`^end ${old.sessionId} at (\\d+)$`).exec(line)?.[1])
+            .find(Boolean),
+        );
+        expect(at, what).toBeGreaterThan(Date.now() + 9 * 60_000);
+        expect(at, what).toBeLessThan(Date.now() + 11 * 60_000);
+        expect(JSON.parse(readFileSync(stateFile(old.sessionId), "utf8")).end.at, what).toBe(at);
+      } finally {
+        clean();
+      }
+    }
+  });
+
+  it("no assistant chat is opened when claude agents cannot be read", () => {
+    const { queue, startLines, clean } = oneChat();
+    const bin = mkdtempSync(join(tmpdir(), "unread-claude-"));
+    const script = join(bin, "claude");
+    writeFileSync(script, '#!/bin/sh\n[ "$1" = agents ] && exit 1\necho "Started $*"\n');
+    chmodSync(script, 0o755);
+    clean();
+    try {
+      expect(
+        queue([], ["start", "--agent", "assistant"], {
+          WORKFLOW_LIVE: "",
+          WORKFLOW_CLAUDE: script,
+        })
+          .trim()
+          .split("\n")
+          .at(-1),
+      ).toBe(
+        "claude agents could not be read, so no assistant chat is opened: start again once plans lists the chats.",
+      );
+      expect(startLines()).toBe("");
+    } finally {
+      clean();
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it("plans end --now ends an assistant chat named", () => {
+    const { queue, old, fresh, lines, clean } = oneChat();
+    clean();
+    try {
+      // Named without --now: refused, pointing to it.
+      expect(queue([old, fresh], ["end", "81000000"])).toBe(
+        "Not ended: Test Assistant [81000000], it is Javi's one chat: plans end 81000000 --now ends it.\n",
+      );
+      // Not named: left.
+      queue([old, fresh], ["end"]);
+      expect(lines()).not.toContain(old.sessionId);
+      // Named with --now: stopped, another open.
+      expect(queue([old, fresh], ["end", "81000000", "--now"])).toBe(
+        "Ended Test Assistant [81000000]: idle.\n",
+      );
+      expect(lines()).toContain(old.sessionId);
+      // The last one: stopped, and the line says none is open.
+      expect(queue([fresh], ["end", "82000000", "--now"])).toBe(
+        "Ended Test Assistant [82000000]: idle. No assistant chat is open: plans start --agent assistant opens one.\n",
+      );
+      expect(lines()).toContain(fresh.sessionId);
+    } finally {
+      clean();
+    }
   });
 
   // plans/prs-close-their-issues.md, part 5.
@@ -12459,6 +12658,45 @@ else if (args[0] === "-p") {
             expect(textOf(second)).toContain("has the assistant's name and not its instructions");
           } finally {
             rmSync(state, { force: true });
+            rmSync(dir, { recursive: true, force: true });
+          }
+        },
+      );
+
+      // plans/one-assistant-after-handover.md, part 1.
+      it(
+        "assistantChat picks the chat started last that is not handed on",
+        { timeout: 60_000 },
+        () => {
+          const dir = project([]);
+          const [older, newer] = [chat(dir, 111), chat(dir, 222)];
+          const states = [older, newer].map((one) => stateFile(one.sessionId));
+          const picked = (rows: object[], state: Record<string, object>) => {
+            for (const [i, one] of [older, newer].entries())
+              writeFileSync(states[i], JSON.stringify(state[one.sessionId] || {}));
+            writeFileSync(join(dir, "rows.json"), JSON.stringify(rows));
+            rmSync(join(dir, ".claude", "github-told.json"), { force: true });
+            const before = sent(dir).length;
+            plansPath(dir, "github", "--inbox");
+            return textOf(sent(dir)[before]).split("\n")[0];
+          };
+          const ran = { agent: "assistant" };
+          const handing = { agent: "assistant", handing: { at: Date.now() - 20 * 60_000 } };
+          try {
+            // An older chat handed on and a newer one, both having run the agent: the newer.
+            expect(
+              picked([older, newer], { [older.sessionId]: handing, [newer.sessionId]: ran }),
+            ).toBe(`Recipient: uds:${join(socks, "222.sock")}`);
+            // The handed-on chat alone: it, the one chat until it is replaced.
+            expect(picked([older], { [older.sessionId]: handing })).toBe(
+              `Recipient: uds:${join(socks, "111.sock")}`,
+            );
+            // Two that ran the agent, neither handed on: the one started last.
+            expect(picked([older, newer], { [older.sessionId]: ran, [newer.sessionId]: ran })).toBe(
+              `Recipient: uds:${join(socks, "222.sock")}`,
+            );
+          } finally {
+            for (const state of states) rmSync(state, { force: true });
             rmSync(dir, { recursive: true, force: true });
           }
         },

@@ -2573,8 +2573,14 @@ export function canStart({
     };
   // **An assistant chat is opened only when none is open**
   // (decisions.md#one-chat): the one open, idle or busy, is sent the message
-  // instead, and it is never replaced.
+  // instead, and it is never replaced; with the chats unread, none is known
+  // not to be open, so none is opened.
   if (kind === "assistant") {
+    if (unread)
+      return {
+        refuse: true,
+        why: "claude agents could not be read, so no assistant chat is opened: start again once plans lists the chats.",
+      };
     if (open.length)
       return {
         refuse: true,
@@ -3047,13 +3053,42 @@ export function writtenAt(
 }
 
 /**
+ * **The live assistant chats, the one the queue addresses first**
+ * (decisions.md#one-chat): the rows with the assistant's name, other than
+ * `except`, with a process, ordered not handed on before handed on, then one
+ * whose state says it ran the assistant's agent, then the one started last.
+ * A handed-on chat alone is still first: it is the one chat until it is
+ * replaced (plans/one-assistant-after-handover.md).
+ */
+export function liveAssistants(live, except = "", stateOf = readState) {
+  const rank = (row) => {
+    const state = stateOf(row.sessionId) || {};
+    return [state.handing ? 1 : 0, state.agent === "assistant" ? 0 : 1, -(row.startedAt || 0)];
+  };
+  return (live || [])
+    .filter(
+      (row) =>
+        row.sessionId !== except && isSession("assistant", row) && statusOf(row) !== "not running",
+    )
+    .map((row) => ({ row, by: rank(row) }))
+    .sort((a, b) => a.by[0] - b.by[0] || a.by[1] - b.by[1] || a.by[2] - b.by[2])
+    .map((one) => one.row);
+}
+
+/**
  * This project's assistant chat open on this machine, by its one name, any
- * state, never a Remote Control row, which is another machine's chat.
+ * state, never a Remote Control row, which is another machine's chat: each
+ * as `<name> [<8 hex>]`, the id `plans` prints and `plans end` takes, the
+ * chats `liveAssistants` orders first and the ones with no process after.
  */
 function openAssistants(rows, except = "") {
-  return (rows || [])
-    .filter((row) => row.sessionId !== except && isSession("assistant", row))
-    .map((row) => row.name);
+  const first = liveAssistants(rows, except);
+  return [
+    ...first,
+    ...(rows || []).filter(
+      (row) => row.sessionId !== except && isSession("assistant", row) && !first.includes(row),
+    ),
+  ].map((row) => `${row.name} [${String(row.sessionId).slice(0, 8)}]`);
 }
 
 /** "plans/a.md, plans/b.md (until 14:02)", a deferral as the pause and the resume say it. */
@@ -3413,12 +3448,64 @@ function endSession(
   const row = live?.find((r) => r.sessionId === sessionId) || null;
   const state = readState(sessionId);
   const who = `${row?.name || String(sessionId).slice(0, 8)} [${String(sessionId).slice(0, 8)}]`;
+  // **A handed-on assistant chat is ended, however long it takes**
+  // (decisions.md#one-chat): with the chats unread the timer tries again
+  // (`again`), since the chat may still be live.
+  if (state.handing && !live)
+    return {
+      ended: false,
+      again: true,
+      line: `Not ended: ${who}, claude agents could not be read.`,
+    };
   if (!row) return { ended: false, line: `Not ended: ${who}, it is no live session.` };
+  const assistant = isSession("assistant", row);
+  // Stopped with nothing in its place, its state's hand-over and timer gone.
+  const stopAssistant = () => {
+    if (!stopNow(row.id || sessionId)) return false;
+    endSwarm(row.pid);
+    killTimer(state.end?.pid, endTimer(sessionId));
+    const { handing: _handing, end: _end, ...rest } = readState(sessionId);
+    writeJson(files.state(sessionId), rest);
+    return true;
+  };
+  const failed = { ended: false, again: true, line: `Not ended: ${who}, claude stop failed.` };
+  // **`plans end <id> --now` ends an assistant chat he names**
+  // (decisions.md#end-now): stopped, nothing started in its place.
+  if (assistant && immediate) {
+    if (!stopAssistant()) return { ended: false, line: `Not ended: ${who}, claude stop failed.` };
+    const none = liveAssistants(live, sessionId).length
+      ? ""
+      : " No assistant chat is open: plans start --agent assistant opens one.";
+    return { ended: true, line: `Ended ${who}: ${statusOf(row)}.${none}` };
+  }
   // **A handed-on assistant chat is taken over** (decisions.md#one-chat):
-  // stopped once quiet, and a fresh one opened on the hand-over file.
-  if (state.handing && isSession("assistant", row)) {
-    const verdict = decideEnd({ row, force: true });
-    if (!verdict.end) return { ended: false, line: `Not ended: ${who}, ${verdict.why}.` };
+  // stopped once its process is idle (its own status: `state` reads working
+  // on an idle chat), and a fresh one opened on the hand-over file, or none
+  // when another assistant chat is live already. Each refusal but a row
+  // that is no background chat tries again ten minutes on.
+  if (state.handing && assistant) {
+    if (row.kind !== "background")
+      return {
+        ended: false,
+        line: `Not ended: ${who}, it is not a background session of the queue.`,
+      };
+    // A chat whose process is gone is as quiet as an idle one.
+    const status = statusOf(row);
+    if (status !== "idle" && status !== "not running")
+      return {
+        ended: false,
+        again: true,
+        line: `Not ended: ${who}, ${status.startsWith("waiting for input") ? "a question or a prompt is open in it" : `it is ${status}`}.`,
+      };
+    // Another chat handed on too is no successor: both would stop.
+    const other = liveAssistants(live, sessionId).find((one) => !readState(one.sessionId).handing);
+    if (other) {
+      if (!stopAssistant()) return failed;
+      return {
+        ended: true,
+        line: `Ended ${who}: past its ceiling; ${other.name} [${String(other.sessionId).slice(0, 8)}] is the open chat.`,
+      };
+    }
     // A fresh chat that would not start (paused, usage, a quick death)
     // leaves this one open: he is never left with none.
     const would = start([ASSISTANT_HANDOVER], {
@@ -3427,14 +3514,22 @@ function endSession(
       dry: true,
     });
     if (!/^Would run: /m.test(would))
-      return { ended: false, line: `Not ended: ${who}, no fresh chat would start: ${would}` };
-    if (!stopNow(row.id || sessionId))
-      return { ended: false, line: `Not ended: ${who}, claude stop failed.` };
-    endSwarm(row.pid);
-    clearEnd(sessionId, null);
+      return {
+        ended: false,
+        again: true,
+        line: `Not ended: ${who}, no fresh chat would start: ${would}`,
+      };
+    if (!stopAssistant()) return failed;
     const started = start([ASSISTANT_HANDOVER], { agent: "assistant", replace: sessionId });
     return { ended: true, line: `Ended ${who}: past its ceiling.\n${started}` };
   }
+  // **`plans end <id>` refuses an assistant chat**: it is the owner's one
+  // chat, ended only with `--now`.
+  if (assistant)
+    return {
+      ended: false,
+      line: `Not ended: ${who}, it is ${owner()}'s one chat: plans end ${String(sessionId).slice(0, 8)} --now ends it.`,
+    };
   const plans = readPlans(join(root, "plans"), liveIds(live));
   const plan = plans.find(
     (one) =>
@@ -3501,8 +3596,9 @@ function endSession(
 /**
  * **`plans end [id...] [--now]`**: this queue's finished chats now, warm or
  * not (`force`), or the ones named, by session id, background id or the eight
- * hex `plans` prints. `immediate` (`--now`) ends the named ones whatever they
- * are doing, and only named ones. One line per session.
+ * hex `plans` prints, an assistant chat among them. `immediate` (`--now`)
+ * ends the named ones whatever they are doing, and only named ones. One line
+ * per session.
  */
 function endCommand(ids = [], { immediate = false } = {}) {
   if (immediate && !ids.length)
@@ -3519,13 +3615,12 @@ function endCommand(ids = [], { immediate = false } = {}) {
   let targets = ours.map((one) => one.sessionId);
   if (ids.length) {
     targets = [];
+    // An assistant chat is ended only when named (decisions.md#end-now).
+    const assistants = live.filter((row) => isSession("assistant", row));
+    const named = (id) => (s) =>
+      s.sessionId === id || (s.id && s.id === id) || (id.length >= 8 && s.sessionId.startsWith(id));
     for (const id of ids) {
-      const one = ours.find(
-        (s) =>
-          s.sessionId === id ||
-          (s.id && s.id === id) ||
-          (id.length >= 8 && s.sessionId.startsWith(id)),
-      );
+      const one = ours.find(named(id)) || assistants.find(named(id));
       if (one) targets.push(one.sessionId);
       else lines.push(`${id} is no live session of this queue; plans lists them.`);
     }
@@ -4523,7 +4618,12 @@ function startHere(
   // **The owner's word** (decisions.md#starts-bounded), as one line: it
   // passes the two refusals he decides, and the log keeps it.
   said = said.replace(/\s+/g, " ").trim();
-  const live = liveSessions();
+  // **No assistant chat is opened on a list that cannot be read**
+  // (decisions.md#one-chat): read once more, with longer to answer, before
+  // `canStart` refuses it (plans/one-assistant-after-handover.md).
+  const live =
+    liveSessions() ??
+    (agent === "assistant" ? liveSessions({ fresh: true, timeout: 20_000 }) : null);
   // **A start takes over from an executor with no process**
   // (decisions.md#plan-put-first): each plan its Building line holds is read
   // as handed over, so it is picked first and resumed. The hand-over is
@@ -8904,8 +9004,8 @@ function markTold(to, at = Date.now(), notes = notesWaitingNow()) {
 /**
  * **The open assistant chat a note is sent to**
  * (decisions.md#note-sent-to-open-chat): of the live rows with the
- * assistant's name and a process, the one whose state says it ran the
- * assistant's agent, else the one started last. `{ row, address, agent }`,
+ * assistant's name and a process, the first `liveAssistants` orders: not
+ * handed on, having run the assistant's agent, started last. `{ row, address, agent }`,
  * the address its process's socket, or the name when no socket is found and
  * one chat alone has it, else "". Null with none.
  */
@@ -8918,14 +9018,17 @@ export function assistantChat(
     all = liveAll || live,
   } = {},
 ) {
-  const rows = (live || []).filter((row) => row.pid && isSession("assistant", row));
-  if (!rows.length) return null;
-  const ran = rows.find((one) => stateOf(one.sessionId)?.agent === "assistant");
-  const row = ran || [...rows].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+  const row = liveAssistants(
+    (live || []).filter((one) => one.pid),
+    "",
+    stateOf,
+  )[0];
+  if (!row) return null;
+  const ran = stateOf(row.sessionId)?.agent === "assistant";
   const sock = join(socks, `${row.pid}.sock`);
   const alone = (all || []).filter((one) => one.name === row.name).length === 1;
   const address = existsSync(sock) ? `uds:${sock}` : alone ? row.name : "";
-  return { row, address, agent: !!ran };
+  return { row, address, agent: ran };
 }
 
 /**
@@ -10314,7 +10417,7 @@ plans start --owner-said "<words>" [path...]  start one more past a refusal that
 plans first <path> [--undo]  put a waiting plan or brief first, on the owner's word, or take that back
 plans topic <path>    say whether a plan's build opens its topic's pull request, or what it waits for
 plans pause | resume  stop and restart starting sessions
-plans end [id...] [--now]  end this queue's finished chats, or these; --now ends a named one whatever it is doing
+plans end [id...] [--now]  end this queue's finished chats, or these; --now ends a named one, or an assistant chat, whatever it is doing
 plans sync            move a clean checkout with no commit of its own to the branch, detached
 plans init            write .claude/workflow.md for this project
 plans check           lint the catalogues and the deny key the project file names
@@ -10419,11 +10522,16 @@ export function main(args = process.argv.slice(2)) {
       setTimeout(
         () => {
           let handed = false;
+          let again = false;
           try {
-            if (sessionId) handed = Boolean(endSession(sessionId).handed);
+            if (sessionId) ({ handed = false, again = false } = endSession(sessionId));
           } catch {
             // A timer that fails ends nothing: the supervisor's own clock remains.
           }
+          // **A handed-on assistant chat is ended, however long it takes**
+          // (decisions.md#one-chat): a refusal arms the timer again ten
+          // minutes on; `clearEnd` below then leaves the new one's registration.
+          if (again) armEnd(sessionId, null, Date.now() + HANDOVER_QUIET);
           // **The end timer is the queue's sweep**
           // (decisions.md#plans-reach-an-executor): plans ready and no executor
           // alive start one, unless the end handed a plan over and started one

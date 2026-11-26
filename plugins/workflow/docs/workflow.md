@@ -34,7 +34,12 @@ kept warm by a scheduled prompt twice an hour, and one over its ceiling
 quiet ten minutes, by a fresh chat of the same name: what it still owes
 is written into the queue first, and the file is said once to whichever
 assistant chat speaks next, since a scheduled `/compact` reaches a
-background chat as a plain message.
+background chat as a plain message. One assistant chat is live: the
+handed-on one is stopped before the fresh one starts, or, when another
+is open already, as soon as it is quiet, the queue trying again every
+ten minutes until it is; none is opened while `claude agents` cannot be
+read; what the queue sends goes to the chat started last that is not
+handed on; and `plans end <id> --now` ends one he names.
 (decisions.md#one-chat)
 
 **An agent file is the agent's instructions, and a start prompt names
@@ -647,7 +652,8 @@ process `not running`. (decisions.md#waiting-is-an-open-prompt)
 
 **`plans end <id> --now` ends a named chat whatever it is doing**, writes
 its plan a "Handing over, <date>, ended with plans end --now" section,
-releases the lock and starts a fresh session on it; the assistant runs it
+releases the lock and starts a fresh session on it; an assistant chat
+named is stopped with nothing started in its place; the assistant runs it
 on the owner's word, or its own for a chat that is stuck.
 (decisions.md#end-now)
 

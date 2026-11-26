@@ -41,7 +41,8 @@ the queue trying again every ten minutes until one is open and the old
 one stopped; a chat with no process is not open, so one is opened beside
 its row; none is opened while `claude agents` cannot be read; what the
 queue sends goes to the chat started last that is not handed on; and
-`plans end <id> --now` ends one he names.
+`plans end <id> --now` ends one he names. A handed-on chat is not open
+to a takeover, so two handed on at once are replaced by one fresh chat.
 (decisions.md#one-chat)
 
 **An agent file is the agent's instructions, and a start prompt names

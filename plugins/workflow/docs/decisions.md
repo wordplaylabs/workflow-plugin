@@ -139,10 +139,15 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   session not listed before, and the old one is stopped once it is, as a
   rolling update brings the new copy up before it takes the old one
   down; and a chat with no process is not open, since it takes no
-  message: one is opened beside its row.
+  message: one is opened beside its row. Two chats handed on at once
+  each counted the other as open, so neither takeover ever started; a
+  handed-on chat is on its way out, so it is not open to a takeover, and
+  one fresh chat replaces both. A stopped row beside the live chat made
+  its name shared, so a note waited; only rows with a process share it.
   plans/one-assistant-chat.md, plans/quiet-worker-starts.md,
   plans/prs-close-their-issues.md, plans/one-assistant-after-handover.md,
-  plans/assistant-takeover-never-leaves-none.md.
+  plans/assistant-takeover-never-leaves-none.md,
+  plans/assistant-chat-counts-live-rows.md.
   - ~~Planners and executors stay openable, in his chat list.~~
     (Javi, 24 November)
 - `new-topic-to-assistant` **Every new topic starts in the assistant's

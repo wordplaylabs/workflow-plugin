@@ -3095,11 +3095,15 @@ export function liveAssistants(live, except = "", stateOf = readState) {
  * in `liveAssistants`' order. A row with no process takes no message and
  * stays listed for weeks after `claude stop`, so it is not open, and a chat
  * is opened beside it (plans/assistant-takeover-never-leaves-none.md).
+ * `handedOn` false leaves out the chats handed on, as a takeover's start
+ * does: each is on its way out, so two handed on at once never refuse each
+ * other's start, and one fresh chat replaces both
+ * (plans/assistant-chat-counts-live-rows.md).
  */
-function openAssistants(rows, except = "") {
-  return liveAssistants(rows, except).map(
-    (row) => `${row.name} [${String(row.sessionId).slice(0, 8)}]`,
-  );
+function openAssistants(rows, except = "", { handedOn = true } = {}) {
+  return liveAssistants(rows, except)
+    .filter((row) => handedOn || !readState(row.sessionId).handing)
+    .map((row) => `${row.name} [${String(row.sessionId).slice(0, 8)}]`);
 }
 
 /** "plans/a.md, plans/b.md (until 14:02)", a deferral as the pause and the resume say it. */
@@ -3577,8 +3581,9 @@ function endSession(
       };
     // Confirmed by claude --bg's own line, or listed and gone again: the old
     // one is stopped only beside another open chat, a later firing's
-    // `other` (Codex C1).
-    if (!liveAssistants(now, sessionId).length)
+    // `other` (Codex C1), never one handed on too, which is on its way out
+    // (plans/assistant-chat-counts-live-rows.md).
+    if (!liveAssistants(now, sessionId).some((one) => !readState(one.sessionId).handing))
       return {
         ended: false,
         again: true,
@@ -4985,8 +4990,8 @@ function startHere(
         : [],
     // This checkout's chats only: one in another checkout reads another queue.
     // The chat a hand-over replaces is stopped once this one is confirmed,
-    // so it is not counted.
-    open: kind === "assistant" ? openAssistants(live, replace) : [],
+    // so it is not counted, nor, for a takeover, another handed on.
+    open: kind === "assistant" ? openAssistants(live, replace, { handedOn: !replace }) : [],
     unread: !live,
     name: proj().name,
     fallback,
@@ -9102,7 +9107,7 @@ function markTold(to, at = Date.now(), notes = notesWaitingNow()) {
  * assistant's name and a process, the first `liveAssistants` orders: not
  * handed on, having run the assistant's agent, started last. `{ row, address, agent }`,
  * the address its process's socket, or the name when no socket is found and
- * one chat alone has it, else "". Null with none.
+ * one chat with a process alone has it, else "". Null with none.
  */
 export function assistantChat(
   live,
@@ -9121,7 +9126,11 @@ export function assistantChat(
   if (!row) return null;
   const ran = stateOf(row.sessionId)?.agent === "assistant";
   const sock = join(socks, `${row.pid}.sock`);
-  const alone = (all || []).filter((one) => one.name === row.name).length === 1;
+  // A stopped row stays listed for weeks and takes no message, so it does not
+  // share the name (plans/assistant-chat-counts-live-rows.md).
+  const alone =
+    (all || []).filter((one) => one.name === row.name && statusOf(one) !== "not running").length ===
+    1;
   const address = existsSync(sock) ? `uds:${sock}` : alone ? row.name : "";
   return { row, address, agent: ran };
 }

@@ -4104,6 +4104,13 @@ describe("one assistant chat is live after a hand-over", () => {
     expect(decisions).toContain(
       "An assistant chat he names is ended the same way, with nothing started in its place: archiving it stopped nothing.",
     );
+    // plans/assistant-chat-counts-live-rows.md.
+    expect(handbook).toContain(
+      "A handed-on chat is not open to a takeover, so two handed on at once are replaced by one fresh chat.",
+    );
+    expect(decisions).toContain(
+      "a handed-on chat is on its way out, so it is not open to a takeover, and one fresh chat replaces both. A stopped row beside the live chat made its name shared, so a note waited; only rows with a process share it.",
+    );
     expect(decisions).toContain(
       "addressed by the chat's process, the one started last that is not handed on:",
     );

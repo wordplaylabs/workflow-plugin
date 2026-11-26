@@ -3184,6 +3184,44 @@ describe("the planner queue", () => {
     },
   );
 
+  // plans/assistant-chat-counts-live-rows.md, item 2.
+  it("two chats handed on at once are replaced by one fresh chat", { timeout: 60_000 }, () => {
+    const { dir, rows, old, state, handOn, queue, timer, lines, ends, startLines, clean } =
+      takeover("86000000");
+    const second = {
+      ...old,
+      sessionId: "87000000-aaaa-0000-0000-000000000000",
+      pid: 1001,
+      startedAt: 1001,
+    };
+    const secondState = stateFile(second.sessionId);
+    try {
+      writeFileSync(rows, JSON.stringify([old, second]));
+      handOn();
+      writeFileSync(secondState, readFileSync(state, "utf8"));
+      // The fresh chat confirmed by claude --bg's line but not listed yet: the other chat
+      // handed on is no successor, so the old one is kept and tried again (Codex C1).
+      timer({ STUB: "backgrounded" });
+      expect(lines()).not.toContain(old.sessionId);
+      expect(ends()).toHaveLength(1);
+      writeFileSync(rows, JSON.stringify([old, second]));
+      rmSync(join(dir, ".claude", "starts.log"), { force: true });
+      // The launch listed: one fresh chat, each old one stopped, no refusal tried again. The
+      // timer prints nothing, so a refusal shows as a re-armed end.
+      timer();
+      queue(["end", "--timer", String(Date.now()), second.sessionId]);
+      expect(startLines()).toHaveLength(1);
+      expect(JSON.parse(startLines()[0]).paths).toEqual(["plans/assistant-handover.md"]);
+      expect(lines().filter((line) => line === old.sessionId)).toHaveLength(1);
+      expect(lines().filter((line) => line === second.sessionId)).toHaveLength(1);
+      expect(ends()).toHaveLength(1);
+      expect(lines().some((line) => line.startsWith(`end ${second.sessionId} at `))).toBe(false);
+    } finally {
+      rmSync(secondState, { force: true });
+      clean();
+    }
+  });
+
   it("a chat that took a message during the takeover is kept", { timeout: 60_000 }, () => {
     // A claude whose `--bg` adds the fresh row, then marks the old row busy
     // (STUB_DO=busy) or takes his message, the prompt hook clearing `handing`
@@ -12946,6 +12984,26 @@ else if (args[0] === "-p") {
             );
           } finally {
             for (const state of states) rmSync(state, { force: true });
+            rmSync(dir, { recursive: true, force: true });
+          }
+        },
+      );
+
+      // plans/assistant-chat-counts-live-rows.md, item 1 (Codex C4 of
+      // plans/assistant-takeover-never-leaves-none.md).
+      it(
+        "a note reaches the live assistant chat beside a stopped row of its name",
+        { timeout: 30_000 },
+        () => {
+          const dir = project([]);
+          // No socket for either: 333 has none in the stub's folder.
+          const { pid: _pid, status: _status, ...stopped } = chat(dir, 332);
+          const live = chat(dir, 333);
+          writeFileSync(join(dir, "rows.json"), JSON.stringify([stopped, live]));
+          try {
+            plansPath(dir, "github", "--inbox");
+            expect(textOf(sent(dir)[0]).split("\n")[0]).toBe("Recipient: Runs Assistant");
+          } finally {
             rmSync(dir, { recursive: true, force: true });
           }
         },

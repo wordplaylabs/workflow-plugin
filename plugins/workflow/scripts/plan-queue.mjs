@@ -869,13 +869,17 @@ export function readPlans(dir = join(root, "plans"), live = null, texts = {}) {
     const state = stateOf(text, { mtime, live });
     if (state) plans.push({ path: `plans/${name}`, file, text, ...state });
   }
-  return plans.sort(
-    (a, b) =>
-      Number(b.state === "handed") - Number(a.state === "handed") ||
-      Number(Boolean(b.first)) - Number(Boolean(a.first)) ||
-      (b.first?.at || 0) - (a.first?.at || 0) ||
-      (a.date || 0) - (b.date || 0) ||
-      a.mtime - b.mtime,
+  return plans.sort(queueOrder);
+}
+
+/** The queue's order: handed plans, then those put first, the latest first, then by date and time. */
+function queueOrder(a, b) {
+  return (
+    Number(b.state === "handed") - Number(a.state === "handed") ||
+    Number(Boolean(b.first)) - Number(Boolean(a.first)) ||
+    (b.first?.at || 0) - (a.first?.at || 0) ||
+    (a.date || 0) - (b.date || 0) ||
+    (a.mtime || 0) - (b.mtime || 0)
   );
 }
 
@@ -4108,11 +4112,21 @@ function changedFiles(text = "") {
  * (ready, asking, planned, handed or building), two that name each other
  * holding neither; and on a plan in progress (building by a live session,
  * handed over, or claimed) that lands on its topic, or is one of the day's
- * fixes as it is, or changes a file it changes. A plan held is passed over,
- * never reordered.
+ * fixes as it is, or changes a file it changes. Between two handed plans one
+ * goes first and only the other waits (plans/handed-plans-no-mutual-wait.md):
+ * the one claimed, else the one the other rests on, else the one put first,
+ * else the earlier in the queue's order; one claimed is waited on as before.
+ * A plan held is passed over, never reordered.
  */
 export function freePlans(plans, { claims = {} } = {}) {
   const byPath = new Map(plans.map((plan) => [plan.path, plan]));
+  const order = new Map(plans.map((plan, i) => [plan.path, i]));
+  // As `readPlans` sorts: put first ahead, the later put first ahead of the
+  // earlier, then the queue's order.
+  const goesBefore = (a, b) =>
+    (Number(Boolean(b.first)) - Number(Boolean(a.first)) ||
+      (b.first?.at || 0) - (a.first?.at || 0) ||
+      order.get(a.path) - order.get(b.path)) < 0;
   // A brief or a plan still being planned is not built either.
   const unbuilt = ["ready", "planned", "handed", "building", "brief", "planning"];
   const inProgress = plans.filter(
@@ -4129,6 +4143,15 @@ export function freePlans(plans, { claims = {} } = {}) {
     const files = changedFiles(plan.text);
     for (const other of inProgress) {
       if (other.path === plan.path) continue;
+      if (
+        plan.state === "handed" &&
+        other.state === "handed" &&
+        !claims[other.path] &&
+        (claims[plan.path] ||
+          (restsOn(other).includes(plan.path) && !restsOn(plan).includes(other.path)) ||
+          goesBefore(plan, other))
+      )
+        continue;
       if (topicOf(other) === topic)
         return {
           ...plan,
@@ -7496,8 +7519,16 @@ function takenWords(path, plans, live, sessionId) {
   const others = Object.fromEntries(
     Object.entries(claims).filter(([, one]) => !holdsClaim(one, sessionId, live)),
   );
-  const own = plans.map((p) => (p.path === path ? { ...p, state: "ready" } : p));
-  const waits = freePlans(own, { claims: others }).find((p) => p.path === path)?.waitsOn;
+  // A handed plan resumed stays handed, so it goes before the other handed
+  // plans as `freePlans` gave it to its start.
+  const own = plans.map((p) =>
+    p.path === path && p.state !== "handed" ? { ...p, state: "ready" } : p,
+  );
+  // This session's own claim on it is kept: a handed plan claimed goes first.
+  const held = claims[path] ? { [path]: claims[path] } : {};
+  const waits = freePlans(own, { claims: { ...others, ...held } }).find(
+    (p) => p.path === path,
+  )?.waitsOn;
   return waits
     ? `${path} waits on ${waits.path} (${waits.why}): leave it, and build what the queue names.`
     : "";
@@ -7977,17 +8008,20 @@ function hook(mode, input) {
         const claimed = (p) => unjudged.some((one) => one.path === p.path);
         const hookTime = (p) => state.plansAt?.[p.path] || (claimed(p) ? 0 : p.mtime || 0);
         const queued = live
-          ? readPlans(join(root, "plans"), liveIds(live)).map((p) =>
-              claimed(p)
-                ? {
-                    ...p,
-                    ...stateOf(p.text.replace(own, ""), {
-                      mtime: hookTime(p),
-                      live: liveIds(live),
-                    }),
-                  }
-                : p,
-            )
+          ? readPlans(join(root, "plans"), liveIds(live))
+              .map((p) =>
+                claimed(p)
+                  ? {
+                      ...p,
+                      ...stateOf(p.text.replace(own, ""), {
+                        mtime: hookTime(p),
+                        live: liveIds(live),
+                      }),
+                    }
+                  : p,
+              )
+              // In the queue's order as it stood, so a plan taken keeps its place.
+              .sort(queueOrder)
           : [];
         for (const plan of unjudged) {
           const asking = heldFromBuilding(plan.path, plan.text, live, { mtime: hookTime(plan) });

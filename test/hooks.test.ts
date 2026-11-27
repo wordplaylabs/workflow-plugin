@@ -15605,6 +15605,172 @@ describe("several executors build at once", () => {
     expect(freePlans([c, brief])[0].waitsOn).toEqual({ path: "plans/d.md", why: "it rests on it" });
   });
 
+  // plans/handed-plans-no-mutual-wait.md
+  it("lets one of two handed plans of a topic go, the one put first, else the earlier", () => {
+    const at = (path: string, text: string, state: string, extra: object = {}) => ({
+      path,
+      text,
+      state,
+      ...extra,
+    });
+    const lands = "\n\nLands: topic chat.";
+    const one = at("plans/one.md", plan("One", "Change src/one.js.", lands), "handed");
+    const two = at("plans/two.md", plan("Two", "Change src/two.js.", lands), "handed");
+    const why = "the same topic, chat";
+    // Neither put first: the earlier goes, the other waits on it.
+    expect(freePlans([one, two]).map((p) => p.waitsOn)).toEqual([
+      null,
+      { path: "plans/one.md", why },
+    ]);
+    // The second put first goes, and the first waits on it.
+    const put = {
+      ...two,
+      first: { day: "27 November 2026", time: "00:44", at: 1_795_740_240_000 },
+    };
+    expect(freePlans([one, put]).map((p) => p.waitsOn)).toEqual([
+      { path: "plans/two.md", why },
+      null,
+    ]);
+    // Two of the day's fixes, handed both.
+    const x = at("plans/x.md", plan("X", "Change src/x.js.", "\n\nLands: fix."), "handed");
+    const y = at("plans/y.md", plan("Y", "Change src/y.js.", "\n\nLands: fix."), "handed");
+    expect(freePlans([x, y]).map((p) => p.waitsOn)).toEqual([
+      null,
+      { path: "plans/x.md", why: "the day's fixes" },
+    ]);
+    // Two handed plans that change one file: the earlier goes too.
+    const f = at("plans/f.md", plan("F", "Change src/x.js."), "handed");
+    const g2 = at("plans/g.md", plan("G", "Change src/x.js."), "handed");
+    expect(freePlans([f, g2]).map((p) => p.waitsOn)).toEqual([
+      null,
+      { path: "plans/f.md", why: "both change src/x.js" },
+    ]);
+    // A handed plan claimed goes first, and is waited on by the one ahead of it too.
+    const claims = { "plans/two.md": { holder: "someone", until: Infinity } };
+    expect(freePlans([one, two], { claims }).map((p) => p.waitsOn)).toEqual([
+      { path: "plans/two.md", why },
+      null,
+    ]);
+    // The one the other rests on goes first, ahead in the queue or not (Codex C1).
+    const rests = at(
+      "plans/one.md",
+      plan("One", "Change src/one.js.", ` It rests on plans/two.md.${lands}`),
+      "handed",
+    );
+    expect(freePlans([rests, two]).map((p) => p.waitsOn)).toEqual([
+      { path: "plans/two.md", why: "it rests on it" },
+      null,
+    ]);
+    // A handed plan and one building of its topic: the handed one still waits.
+    const live = at("plans/live.md", plan("Live", "Change src/live.js.", lands), "building");
+    expect(freePlans([one, live]).map((p) => p.waitsOn)).toEqual([{ path: "plans/live.md", why }]);
+  });
+
+  it(
+    "starts the first of two handed plans of a topic and lets its Building line through",
+    { timeout: 60_000 },
+    () => {
+      const handed = (title: string) =>
+        plan(title, `Change src/${title}.js.`, "\n\nLands: topic chat.").replace(
+          "\n\nPlan only",
+          "\n\n## Handing over, 27 November 2026\n\nStep in hand: 2.\n\nPlan only",
+        );
+      const one = pool("Handed", { "one.md": handed("one"), "two.md": handed("two") });
+      expect(one.queue(["start", "--dry"])).not.toContain("waits on");
+      expect(one.queue(["start"])).toContain("was started on: plans/one.md");
+      const [first] = one.read();
+      const building = (file: string, id = first.sessionId) =>
+        one.queue(["tool"], {
+          session_id: id,
+          agent_type: "workflow:executor",
+          cwd: one.tree(1),
+          tool_name: "Edit",
+          tool_input: {
+            file_path: join(one.dir, "plans", file),
+            old_string: "\n\n## Handing over",
+            new_string: `\n\n## Building, 27 November 2026, session ${id}\n\n## Handing over`,
+          },
+        });
+      expect(building("two.md")).toContain(
+        "plans/two.md waits on plans/one.md (the same topic, chat): leave it, and build what the queue names.",
+      );
+      expect(building("one.md")).toBe("");
+      // Put first after the start claimed one.md: the claim goes first (Codex C2).
+      const two = join(one.dir, "plans", "two.md");
+      writeFileSync(
+        two,
+        readFileSync(two, "utf8").replace("# two\n", "# two\n\nFirst: 27 November 2026 06:30.\n"),
+      );
+      expect(building("one.md")).toBe("");
+      expect(building("two.md", "pool-other-0000")).toContain("plans/two.md waits on plans/one.md");
+    },
+  );
+
+  it(
+    "keeps a Building line a shell command wrote on the first of two handed plans",
+    { timeout: 60_000 },
+    () => {
+      const handed = (title: string) =>
+        plan(title, `Change src/${title}.js.`, "\n\nLands: topic chat.").replace(
+          "\n\nPlan only",
+          "\n\n## Handing over, 27 November 2026\n\nStep in hand: 2.\n\nPlan only",
+        );
+      const one = pool("Shell", { "one.md": handed("one"), "two.md": handed("two") });
+      expect(one.queue(["start"])).toContain("was started on: plans/one.md");
+      const [first] = one.read();
+      // With no claim, the queue's order alone decides (Codex C3).
+      rmSync(join(one.dir, ".claude", "executor.claims.json"), { force: true });
+      const file = join(one.dir, "plans", "one.md");
+      const line = `## Building, 27 November 2026, session ${first.sessionId}`;
+      writeFileSync(
+        file,
+        readFileSync(file, "utf8").replace("\n\n## Handing over", `\n\n${line}\n\n## Handing over`),
+      );
+      try {
+        one.queue(["wrote"], {
+          session_id: first.sessionId,
+          agent_type: "workflow:executor",
+          cwd: one.tree(1),
+          tool_name: "Bash",
+          tool_input: { command: "cat >> plans/one.md" },
+        });
+        expect(readFileSync(file, "utf8")).toContain(line);
+      } finally {
+        rmSync(stateFile(first.sessionId), { force: true });
+      }
+    },
+  );
+
+  it(
+    "starts no executor when every plan waits, and says what waits on what",
+    { timeout: 60_000 },
+    () => {
+      const one = pool("Only", {
+        "live.md": plan("Live", "Change src/live.js.", "\n\nLands: topic chat."),
+        "handed.md": plan("Handed", "Change src/handed.js.", "\n\nLands: topic chat.").replace(
+          "\n\nPlan only",
+          "\n\n## Handing over, 27 November 2026\n\nStep in hand: 2.\n\nPlan only",
+        ),
+      });
+      const id = "pool-live-0000";
+      one.write([
+        {
+          sessionId: id,
+          name: "Only Executor 1",
+          kind: "background",
+          status: "busy",
+          cwd: one.tree(1),
+        },
+      ]);
+      one.building("live.md", id);
+      expect(one.queue(["start"])).toContain(
+        "plans/handed.md waits on plans/live.md (the same topic, chat): it is taken once that one is built.",
+      );
+      expect(one.read()).toHaveLength(1);
+      expect(existsSync(join(one.dir, ".claude", "starts.log"))).toBe(false);
+    },
+  );
+
   it("starts number 1 and no other with three free and one plan", () => {
     const one = pool("One", { "a.md": plan("A", "Change src/a.js.") });
     const dry = one.queue(["start", "--dry"]);

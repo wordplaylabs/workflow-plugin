@@ -593,7 +593,28 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   rests on a ready plan of its own topic or files, or three or more
   plans that rest on each other in a ring, hold each other, which takes
   a header changed after its Building line, since the line is refused
-  on a plan that rests on one not built. A start's claim holds the
+  on a plan that rests on one not built. A start's claim is its
+  session's for the start's span, two minutes, whatever `claude agents`
+  lists: a session is listed a moment before its process starts, half a
+  second to two and a half when measured, and a reader's rows may be
+  older than the claim, so a claim read by its row alone was lost in
+  that moment (27 November: one plan started on twice, thirteen seconds
+  apart, and the two plans of one topic above); as Kubernetes holds the
+  liveness check off a container until its startup probe passes. The
+  claim carries the start's number, which no other start takes while
+  the claim stands, since the second start would retire the first's
+  session as one with no process. A claim keeps its time when its
+  holder takes it again or a start takes it over, as a Lease keeps its
+  `acquireTime` while its `renewTime` moves, and no two claims share a
+  time, so the order of two claims never changes once written; and a
+  start judges its plan again once it holds the claim, as a stop does,
+  and gives it back when a claim written since its read makes it wait.
+  Known limits: a chat begun before this runs the copy it began with
+  and does neither until it ends; a session ended within its span holds
+  its plan and number to the span's end; a start that gives a plan back
+  starts nothing, and the next hook or timer starts on what is free; a
+  plan sent by message to an idle chat is not judged again, its
+  Building line is. A start's claim holds the
   session it started: its row's id, else the id `claude --bg` printed
   before `claude agents` lists it, and its name only when neither is
   read; a name claim is that session's wherever a claim is read, and its
@@ -602,7 +623,8 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/handed-plans-no-mutual-wait.md,
   plans/handed-plan-asking-not-ahead.md,
   plans/handed-plans-order-holds-everywhere.md,
-  plans/claimed-plans-no-mutual-wait.md.
+  plans/claimed-plans-no-mutual-wait.md,
+  plans/claims-held-across-starts.md.
 - `push-not-waited-on` **The executor runs the checks once, before the
   push, and waits on no pull request's run of them; a failed run
   reaches the assistant by the webhook.** (Javi, 14 November) The pull

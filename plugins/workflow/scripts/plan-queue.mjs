@@ -4031,6 +4031,10 @@ export function start(paths, options = {}) {
   // next start, listed or not, and a plan started here is held from it as
   // claimed, so it leases at most one plan of a topic, or of the day's
   // fixes; the session replaced and the owner's word go with the first start.
+  // A start that gives its plan back, a claim written since its read making
+  // it wait, ends the loop as one that starts nothing; and a separate start
+  // beside these reads each one's claim, with its number, as its session's
+  // for the start's span (plans/claims-held-across-starts.md).
   let out = {};
   let said = startHere(paths, { ...options, out });
   const kind = options.agent === "planner" || options.agent === "assistant" ? "" : "executor";
@@ -4201,9 +4205,11 @@ function waitsWords(plan) {
 
 /**
  * **A plan is claimed before it is taken**: `.claude/executor.claims.json`, a
- * path to `{ holder, name, at, until }`. A claim ends with its plan's Building
- * line, its holder gone from `claude agents` (when they could be read), or
- * `until`. The live claims.
+ * path to `{ holder, name, at, until }`, with `started` and `number` when a
+ * start handed it to the session it launched. A claim ends with its plan's
+ * Building line, its holder gone from `claude agents` (when they could be
+ * read; never within a start's span, `holderRuns`), or `until`. The live
+ * claims.
  */
 function readClaims(plans = [], live = null, now = Date.now()) {
   const table = readJson(files.claims()) || {};
@@ -4269,19 +4275,27 @@ function idHolds(holder, sessionId, rows) {
 
 /**
  * Whether a claim's holder is a session with its process running: a row
- * of its id (`idHolds`) or its name that is not "not running". A name, or
- * an id `claude --bg` printed (`launched`), that no row lists yet is a
- * session starting, held for the start's span.
+ * of its id (`idHolds`) or its name that is not "not running". A claim a
+ * start handed to the session it launched (`started`) is that session's for
+ * the start's span whatever the rows say: a session is listed a moment
+ * before its process starts, and a reader's rows may be older than the
+ * claim (plans/claims-held-across-starts.md). A name, or an id `claude
+ * --bg` printed (`launched`), that no row lists yet is a session starting,
+ * held for the start's span.
  */
 function holderRuns(one, live, now = Date.now()) {
   const holder = one?.holder || "";
   const start = /^start:(\d+)$/.exec(holder);
   if (start) return pidAlive(Number(start[1]));
+  if (one.started && now - one.started < STARTING_SPAN) return true;
   const named = /^name:(.+)$/.exec(holder);
   const rows = live.filter((row) =>
     named ? row.name === named[1] : idHolds(holder, row.sessionId, live),
   );
-  if (!rows.length) return (named || one.launched) && now - (one.at || 0) < STARTING_SPAN;
+  // Measured from `started` where the claim has one: its `at` may be minutes
+  // old, kept from the claim a start took over.
+  if (!rows.length)
+    return (named || one.launched) && now - (one.started || one.at || 0) < STARTING_SPAN;
   return rows.some((row) => statusOf(row) !== "not running");
 }
 
@@ -4317,11 +4331,38 @@ function unclaim(path, holder, { live, back } = {}) {
 /**
  * Claims a plan for a session under the guard; false when another holds it.
  * `from`, a holder whose claim this one takes over in the same write;
- * `launched`, an id `claude --bg` printed, held while no row lists it yet.
+ * `launched`, an id `claude --bg` printed, held while no row lists it yet;
+ * `started`, when a start launched the session it hands the claim to, which
+ * holds it for the start's span whatever the rows say (`holderRuns`), and
+ * `number`, the executor number that start took, which no other start takes
+ * while the claim stands (`takerFor`). A claim keeps its time (`at`) when it
+ * continues a hold, its holder taking it again or a start taking it over, as
+ * a Lease keeps its `acquireTime` while its `renewTime` moves; any other is
+ * the latest in the table, read under the guard, so no two share a time and
+ * the order of two claims never changes once written; a hold continued keeps
+ * its `started` and `number` too, so a session taking its own claim again
+ * within the span keeps it (Codex C5). `release`, keys `from` holds that go in
+ * the same write, as a start lets its number's slot go with the hand-over
+ * (Codex C2); `wait`, how long the guard is waited for
+ * (plans/claims-held-across-starts.md).
  */
-function claim(path, { holder, name, now = Date.now(), live = null, from = "", launched = false }) {
+function claim(
+  path,
+  {
+    holder,
+    name,
+    now = Date.now(),
+    live = null,
+    from = "",
+    launched = false,
+    started = 0,
+    number = 0,
+    release = [],
+    wait = 3000,
+  },
+) {
   const guard = `${files.claims()}.guard`;
-  if (!takeGuard(guard)) return false;
+  if (!takeGuard(guard, wait)) return false;
   try {
     const table = readJson(files.claims()) || {};
     const held = table[path];
@@ -4336,13 +4377,24 @@ function claim(path, { holder, name, now = Date.now(), live = null, from = "", l
         (from && (held.holder === from || holdsClaim(held, from, live))) ||
         (!/^start:/.test(held.holder) && holdsClaim(held, holder, live)));
     if (held && !own && held.until > now && !gone) return false;
+    const latest = Math.max(0, ...Object.values(table).map((one) => one?.at || 0));
+    const kept = own && held.until > now ? held : {};
+    const at = kept.at || Math.max(now, latest + 1);
+    // Only its own holder's: a start taking a claim over makes its own span.
+    if (!from) {
+      started ||= kept.started || 0;
+      number ||= kept.number || 0;
+    }
     table[path] = {
       holder,
       name,
-      at: now,
+      at,
       until: now + ANSWER_WINDOW,
       ...(launched ? { launched: true } : {}),
+      ...(started ? { started } : {}),
+      ...(number ? { number } : {}),
     };
+    for (const key of release) if (from && table[key]?.holder === from) delete table[key];
     writeJson(files.claims(), table);
     return true;
   } finally {
@@ -4366,7 +4418,11 @@ function ownTree(plan, executors, trees = null) {
  * number is within `executors` and its worktree is there, else the lowest
  * number that is free, one with no live unretired executor or with one that
  * is idle, has no plan building and holds no claim, by its id or its name
- * (`holdsClaim`, the sessions read as the live rows); null when none is.
+ * (`holdsClaim`, the sessions read as the live rows); null when none is. A
+ * number a claim names (`number`, the start's that launched its holder) is
+ * not free while the claim stands, so a second start that reads the first's
+ * session with no process, or no row, never takes its number
+ * (plans/claims-held-across-starts.md).
  */
 export function takerFor(
   plan,
@@ -4377,6 +4433,11 @@ export function takerFor(
   const at = (n) => sessions.filter((one) => one.number === n && !one.retired);
   const free = (n) =>
     !claims[`slot:${n}`] &&
+    !Object.values(claims).some(
+      // Past the start's span a live claim's session is listed in its number,
+      // so the claim holds it no longer, also when the sessions are unread.
+      (one) => one?.number === n && !(one.started && Date.now() - one.started >= STARTING_SPAN),
+    ) &&
     at(n).every(
       (one) =>
         one.status === "not running" ||
@@ -4934,19 +4995,27 @@ function startHere(
   let messaged = "";
   let batch = null;
   let sessionAt = false;
-  if (kind === "executor" && agent === "executor") {
-    // The replaced session's claims order two handed plans as its own hooks
-    // do, and hold none from this start.
-    const replaced = claimsFor(plans, live, replace);
-    const claims = Object.fromEntries([
+  // The claims that hold a plan from this start: the other sessions', with
+  // the plans and numbers a usage reset's starts took before it.
+  const holding = (others) =>
+    Object.fromEntries([
       // The plans it started, so a plan of one of their topics, or of the
       // day's fixes with one, waits on it (plans/claimed-plans-no-mutual-wait.md);
       // a claim read for one is kept, its holder and time with it.
       ...leased.map((path) => [path, { holder: "started", until: Infinity }]),
-      ...Object.entries(replaced.others),
+      ...Object.entries(others),
       // The numbers this timer started or was refused at, held as a start holds its own.
       ...passed.map((n) => [`slot:${n}`, { holder: "started", until: Infinity }]),
     ]);
+  // The claims a start made that name their number: their sessions are at
+  // work there, listed or not (plans/claims-held-across-starts.md).
+  let numbered = [];
+  if (kind === "executor" && agent === "executor") {
+    // The replaced session's claims order two handed plans as its own hooks
+    // do, and hold none from this start.
+    const replaced = claimsFor(plans, live, replace);
+    const claims = holding(replaced.others);
+    numbered = Object.values(claims).filter((one) => one?.number && one.name);
     const free = freePlans(plans, { claims, own: replaced.own });
     const sessions = sessionsOf("executor", live, readLocks(), { plans })
       // A chat in the checkout is no number's: it builds nothing there.
@@ -4989,7 +5058,13 @@ function startHere(
         const there = sessions.find((one) => one.number === own && !one.retired);
         return `${open[0].path} waits on executor-${own}, where it was built${there?.on ? ` and ${there.name} is building ${there.on}` : ""}: it is resumed there once that executor is free.`;
       }
-      const busy = sessions.filter((one) => one.number <= executors).map((one) => one.name);
+      const listed = sessions.filter((one) => one.number <= executors).map((one) => one.name);
+      const busy = [
+        ...new Set([
+          ...listed,
+          ...numbered.filter((one) => one.number <= executors).map((one) => one.name),
+        ]),
+      ];
       return `All ${executors} executors are at work (${busy.join(", ") || "none read"}): the first to finish takes ${open[0].path}.`;
     }
     const taker = takeOf(pick);
@@ -5132,6 +5207,7 @@ function startHere(
             .filter((one) => one.number && one.number !== number && !one.retired)
             .map((one) => one.name)
             .concat(going)
+            .concat(numbered.filter((one) => one.number !== number).map((one) => one.name))
         : [],
     // This checkout's chats only: one in another checkout reads another queue.
     // The chat a hand-over replaces is stopped once this one is confirmed,
@@ -5308,24 +5384,59 @@ function startHere(
   // handed plans (decisions.md#plan-waits-on).
   const before = tree && replace ? (readJson(files.claims()) || {})[paths[0]] : null;
   const back = before && holdsClaim(before, replace, live) ? before : undefined;
+  // Gives back what this start took: its name, unless the launch failed
+  // (`keepName`), an executor's plan claim, put back as it was, and its
+  // number's slot, the replaced sessions' state and lock, the handed plans' text.
+  const giveBack = ({ keepName = false } = {}) => {
+    if (!keepName) dropName(name);
+    if (tree) {
+      unclaim(paths[0], starter, { back });
+      unclaim(`slot:${number}`, starter);
+    }
+    for (const { old, state, lock } of replaced) {
+      writeJson(files.state(old.sessionId), state);
+      if (lock?.sessionId === old.sessionId) writeJson(files.lock(number), lock);
+    }
+    for (const [path, one] of handed) writeFileSync(join(root, path), one.before);
+  };
   if (tree) {
     const plan = claim(paths[0], { holder: starter, name, live, from: back ? replace : "" });
     const slot = plan && claim(`slot:${number}`, { holder: starter, name, live });
-    if (!slot) {
-      dropName(name);
-      if (plan) unclaim(paths[0], starter, { back });
-      for (const { old, state, lock } of replaced) {
-        writeJson(files.state(old.sessionId), state);
-        if (lock?.sessionId === old.sessionId) writeJson(files.lock(number), lock);
-      }
-      for (const [path, one] of handed) writeFileSync(join(root, path), one.before);
+    // A start that took the number's slot once another let it go reads the
+    // other's claim naming the number (Codex C1).
+    const named =
+      slot &&
+      Object.values(readClaims(plans, live)).some(
+        (one) => one.number === number && one.holder !== starter && !holdsClaim(one, replace, live),
+      );
+    if (!slot || named) {
+      giveBack();
       return `${paths[0]} or executor-${number} was taken by another start at this moment; plans shows the queue.`;
+    }
+    // **A start judges its plan again once it holds it**, as a stop does: a
+    // claim another start or stop wrote since this one read them may make it
+    // wait, and it is given back, nothing launched
+    // (plans/claims-held-across-starts.md). This start's own claims order
+    // two plans in hand with the replaced session's.
+    if (agent === "executor") {
+      const current = claimsFor(plans, live, replace);
+      const split = (mine) =>
+        Object.fromEntries(
+          Object.entries(current.others).filter(([, one]) => (one.holder === starter) === mine),
+        );
+      const still = freePlans(plans, {
+        claims: holding(split(false)),
+        own: { ...current.own, ...split(true) },
+      }).find((p) => p.path === paths[0]);
+      if (still?.waitsOn) {
+        giveBack();
+        return waitsWords(still);
+      }
     }
   }
   // The rows of the name this start's own read listed are not its session.
   const known = (live || []).filter((row) => row.name === name).map((row) => row.sessionId);
   const seen = launch(args, name, kind, tree || root, known);
-  if (tree) unclaim(`slot:${number}`, starter);
   if (kind === "assistant") unclaim("slot:assistant", starter);
   // A launch that failed keeps the deferral, and with it the timer's pid.
   if (typeof seen === "string" && seen !== "unread") {
@@ -5333,12 +5444,7 @@ function startHere(
     // slow launcher's as a silent one's, so the name stays held until its
     // span lapses and no start numbers it again meanwhile
     // (plans/late-session-keeps-its-name.md).
-    if (tree) unclaim(paths[0], starter, { back });
-    for (const { old, state, lock } of replaced) {
-      writeJson(files.state(old.sessionId), state);
-      if (lock?.sessionId === old.sessionId) writeJson(files.lock(number), lock);
-    }
-    for (const [path, one] of handed) writeFileSync(join(root, path), one.before);
+    giveBack({ keepName: true });
     // A lease's timer that failed to launch leaves its due briefs free, as a refusal does.
     if (leaseTimer) releaseLease(due);
     return seen;
@@ -5421,13 +5527,20 @@ function startHere(
     // Not listed yet: held by the id the launch read, else by its name, until
     // it is listed, or for the start's span ("A start sees its session"). The
     // start's own claim is handed over in the same write, so no other takes
-    // the plan between.
+    // the plan between; it is the session's for the start's span with the
+    // start's number, and the number's slot is let go only then, so the
+    // number is held without a gap (plans/claims-held-across-starts.md).
     const id = row ? row.sessionId : own;
     claim(paths[0], {
       holder: id || `name:${name}`,
       name,
       from: starter,
       launched: !row && Boolean(seen?.launched) && Boolean(id),
+      started: Date.now(),
+      number,
+      release: [`slot:${number}`],
+      // A guard left by a dead writer is taken after ten seconds.
+      wait: 12_000,
     });
   }
   const what = paths.length

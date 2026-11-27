@@ -15230,6 +15230,13 @@ describe("an executor builds in its own worktree", () => {
       const earlier = new Date(Date.now() - 3_600_000);
       utimesSync(file, earlier, earlier);
       writeFileSync(one.rows, "[]");
+      // Its session gone past the start's span, the claim holds its number no
+      // longer (plans/claims-held-across-starts.md).
+      const claimsFile = join(one.dir, ".claude", "executor.claims.json");
+      const table = JSON.parse(readFileSync(claimsFile, "utf8"));
+      for (const one of Object.values(table) as { started?: number }[])
+        if (one.started) one.started = Date.now() - 3 * 60_000;
+      writeFileSync(claimsFile, JSON.stringify(table));
       // The loop guard holds a second start within ten minutes: the owner's word lets it.
       one.queue(["start", "--owner-said", "start it again"]);
       expect(readFileSync(carried, "utf8")).toContain("executors: 2");
@@ -15388,7 +15395,18 @@ describe("several executors build at once", () => {
           `\n\n## Building, 24 November 2026, session ${id}\n\nPlan only`,
         ),
       );
-    return { dir, queue, read, write, tree, building, env };
+    /**
+     * Sets the `started` of the claim on `path` three minutes back: past the
+     * start's span, so its session is read by its row, as one with no process
+     * (plans/claims-held-across-starts.md).
+     */
+    const lapse = (path: string) => {
+      const file = join(dir, ".claude", "executor.claims.json");
+      const table = JSON.parse(readFileSync(file, "utf8"));
+      table[path] = { ...table[path], started: Date.now() - 3 * 60_000 };
+      writeFileSync(file, JSON.stringify(table));
+    };
+    return { dir, queue, read, write, tree, building, env, lapse };
   };
 
   it(
@@ -15486,8 +15504,9 @@ describe("several executors build at once", () => {
           "b.md": plan("B", "Change src/b.js.", "\n\nLands: topic chat."),
         },
         "executors: 2\n",
-        // Listed with no status, so the first start's claim is not read as
-        // its session's by the next: the plan it started holds the other.
+        // Listed with no status, as a session is for a moment before its
+        // process starts: the first start's claim, its session's for the
+        // start's span, holds the other plan (plans/claims-held-across-starts.md).
         "",
       );
       reset(one, ["plans/a.md", "plans/b.md"]);
@@ -15496,6 +15515,106 @@ describe("several executors build at once", () => {
       expect(one.queue(["list"])).toMatch(
         /plans\/b\.md +Plan only, 24 November, waits on plans\/a\.md \(the same topic, chat\)/,
       );
+    },
+  );
+
+  // plans/claims-held-across-starts.md
+  const topicPair = {
+    "a.md": plan("A", "Change src/a.js.", "\n\nLands: topic chat."),
+    "b.md": plan("B", "Change src/b.js.", "\n\nLands: topic chat."),
+  };
+  const claimsIn = (one: ReturnType<typeof pool>) =>
+    JSON.parse(readFileSync(join(one.dir, ".claude", "executor.claims.json"), "utf8"));
+  const bWaits =
+    "plans/b.md waits on plans/a.md (the same topic, chat): it is taken once that one is built.";
+
+  it(
+    "a second start sees the first's claim while its session has no process yet",
+    { timeout: 90_000 },
+    () => {
+      // Listed with no process, as every session is for a moment.
+      const one = pool(
+        "Fresh",
+        { ...topicPair, "c.md": plan("C", "Change src/c.js.") },
+        "executors: 2\n",
+        "",
+      );
+      expect(one.queue(["start"])).toContain(
+        "Fresh Executor 1 (lab) was started on: plans/a.md, in executor-1.",
+      );
+      expect(one.queue(["start"])).toContain(
+        "Fresh Executor 2 (lab) was started on: plans/c.md, in executor-2.",
+      );
+      const log = readFileSync(join(one.dir, ".claude", "starts.log"), "utf8")
+        .trim()
+        .split("\n");
+      expect(log).toHaveLength(2);
+      expect(log.filter((line) => line.includes("was retired"))).toEqual([]);
+      const held = claimsIn(one)["plans/a.md"];
+      expect(held).toMatchObject({ holder: one.read()[0].sessionId, number: 1 });
+      expect(held.started).toEqual(expect.any(Number));
+      expect(one.queue(["start", "plans/b.md"]).trim()).toContain(bWaits);
+      // Not listed at all: the claim's holder is the id claude --bg printed.
+      const two = pool(
+        "Unlisted",
+        { ...topicPair, "c.md": plan("C", "Change src/c.js.") },
+        "executors: 2\n",
+        "",
+      );
+      two.queue(["start"], {}, { STUB: "backgrounded" });
+      expect(claimsIn(two)["plans/a.md"]).toMatchObject({ holder: "1234abcd", number: 1 });
+      expect(two.queue(["start"])).toContain(
+        "Unlisted Executor 2 (lab) was started on: plans/c.md, in executor-2.",
+      );
+    },
+  );
+
+  it(
+    "a start gives its plan back when a claim written since its read makes it wait",
+    { timeout: 60_000 },
+    () => {
+      const one = pool("Back", topicPair, "executors: 2\n");
+      const busy = "pool-busy-0000";
+      one.write([
+        {
+          sessionId: busy,
+          name: "Back Executor 9 (lab)",
+          kind: "background",
+          status: "busy",
+          cwd: one.tree(2),
+        },
+      ]);
+      // Another start's claim on plans/b.md, written after this start read the
+      // claims and before its own: by git's post-checkout hook, which
+      // `git worktree add` runs as the start makes executor-1.
+      const claimsFile = join(one.dir, ".claude", "executor.claims.json");
+      const prepared = join(one.dir, ".claude", "prepared.claims.json");
+      writeFileSync(
+        prepared,
+        JSON.stringify({
+          "plans/b.md": {
+            holder: busy,
+            name: "Back Executor 9 (lab)",
+            at: Date.now() - 60_000,
+            until: Date.now() + 20 * 60_000,
+          },
+        }),
+      );
+      const hook = join(one.dir, ".git", "hooks", "post-checkout");
+      writeFileSync(
+        hook,
+        `#!/bin/sh\ncase "$(pwd)" in */.claude/worktrees/*) cp "${prepared}" "${claimsFile}" ;; esac\n`,
+      );
+      chmodSync(hook, 0o755);
+      expect(one.queue(["start"]).trim()).toContain(
+        "plans/a.md waits on plans/b.md (the same topic, chat): it is taken once that one is built.",
+      );
+      const left = claimsIn(one);
+      expect(left["plans/a.md"]).toBeUndefined();
+      expect(left["slot:1"]).toBeUndefined();
+      expect(left["plans/b.md"]).toMatchObject({ holder: busy });
+      expect(existsSync(join(one.dir, ".claude", "starts.log"))).toBe(false);
+      expect(one.read()).toHaveLength(1);
     },
   );
 
@@ -16033,6 +16152,8 @@ describe("several executors build at once", () => {
       timer();
       expect(log()).toHaveLength(before + 1);
       expect(JSON.parse(log().at(-1) || "{}").paths).toEqual(["plans/one.md"]);
+      // The claim taken over keeps its time (plans/claims-held-across-starts.md).
+      expect(claims()["plans/one.md"].at).toBe(held.at);
     },
   );
 
@@ -16115,6 +16236,17 @@ describe("several executors build at once", () => {
     expect(
       takerFor({ path: "plans/a.md", state: "ready" }, { executors: 3, sessions: [] }),
     ).toEqual({ number: 1, session: null });
+    // A number a claim names is not free (plans/claims-held-across-starts.md).
+    expect(
+      takerFor(
+        { path: "plans/a.md", state: "ready" },
+        {
+          executors: 2,
+          sessions: [],
+          claims: { "plans/x.md": { holder: "abcd1234", number: 1 } },
+        },
+      ),
+    ).toEqual({ number: 2, session: null });
   });
 
   it(
@@ -16176,6 +16308,7 @@ describe("several executors build at once", () => {
             row.sessionId === second.sessionId ? { ...row, status: undefined, pid: 0 } : row,
           ),
       );
+      one.lapse("plans/b.md");
       // The fresh executor is prompted to resume it.
       expect(one.queue(["start", "--dry"])).toContain(
         'Resume plans/b.md from its \\"Handing over\\" section.',

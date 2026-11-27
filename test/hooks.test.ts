@@ -15618,6 +15618,108 @@ describe("several executors build at once", () => {
     },
   );
 
+  // plans/claims-held-follow-up.md
+  /** Runs `script` in git's post-checkout hook when a worktree is made: after a start's read, before its claim. */
+  const onTreeMade = (one: ReturnType<typeof pool>, script: string) => {
+    const hook = join(one.dir, ".git", "hooks", "post-checkout");
+    writeFileSync(hook, `#!/bin/sh\ncase "$(pwd)" in */.claude/worktrees/*) ${script} ;; esac\n`);
+    chmodSync(hook, 0o755);
+  };
+
+  it(
+    "a start gives back a plan another session's Building line took since its read, and launches nothing",
+    { timeout: 60_000 },
+    () => {
+      const one = pool("Taken", { "a.md": plan("A", "Change src/a.js.") }, "executors: 2\n");
+      // Another executor's Building line, with no claim, by a session this
+      // start's rows do not list yet.
+      const file = join(one.dir, "plans", "a.md");
+      const taken = join(one.dir, ".claude", "taken.md");
+      writeFileSync(
+        taken,
+        readFileSync(file, "utf8").replace(
+          "\n\nPlan only",
+          "\n\n## Building, 27 November 2026, session other-exec-5678\n\nPlan only",
+        ),
+      );
+      onTreeMade(one, `cp "${taken}" "${file}"`);
+      expect(one.queue(["start"]).trim()).toContain(
+        "plans/a.md or executor-1 was taken by another start at this moment; plans shows the queue.",
+      );
+      const left = claimsIn(one);
+      expect(left["plans/a.md"]).toBeUndefined();
+      expect(left["slot:1"]).toBeUndefined();
+      expect(existsSync(join(one.dir, ".claude", "starts.log"))).toBe(false);
+      expect(one.read()).toHaveLength(0);
+    },
+  );
+
+  it(
+    "goes on at a usage reset past a plan it gave back to a free plan of another topic",
+    { timeout: 90_000 },
+    () => {
+      const busy = "pool-busy-0000";
+      // Each case runs `script` once the first start read the queue, so it
+      // gives plans/a.md back, and the reset starts plans/c.md, not plans/b.md.
+      const onward = (name: string, script: (one: ReturnType<typeof pool>) => string) => {
+        const one = pool(
+          name,
+          { ...topicPair, "c.md": plan("C", "Change src/c.js.") },
+          "executors: 3\n",
+        );
+        one.write([
+          {
+            sessionId: busy,
+            name: `${name} Executor 3 (lab)`,
+            kind: "background",
+            status: "busy",
+            cwd: one.tree(3),
+          },
+        ]);
+        onTreeMade(one, script(one));
+        reset(one, ["plans/a.md", "plans/b.md", "plans/c.md"]);
+        expect(startedBy(one)).toEqual([`${name} Executor 4 (lab): plans/c.md in executor-1`]);
+        expect(String(claimsIn(one)["plans/a.md"]?.holder ?? "")).not.toMatch(/^start:/);
+        return one;
+      };
+      /** A claim by the busy session on `path`, copied over the claims. */
+      const claimOn = (path: string) => (one: ReturnType<typeof pool>) => {
+        const prepared = join(one.dir, ".claude", "prepared.claims.json");
+        writeFileSync(
+          prepared,
+          JSON.stringify({
+            [path]: {
+              holder: busy,
+              name: "Executor 3",
+              at: Date.now() - 60_000,
+              until: Date.now() + 20 * 60_000,
+            },
+          }),
+        );
+        return `cp "${prepared}" "${join(one.dir, ".claude", "executor.claims.json")}"`;
+      };
+      // A newer claim on plans/b.md makes plans/a.md wait.
+      onward("Onward", claimOn("plans/b.md"));
+      // Another start's claim on plans/a.md itself (Codex C6).
+      onward("Claimed", claimOn("plans/a.md"));
+      // Another executor's Building line on plans/a.md, by a session the
+      // reset's rows never list: plans/b.md still waits on it (Codex C2).
+      const built = onward("Built", (one) => {
+        const file = join(one.dir, "plans", "a.md");
+        const taken = join(one.dir, ".claude", "taken.md");
+        writeFileSync(
+          taken,
+          readFileSync(file, "utf8").replace(
+            "\n\nPlan only",
+            "\n\n## Building, 27 November 2026, session other-exec-5678\n\nPlan only",
+          ),
+        );
+        return `cp "${taken}" "${file}"`;
+      });
+      expect(existsSync(join(built.tree(2)))).toBe(false);
+    },
+  );
+
   it(
     "leaves a plan deferred with another that changes its file waiting on it at the reset",
     { timeout: 60_000 },

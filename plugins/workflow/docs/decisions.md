@@ -608,12 +608,18 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   `acquireTime` while its `renewTime` moves, and no two claims share a
   time, so the order of two claims never changes once written; and a
   start judges its plan again once it holds the claim, as a stop does,
-  and gives it back when a claim written since its read makes it wait.
+  on the plans read again, and gives it back when a claim written since
+  its read makes it wait, or when a Building line written meanwhile
+  makes it no longer ready or handed, or handed over, a session a moment
+  old being read as live, since launching on a taken plan spends a
+  session; a usage reset's start then goes on to the next free plan, as
+  it does past a plan or number another start took at that moment,
+  reading that Building line as live in its next starts.
   Known limits: a chat begun before this runs the copy it began with
   and does neither until it ends; a session ended within its span holds
-  its plan and number to the span's end; a start that gives a plan back
-  starts nothing, and the next hook or timer starts on what is free; a
-  plan sent by message to an idle chat is not judged again, its
+  its plan and number to the span's end; any other start that gives a
+  plan back starts nothing, and the next hook or timer starts on what
+  is free; a plan sent by message to an idle chat is not judged again, its
   Building line is. A start's claim holds the
   session it started: its row's id, else the id `claude --bg` printed
   before `claude agents` lists it, and its name only when neither is
@@ -624,7 +630,7 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/handed-plan-asking-not-ahead.md,
   plans/handed-plans-order-holds-everywhere.md,
   plans/claimed-plans-no-mutual-wait.md,
-  plans/claims-held-across-starts.md.
+  plans/claims-held-across-starts.md, plans/claims-held-follow-up.md.
 - `push-not-waited-on` **The executor runs the checks once, before the
   push, and waits on no pull request's run of them; a failed run
   reaches the assistant by the webhook.** (Javi, 14 November) The pull

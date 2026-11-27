@@ -4031,17 +4031,23 @@ export function start(paths, options = {}) {
   // next start, listed or not, and a plan started here is held from it as
   // claimed, so it leases at most one plan of a topic, or of the day's
   // fixes; the session replaced and the owner's word go with the first start.
-  // A start that gives its plan back, a claim written since its read making
-  // it wait, ends the loop as one that starts nothing; and a separate start
+  // A start that gives its plan back, judged again once it holds it or its
+  // plan or number taken by another start at that moment, is passed by the
+  // next start, which goes on to the next free plan, reading a Building line
+  // it saw written as live; one that starts nothing for any other reason
+  // ends the loop; and a separate start
   // beside these reads each one's claim, with its number, as its session's
-  // for the start's span (plans/claims-held-across-starts.md).
+  // for the start's span (plans/claims-held-across-starts.md,
+  // plans/claims-held-follow-up.md).
   let out = {};
-  let said = startHere(paths, { ...options, out });
+  const lately = [];
+  let said = startHere(paths, { ...options, out, lately });
   const kind = options.agent === "planner" || options.agent === "assistant" ? "" : "executor";
   if (options.timer && kind && !options.dry) {
     const started = [];
     const passed = [];
     const going = [];
+    const given = [];
     const { replace: _r, said: _s, ...next } = options;
     for (let i = 1; i < paths.length + proj().executors; i++) {
       if (out.started) {
@@ -4049,11 +4055,14 @@ export function start(paths, options = {}) {
         started.push(out.started.path);
         if (out.started.number) passed.push(out.started.number);
       } else if (out.refused) passed.push(out.refused);
+      else if (out.gaveBack) given.push(out.gaveBack);
       else break;
-      const rest = paths.filter((path) => !started.includes(queuePath(path)));
+      const rest = paths.filter(
+        (path) => !started.includes(queuePath(path)) && !given.includes(queuePath(path)),
+      );
       if (!rest.length) break;
       out = {};
-      said = `${said}\n${startHere(rest, { ...next, passed, going, leased: started, again: true, out })}`;
+      said = `${said}\n${startHere(rest, { ...next, passed, going, leased: started, again: true, out, lately })}`;
     }
   }
   // **The listener is armed with a start** (decisions.md#github-webhook).
@@ -4872,6 +4881,46 @@ function withoutFirstLine(text) {
   return kept.join("\n");
 }
 
+/** The session a text's Building line names, the first, as `stateOf` reads it: in a list. */
+const buildingIds = (text = "") => {
+  const id = /^## Building, [^,\n]+, session ([^\s,]+)/m.exec(text)?.[1];
+  return id ? [id] : [];
+};
+
+/**
+ * The live sessions' ids for a start's read, with those `lately` holds: the
+ * sessions a start of this run saw write a Building line its rows did not
+ * list yet; null when the rows could not be read.
+ */
+function startIds(live, lately = []) {
+  const ids = liveIds(live);
+  return ids && [...ids, ...lately];
+}
+
+/**
+ * **The plans as they are now, for a start's second judgment**, one read:
+ * a Building line on a plan that its text in `before` did not have names a
+ * session the start's rows may not list yet, a moment old, so it is read
+ * as live and its plan as building, and kept in `lately` for the run's next
+ * starts; a plan a gone session's hand-over (`gone`) was read with is read
+ * so again while its file is unchanged (plans/claims-held-follow-up.md).
+ */
+function rereadPlans(gone, live, before, lately = []) {
+  const ids = startIds(live, lately);
+  const was = new Map(before.map((plan) => [plan.path, plan.text]));
+  const plans = readPlans(join(root, "plans"), ids).map((plan) => {
+    const handOver = gone[plan.path]?.before === plan.text ? gone[plan.path].text : "";
+    const known = [...buildingIds(was.get(plan.path)), gone[plan.path]?.sessionId, ...(ids || [])];
+    const added = ids ? buildingIds(plan.text).filter((id) => !known.includes(id)) : [];
+    lately.push(...added);
+    if (!handOver && !added.length) return plan;
+    const text = handOver || plan.text;
+    const state = stateOf(text, { mtime: plan.mtime, live: [...ids, ...added] });
+    return { path: plan.path, file: plan.file, text, ...state };
+  });
+  return withAsking(plans.sort(queueOrder), live);
+}
+
 function startHere(
   paths,
   {
@@ -4889,6 +4938,7 @@ function startHere(
     leased = [],
     again = false,
     out = {},
+    lately = [],
   } = {},
 ) {
   if (!proj().found) return NO_PROJECT;
@@ -4909,7 +4959,7 @@ function startHere(
   // with the rest `canStart` replaces, and taken back with them when the
   // launch fails; a refused, deferred or dry start writes nothing.
   const gone = {};
-  let read = readPlans(join(root, "plans"), liveIds(live));
+  let read = readPlans(join(root, "plans"), startIds(live, lately));
   if (agent === "executor" && live) {
     for (const plan of read) {
       const row =
@@ -4928,7 +4978,7 @@ function startHere(
     if (Object.keys(gone).length)
       read = readPlans(
         join(root, "plans"),
-        liveIds(live),
+        startIds(live, lately),
         Object.fromEntries(Object.entries(gone).map(([path, one]) => [path, one.text])),
       );
   }
@@ -5411,26 +5461,45 @@ function startHere(
       );
     if (!slot || named) {
       giveBack();
+      // Another start took one of them: a usage reset's loop goes on past it.
+      out.gaveBack = paths[0];
       return `${paths[0]} or executor-${number} was taken by another start at this moment; plans shows the queue.`;
     }
-    // **A start judges its plan again once it holds it**, as a stop does: a
-    // claim another start or stop wrote since this one read them may make it
-    // wait, and it is given back, nothing launched
-    // (plans/claims-held-across-starts.md). This start's own claims order
-    // two plans in hand with the replaced session's.
+    // **A start judges its plan again once it holds it**, as a stop does,
+    // on the plans read again: a claim another start or stop wrote since this
+    // one read them may make it wait, and a Building line another executor
+    // wrote meanwhile, with no claim, makes it no longer ready or handed;
+    // either way it is given back, nothing launched, and marked so a usage
+    // reset's loop goes on past it (plans/claims-held-across-starts.md,
+    // plans/claims-held-follow-up.md). This start's own claims order two
+    // plans in hand with the replaced session's.
     if (agent === "executor") {
-      const current = claimsFor(plans, live, replace);
+      const now = rereadPlans(gone, live, plans, lately);
+      const current = claimsFor(now, live, replace);
       const split = (mine) =>
         Object.fromEntries(
           Object.entries(current.others).filter(([, one]) => (one.holder === starter) === mine),
         );
-      const still = freePlans(plans, {
+      const was = plans.find((p) => p.path === paths[0]);
+      const fresh = now.find((p) => p.path === paths[0]);
+      const still = freePlans(now, {
         claims: holding(split(false)),
         own: { ...current.own, ...split(true) },
       }).find((p) => p.path === paths[0]);
-      if (still?.waitsOn) {
+      // No longer ready or handed, or handed over since the read, when the
+      // worktree and prompt were chosen; a path the read finds no plan in, or
+      // an old one, is taken as named.
+      const taken = fresh
+        ? fresh.state !== "old" && (!still || Boolean(was && fresh.state !== was.state))
+        : Boolean(was && was.state !== "old");
+      if (still?.waitsOn || taken) {
         giveBack();
-        return waitsWords(still);
+        out.gaveBack = paths[0];
+        if (still) return waitsWords(still);
+        if (fresh?.state === "dropped") return droppedWords(fresh);
+        if (fresh?.state === "planned") return plannedWords(fresh);
+        if (fresh?.askingIn) return askingWords(fresh);
+        return `${paths[0]} or executor-${number} was taken by another start at this moment; plans shows the queue.`;
       }
     }
   }

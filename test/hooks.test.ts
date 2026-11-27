@@ -15720,6 +15720,166 @@ describe("several executors build at once", () => {
     },
   );
 
+  // plans/lapsed-claims-and-handover-text.md
+  /** `claude agents` unread: its rows are no JSON, and a `--bg` start prints claude --bg's line. */
+  const unreadAgents = (one: ReturnType<typeof pool>) => {
+    writeFileSync(join(one.dir, ".claude", "rows.json"), "unread");
+    return { STUB: "backgrounded" };
+  };
+  /** A claim by a session no row lists, its start's span past, naming `number`. */
+  const lapsedClaim = (number: number, name: string, more: object = {}) => ({
+    "plans/gone.md": {
+      holder: "gone-exec-0001",
+      name,
+      at: Date.now() - 10 * 60_000,
+      until: Date.now() + 20 * 60_000,
+      started: Date.now() - 3 * 60_000,
+      number,
+    },
+    ...more,
+  });
+  /** A `claude` that runs `onBg` at a `--bg` start, then the pool's own. */
+  const wrapClaude = (one: ReturnType<typeof pool>, onBg: string) => {
+    const file = join(temp("wrapped-claude-"), "claude");
+    writeFileSync(
+      file,
+      `#!/bin/sh\ncase " $* " in *" --bg "*) ${onBg} ;; esac\nexec "${one.env.WORKFLOW_CLAUDE}" "$@"\n`,
+    );
+    chmodSync(file, 0o755);
+    return { WORKFLOW_CLAUDE: file };
+  };
+
+  it(
+    "a start takes the number a claim past its span names, with claude agents unread, and launches",
+    { timeout: 60_000 },
+    () => {
+      const one = pool("Lapse", { "a.md": plan("A", "Change src/a.js.") }, "executors: 2\n");
+      writeFileSync(
+        join(one.dir, ".claude", "executor.claims.json"),
+        JSON.stringify(lapsedClaim(1, "Lapse Executor 7 (lab)")),
+      );
+      expect(one.queue(["start"], {}, unreadAgents(one))).toContain(
+        "Lapse Executor 1 (lab) was started on: plans/a.md, in executor-1.",
+      );
+      expect(claimsIn(one)["plans/a.md"]).toMatchObject({ holder: "1234abcd", number: 1 });
+    },
+  );
+
+  it(
+    "a start whose hand-over claim cannot take the guard stops its session, leaves its claims to lapse with it and says the launch failed",
+    { timeout: 90_000 },
+    () => {
+      const one = pool("Guard", { "a.md": plan("A", "Change src/a.js.") }, "executors: 2\n");
+      // The claims' guard, a folder no writer removes, made as the session launches.
+      const guard = join(one.dir, ".claude", "executor.claims.json.guard");
+      const said = one.queue(["start"], {}, wrapClaude(one, `mkdir -p "${guard}"`));
+      rmSync(guard, { recursive: true, force: true });
+      const [row] = one.read();
+      expect(said.trim()).toContain(
+        "Guard Executor 1 (lab) was not started: plans/a.md could not be handed to it, .claude/executor.claims.json.guard being held past twelve seconds; it was stopped, and plans shows the queue.",
+      );
+      expect(readFileSync(join(one.dir, ".claude", "stops.log"), "utf8")).toContain(row.sessionId);
+      expect(existsSync(join(one.dir, ".claude", "starts.log"))).toBe(false);
+      // Not written without the guard: the start's claims lapse with its process,
+      // so the slot is free after the start and the next start takes executor-1.
+      expect(claimsIn(one)["slot:1"].holder).toMatch(/^start:/);
+      one.write([]);
+      expect(one.queue(["start"])).toContain(
+        "Guard Executor 1 (lab) was started on: plans/a.md, in executor-1.",
+      );
+    },
+  );
+
+  it(
+    "a lapsed claim's session is not counted at work: its quick death refuses, and the full line does not name it",
+    { timeout: 60_000 },
+    () => {
+      const one = pool("Count", { "a.md": plan("A", "Change src/a.js.") }, "executors: 2\n");
+      const claimsFile = join(one.dir, ".claude", "executor.claims.json");
+      writeFileSync(claimsFile, JSON.stringify(lapsedClaim(2, "Count Executor 7 (lab)")));
+      writeFileSync(
+        join(one.dir, ".claude", "starts.log"),
+        `${JSON.stringify({ at: Date.now() - 2 * 60_000, name: "Count Executor 7 (lab)", paths: ["plans/gone.md"] })}\n`,
+      );
+      expect(one.queue(["start"], {}, unreadAgents(one))).toContain(
+        "The last executor (Count Executor 7 (lab)) ended within ten minutes with nothing built",
+      );
+      // One executor, its slot held by a live start: the line names nobody read.
+      const two = pool("Full", { "a.md": plan("A", "Change src/a.js.") }, "executors: 1\n");
+      writeFileSync(
+        join(two.dir, ".claude", "executor.claims.json"),
+        JSON.stringify(
+          lapsedClaim(1, "Full Executor 7 (lab)", {
+            "slot:1": {
+              holder: `start:${process.pid}`,
+              name: "Full Executor 8 (lab)",
+              at: Date.now(),
+              until: Date.now() + 20 * 60_000,
+            },
+          }),
+        ),
+      );
+      const full = two.queue(["start"], {}, unreadAgents(two));
+      expect(full).toContain("All 1 executors are at work (none read)");
+      expect(full).not.toContain("Full Executor 7");
+    },
+  );
+
+  it(
+    "keeps an edit made to a plan between a takeover's read and its claim, on the hand-over write and on the give-back",
+    { timeout: 90_000 },
+    () => {
+      /** A pool whose executor-1 session building plans/a.md has no process. */
+      const goneIn = (name: string) => {
+        const one = pool(name, { "a.md": plan("A", "Change src/a.js.") }, "executors: 2\n");
+        one.queue(["start"]);
+        const [row] = one.read();
+        one.building("a.md", row.sessionId);
+        one.write([{ ...row, status: undefined, pid: 0 }]);
+        one.lapse("plans/a.md");
+        return one;
+      };
+      const edit = (one: ReturnType<typeof pool>) =>
+        `printf '\\nEdited meanwhile.\\n' >> "${join(one.dir, "plans", "a.md")}"`;
+      const text = (one: ReturnType<typeof pool>) =>
+        readFileSync(join(one.dir, "plans", "a.md"), "utf8");
+      // Edited before the hand-over is written: its worktree, gone from the
+      // disk, is made again, and git's hook edits the plan.
+      const before = goneIn("Before");
+      rmSync(before.tree(1), { recursive: true, force: true });
+      onTreeMade(before, edit(before));
+      // The gone session's Building line still first, the hand-over is written onto the edit.
+      expect(before.queue(["start"])).toContain("was started on: plans/a.md, in executor-1.");
+      expect(text(before)).toContain("Edited meanwhile.");
+      expect(text(before)).toContain("## Handing over");
+      // Its Building line another's by then: left as found, and given back.
+      const taken = goneIn("Taken");
+      rmSync(taken.tree(1), { recursive: true, force: true });
+      const file = join(taken.dir, "plans", "a.md");
+      const other = join(taken.dir, ".claude", "other.md");
+      writeFileSync(
+        other,
+        readFileSync(file, "utf8").replace(/session [^\s,]+/, "session other-exec-5678"),
+      );
+      onTreeMade(taken, `cp "${other}" "${file}"`);
+      expect(taken.queue(["start"])).toContain(
+        "plans/a.md or executor-1 was taken by another start at this moment",
+      );
+      expect(text(taken)).toContain("session other-exec-5678");
+      expect(text(taken)).not.toContain("## Handing over");
+      // Edited after it, as the launch fails: the give-back leaves it.
+      const after = goneIn("After");
+      const said = after.queue(
+        ["start"],
+        {},
+        wrapClaude(after, `${edit(after)}; echo "Workspace not trusted." >&2; exit 1`),
+      );
+      expect(said).toContain("was not started: Workspace not trusted");
+      expect(text(after)).toContain("## Handing over");
+      expect(text(after)).toContain("Edited meanwhile.");
+    },
+  );
+
   it(
     "leaves a plan deferred with another that changes its file waiting on it at the reset",
     { timeout: 60_000 },

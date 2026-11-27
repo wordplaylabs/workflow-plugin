@@ -601,9 +601,13 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   that moment (27 November: one plan started on twice, thirteen seconds
   apart, and the two plans of one topic above); as Kubernetes holds the
   liveness check off a container until its startup probe passes. The
-  claim carries the start's number, which no other start takes while
-  the claim stands, since the second start would retire the first's
-  session as one with no process. A claim keeps its time when its
+  claim carries the start's number, which no other start takes within
+  the start's span, since the second start would retire the first's
+  session as one with no process; past it the session is listed in its
+  number, and the claim neither holds the number nor counts its session
+  at work. A start that cannot hand its claim to the session it launched
+  stops it and writes no claim without the guard, its own lapsing with
+  its process; one it cannot stop keeps all it took. A claim keeps its time when its
   holder takes it again or a start takes it over, as a Lease keeps its
   `acquireTime` while its `renewTime` moves, and no two claims share a
   time, so the order of two claims never changes once written; and a
@@ -630,7 +634,8 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/handed-plan-asking-not-ahead.md,
   plans/handed-plans-order-holds-everywhere.md,
   plans/claimed-plans-no-mutual-wait.md,
-  plans/claims-held-across-starts.md, plans/claims-held-follow-up.md.
+  plans/claims-held-across-starts.md, plans/claims-held-follow-up.md,
+  plans/lapsed-claims-and-handover-text.md.
 - `push-not-waited-on` **The executor runs the checks once, before the
   push, and waits on no pull request's run of them; a failed run
   reaches the assistant by the webhook.** (Javi, 14 November) The pull
@@ -677,11 +682,13 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   queue is a file: the stop is the acknowledgement, and what matters is
   that no plan is ignored. An executor listed with no process is free:
   it refused every start and `plans end` would not end it, so a start
-  retires it and hands its plan over, as `plans end --now` does. A plan
+  retires it and hands its plan over, as `plans end --now` does, the
+  hand-over written onto the plan as it reads then, never over an edit
+  made since the start read it. A plan
   handed over too often goes to the assistant, the owner not asked
   (`executor-never-waits`). plans/executor-takes-next-ready-plan.md,
   plans/put-first-review-fixes.md, plans/executor-never-waits.md,
-  plans/parallel-executors.md.
+  plans/parallel-executors.md, plans/lapsed-claims-and-handover-text.md.
 - `starts-bounded` **Starts are bounded, as every loop over model calls
   is.** (Javi, 27 October) A queue that starts sessions on its own must
   not spend the subscription's window or loop on a session that dies. At

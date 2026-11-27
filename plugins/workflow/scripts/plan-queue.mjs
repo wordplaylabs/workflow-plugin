@@ -4422,6 +4422,17 @@ function ownTree(plan, executors, trees = null) {
 }
 
 /**
+ * The executor number claim `one` holds: the number of the start that
+ * launched its holder, while the start's span lasts; past it the session is
+ * listed in its number, so the claim holds it no longer, also when the
+ * sessions are unread, and 0 (plans/lapsed-claims-and-handover-text.md).
+ */
+function heldNumber(one, now = Date.now()) {
+  if (!one?.number) return 0;
+  return one.started && now - one.started >= STARTING_SPAN ? 0 : one.number;
+}
+
+/**
  * **Who takes a plan**: `{ number, session }`, `session` the live unretired
  * executor there or null; a handed plan its own worktree's number while that
  * number is within `executors` and its worktree is there, else the lowest
@@ -4442,11 +4453,7 @@ export function takerFor(
   const at = (n) => sessions.filter((one) => one.number === n && !one.retired);
   const free = (n) =>
     !claims[`slot:${n}`] &&
-    !Object.values(claims).some(
-      // Past the start's span a live claim's session is listed in its number,
-      // so the claim holds it no longer, also when the sessions are unread.
-      (one) => one?.number === n && !(one.started && Date.now() - one.started >= STARTING_SPAN),
-    ) &&
+    !Object.values(claims).some((one) => heldNumber(one) === n) &&
     at(n).every(
       (one) =>
         one.status === "not running" ||
@@ -4965,14 +4972,16 @@ function startHere(
       const row =
         plan.state === "building" ? live.find((one) => one.sessionId === plan.session) : null;
       if (!row || statusOf(row) !== "not running") continue;
+      const where = {
+        sessionId: plan.session,
+        branch: branchOf(row.cwd),
+        tree: treeNameOf(row.cwd),
+      };
       gone[plan.path] = {
         sessionId: plan.session,
+        where,
         before: plan.text,
-        text: goneEdit(plan.text, {
-          sessionId: plan.session,
-          branch: branchOf(row.cwd),
-          tree: treeNameOf(row.cwd),
-        }),
+        text: goneEdit(plan.text, where),
       };
     }
     if (Object.keys(gone).length)
@@ -5058,14 +5067,15 @@ function startHere(
       ...passed.map((n) => [`slot:${n}`, { holder: "started", until: Infinity }]),
     ]);
   // The claims a start made that name their number: their sessions are at
-  // work there, listed or not (plans/claims-held-across-starts.md).
+  // work there, listed or not, for the start's span (`heldNumber`)
+  // (plans/claims-held-across-starts.md, plans/lapsed-claims-and-handover-text.md).
   let numbered = [];
   if (kind === "executor" && agent === "executor") {
     // The replaced session's claims order two handed plans as its own hooks
     // do, and hold none from this start.
     const replaced = claimsFor(plans, live, replace);
     const claims = holding(replaced.others);
-    numbered = Object.values(claims).filter((one) => one?.number && one.name);
+    numbered = Object.values(claims).filter((one) => heldNumber(one) && one.name);
     const free = freePlans(plans, { claims, own: replaced.own });
     const sessions = sessionsOf("executor", live, readLocks(), { plans })
       // A chat in the checkout is no number's: it builds nothing there.
@@ -5414,10 +5424,29 @@ function startHere(
     writeJson(files.state(old.sessionId), { ...state, retired: true });
     if (kind === "executor") release(old.sessionId);
   }
-  const handed = Object.entries(gone).filter(([, one]) =>
-    replaced.some(({ old }) => old.sessionId === one.sessionId),
-  );
-  for (const [path, one] of handed) writeFileSync(join(root, path), one.text);
+  // A plan's text as it is on disk now; null when it cannot be read.
+  const onDisk = (path) => {
+    try {
+      return readFileSync(join(root, path), "utf8");
+    } catch {
+      return null;
+    }
+  };
+  // **A hand-over never overwrites an edit**: written onto the file as it
+  // reads now, while the gone session's Building line is still its first, and
+  // given back only while it reads as the hand-over written; a file whose
+  // Building line changed, the session come up or another taking it, is left
+  // as found for the second judgment (plans/lapsed-claims-and-handover-text.md).
+  // A save in the instant between a read and its write is still lost: no
+  // lock is shared with an editor.
+  const handed = Object.entries(gone).filter(([path, one]) => {
+    if (!replaced.some(({ old }) => old.sessionId === one.sessionId)) return false;
+    const now = onDisk(path);
+    if (now === null || buildingIds(now)[0] !== one.sessionId) return false;
+    if (now !== one.before) Object.assign(one, { before: now, text: goneEdit(now, one.where) });
+    writeFileSync(join(root, path), one.text);
+    return true;
+  });
   // **The plan and the number are reserved before the launch**: for this
   // process, so a start beside it at one moment takes neither.
   const starter = `start:${process.pid}`;
@@ -5436,10 +5465,11 @@ function startHere(
   const back = before && holdsClaim(before, replace, live) ? before : undefined;
   // Gives back what this start took: its name, unless the launch failed
   // (`keepName`), an executor's plan claim, put back as it was, and its
-  // number's slot, the replaced sessions' state and lock, the handed plans' text.
-  const giveBack = ({ keepName = false } = {}) => {
+  // number's slot, unless the claims are not to be written (`claims`), the
+  // replaced sessions' state and lock, the handed plans' text.
+  const giveBack = ({ keepName = false, claims = true } = {}) => {
     if (!keepName) dropName(name);
-    if (tree) {
+    if (tree && claims) {
       unclaim(paths[0], starter, { back });
       unclaim(`slot:${number}`, starter);
     }
@@ -5447,7 +5477,8 @@ function startHere(
       writeJson(files.state(old.sessionId), state);
       if (lock?.sessionId === old.sessionId) writeJson(files.lock(number), lock);
     }
-    for (const [path, one] of handed) writeFileSync(join(root, path), one.before);
+    for (const [path, one] of handed)
+      if (onDisk(path) === one.text) writeFileSync(join(root, path), one.before);
   };
   if (tree) {
     const plan = claim(paths[0], { holder: starter, name, live, from: back ? replace : "" });
@@ -5457,7 +5488,8 @@ function startHere(
     const named =
       slot &&
       Object.values(readClaims(plans, live)).some(
-        (one) => one.number === number && one.holder !== starter && !holdsClaim(one, replace, live),
+        (one) =>
+          heldNumber(one) === number && one.holder !== starter && !holdsClaim(one, replace, live),
       );
     if (!slot || named) {
       giveBack();
@@ -5517,6 +5549,54 @@ function startHere(
     // A lease's timer that failed to launch leaves its due briefs free, as a refusal does.
     if (leaseTimer) releaseLease(due);
     return seen;
+  }
+  // **The plan is claimed for the executor started on it**, so no other start
+  // takes it before its Building line.
+  if (tree) {
+    // The row of the id the launch read, never one listed before the launch
+    // or another session listed since under the name
+    // (plans/claim-goes-to-own-row.md); a launch that read no id long enough
+    // to tell a row by takes the first row of the name.
+    const own = seen?.id?.length >= 8 ? seen.id : "";
+    const listed = (liveSessions({ fresh: true }) || []).filter(
+      (one) => one.name === name && !known.includes(one.sessionId),
+    );
+    const row = own ? listed.find((one) => sameSession(own, one.sessionId)) : listed[0];
+    // Not listed yet: held by the id the launch read, else by its name, until
+    // it is listed, or for the start's span ("A start sees its session"). The
+    // start's own claim is handed over in the same write, so no other takes
+    // the plan between; it is the session's for the start's span with the
+    // start's number, and the number's slot is let go only then, so the
+    // number is held without a gap (plans/claims-held-across-starts.md).
+    const id = row ? row.sessionId : own;
+    const handedOver = claim(paths[0], {
+      holder: id || `name:${name}`,
+      name,
+      from: starter,
+      launched: !row && Boolean(seen?.launched) && Boolean(id),
+      started: Date.now(),
+      number,
+      release: [`slot:${number}`],
+      // A guard left by a dead writer is taken after ten seconds.
+      wait: 12_000,
+    });
+    // **A hand-over not written is a failed launch**: the session is stopped
+    // and the rest the start took given back. The claims are not written
+    // without their guard, the one thing that could not be taken: the plan
+    // and the slot stay this start's and lapse with its process. A session
+    // not stopped, or not read, keeps everything, as it may be building
+    // (plans/lapsed-claims-and-handover-text.md).
+    if (!handedOver) {
+      const stopped = Boolean(id) && stopNow(id, 5_000);
+      const guard = `.claude/${basename(files.claims())}.guard being held past twelve seconds`;
+      if (stopped) {
+        giveBack({ claims: false });
+        return `${name} was not started: ${paths[0]} could not be handed to it, ${guard}; it was stopped, and plans shows the queue.`;
+      }
+      return id
+        ? `${name} was started on ${paths[0]}, but it could not be handed to it, ${guard}, and it could not be stopped: end it with plans end ${id.slice(0, 8)} --now.`
+        : `${name} may have started on ${paths[0]}, which could not be handed to it, ${guard}; claude agents could not be read, so it is not confirmed: plans shows the queue once it lists the chats.`;
+    }
   }
   // The deferrals keep the paths this start did not take, and their timers.
   const deferrals = { executor: ["executor", "asking"], planner: ["planner"] }[kind] || [];
@@ -5580,38 +5660,7 @@ function startHere(
   // A planner started by the assistant, with nothing to replace, still ends
   // the retired planners' chats: the next planner starting is their cut-off.
   if (kind === "planner") stopRetiredPlanners(live, { except: replace });
-  // **The plan is claimed for the executor started on it**, so no other start
-  // takes it before its Building line.
   out.started = { name, path: paths[0], number: tree ? number : 0 };
-  if (tree) {
-    // The row of the id the launch read, never one listed before the launch
-    // or another session listed since under the name
-    // (plans/claim-goes-to-own-row.md); a launch that read no id long enough
-    // to tell a row by takes the first row of the name.
-    const own = seen?.id?.length >= 8 ? seen.id : "";
-    const listed = (liveSessions({ fresh: true }) || []).filter(
-      (one) => one.name === name && !known.includes(one.sessionId),
-    );
-    const row = own ? listed.find((one) => sameSession(own, one.sessionId)) : listed[0];
-    // Not listed yet: held by the id the launch read, else by its name, until
-    // it is listed, or for the start's span ("A start sees its session"). The
-    // start's own claim is handed over in the same write, so no other takes
-    // the plan between; it is the session's for the start's span with the
-    // start's number, and the number's slot is let go only then, so the
-    // number is held without a gap (plans/claims-held-across-starts.md).
-    const id = row ? row.sessionId : own;
-    claim(paths[0], {
-      holder: id || `name:${name}`,
-      name,
-      from: starter,
-      launched: !row && Boolean(seen?.launched) && Boolean(id),
-      started: Date.now(),
-      number,
-      release: [`slot:${number}`],
-      // A guard left by a dead writer is taken after ten seconds.
-      wait: 12_000,
-    });
-  }
   const what = paths.length
     ? `was started on: ${paths.join(", ")}${tree ? `, in ${basename(tree)}` : ""}`
     : `was opened for ${owner()}`;

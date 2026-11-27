@@ -294,7 +294,7 @@ nothing; `docs/landing.md` holds the executor's steps.
   stacked on may follow the name (`; lands in #52.`), and `plans` says a
   `Lands` line it cannot read and the topics still waiting for a pull
   request, each with why. (decisions.md#topic-landing)
-  A later plan joins an open pull request: the description is written
+  A later plan joins an open pull request while it has room: the description is written
   again, its screenshots attached with `gh pr edit --attach`, and nothing
   is posted. (decisions.md#joined-pull-request)
 - **A fix** (`Lands: fix.`): no decision, no catalogue or doc rule
@@ -307,20 +307,24 @@ nothing; `docs/landing.md` holds the executor's steps.
   commit of its own. (decisions.md#merge-refreshes-the-rest)
 
 **The description is a short list of what changed**: the owner's
-paragraphs when he wrote some, the `Closes`, `Builds on` and `Related`
-lines, then `Changes`, a few bullets, each a bold lead and one plain
+paragraphs when he wrote some, a `Closes` line per issue, `Builds on`,
+and one `Related` list naming each related pull request, issue or branch
+once, then `Changes`, a few bullets, each a bold lead and one plain
 sentence of what a person can now do or see, with one screenshot under
 a bullet only where it shows it; a bullet that replaces another
 person's call says so by name; the commits no plan here accounts for
 as bullets with their author; then where to try it; on one screen,
 pictures aside. The decisions stay in the catalogue, whose diff the
-pull request shows. The merge is the people's, and no agent merges. (decisions.md#short-description)
+pull request shows. Its title is one sentence saying what the whole
+pull request does now, written again when a plan adds what it does not
+cover; a title a person wrote stays. (decisions.md#pull-request-title)
+The merge is the people's, and no agent merges. (decisions.md#short-description)
 
 **How plans group into pull requests is the project's rule, under
 `## Pull requests` in its file**, read by the author of a `Lands` line;
 the plugin suggests one in `/workflow:setup` and keeps only what the queue cannot do without: a plan that
-rests on an open draft pull request of the queue's own lands in it, and
-one that rests on another person's pull request is stacked on it, since
+rests on an open draft pull request of the queue's own lands in it while
+it has room, and one that rests on another person's pull request is stacked on it, since
 the queue never pushes to another's branch. To rest on a pull request is
 to use what it adds; landing in it, the plan's `Lands` is that pull
 request's topic. Without the heading, a plan resting on the queue's own
@@ -328,6 +332,15 @@ pull request marked ready is stacked on it, and one that shares files
 with an open pull request gets a `Related` line and a pull request of
 its own. (decisions.md#stack-only-on-use,
 decisions.md#pull-requests-heading)
+
+**A pull request takes five plans.** A plan that would land in an open
+pull request of the queue's own that holds five lands on a topic stacked
+on it, with the other plans sent there, five to each; `plans full <n>
+<path>` says which, to the author of a `Lands` line and to the executor
+at the plan's start. Only a plan that fixes what the pull request itself
+added, a failed check, a finding of its review or a bug in it, still
+lands in it, its line saying `; lands in #<n> as its fix.` The day's
+fixes are not counted. (decisions.md#pull-request-full)
 
 **A branch is brought up to date by merging, never force-pushed**, a
 conflicting pull request at a plan's start included, pushed to its own

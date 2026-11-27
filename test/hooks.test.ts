@@ -100,6 +100,8 @@ import {
   pushedBranches,
   relatedLines,
   relatedOf,
+  roomIn,
+  PULL_PLANS,
   relatedWork,
   fromOf,
   issueOf,
@@ -4676,6 +4678,27 @@ describe("the queue's faults, closed", () => {
       ).toEqual(['looks related to #40 "Fixes" (this queue\'s, plans/fix.md; both name b/w.md)']);
     });
 
+    // plans/pull-requests-small-and-plain.md, part 3.
+    it("says a pull request of this queue's own is full in its related line", () => {
+      const built = (name: string) => ({
+        path: `plans/${name}.md`,
+        state: "built",
+        pr: 24,
+        topic: "",
+        lands: { kind: "topic", name: "shown" },
+      });
+      const pulls = [
+        { number: 24, title: "Shown", author: "javi", headRefName: "shown", files: ["b/w.md"] },
+      ];
+      const four = ["a", "b", "c", "d"].map(built);
+      expect(relatedLines("Change b/w.md.", four as never, { pulls })).toEqual([
+        'looks related to #24 "Shown" (this queue\'s, plans/d.md, topic shown; both name b/w.md)',
+      ]);
+      expect(relatedLines("Change b/w.md.", [...four, built("e")] as never, { pulls })).toEqual([
+        'looks related to #24 "Shown" (this queue\'s, plans/e.md, topic shown, full at 5 plans; both name b/w.md)',
+      ]);
+    });
+
     it("prints related lines under briefs and ready plans in the pull request mode only", () => {
       const write = (dir: string) => {
         writeFileSync(
@@ -4963,6 +4986,156 @@ describe("the queue's faults, closed", () => {
           `# P\n\n## Building, 30 October 2026, session abc\n\nPlan only, 30 October 2026.\n\nLands: fix.\n`,
         )?.lands,
       ).toEqual({ kind: "fix", now: false });
+    });
+
+    // plans/pull-requests-small-and-plain.md, part 1.
+    it("reads a Lands line that lands in a pull request as its fix", () => {
+      const head = "# P\n\nPlan only, 27 November 2026, for Javi.\n\n";
+      const text = (line: string) => `${head}${line}\n\n## What was asked\n`;
+      expect(landsOf(text("Lands: topic x; lands in #7 as its fix."))).toEqual({
+        kind: "topic",
+        name: "x",
+        into: 7,
+        fix: true,
+      });
+      expect(landsOf(text("Lands: topic x; lands in #7 as\nits fix"))).toEqual({
+        kind: "topic",
+        name: "x",
+        into: 7,
+        fix: true,
+      });
+      expect(landsWords({ kind: "topic", name: "x", into: 7, fix: true })).toBe(
+        "topic x, lands in #7 as its fix",
+      );
+      // A stacked plan is never the fix of the pull request it is stacked on.
+      expect(landsOf(text("Lands: topic x; stacked on #7 as its fix."))).toBeNull();
+      expect(landsUnread(text("Lands: topic x; stacked on #7 as its fix."))).toBe(true);
+      expect(landsUnread(text("Lands: topic x; lands in #7 as its fix."))).toBe(false);
+    });
+
+    // plans/pull-requests-small-and-plain.md, part 2.
+    it("counts a pull request's plans and says where the next one lands", () => {
+      expect(PULL_PLANS).toBe(5);
+      const topic = (name: string, more: Record<string, unknown> = {}) => ({
+        kind: "topic",
+        name,
+        ...more,
+      });
+      const built = (name: string, pr = 9) => ({
+        path: `plans/${name}.md`,
+        kind: "Plan only",
+        state: "built",
+        pr,
+        lands: topic("big"),
+      });
+      const plan = (name: string, state: string, lands: unknown) => ({
+        path: `plans/${name}.md`,
+        kind: "Plan only",
+        state,
+        lands,
+      });
+      const ask = plan("ask", "ready", topic("big", { into: 9 }));
+      const four = ["b1", "b2", "b3", "b4"].map((name) => built(name));
+      const five = [...four, built("b5")];
+      const room = (plans: unknown[], path = "plans/ask.md", number = 9) =>
+        roomIn(plans as never, number, path);
+      // Four built in #9: it lands in #9.
+      expect(room([...four, ask])).toMatchObject({
+        named: true,
+        full: false,
+        holds: four.map((one) => one.path),
+        lands: { kind: "in" },
+      });
+      // Five built: it opens a topic stacked on #9, named for its file.
+      expect(room([...five, ask])).toMatchObject({
+        full: true,
+        lands: { kind: "new", name: "ask" },
+      });
+      // Two plans of a topic stacked on #9: it lands on that topic.
+      const side = (name: string) => plan(name, "ready", topic("side", { stackedOn: 9 }));
+      expect(room([...five, side("s1"), side("s2"), ask]).lands).toEqual({
+        kind: "stacked",
+        name: "side",
+        with: ["plans/s1.md", "plans/s2.md"],
+      });
+      // That topic at five: it opens another.
+      const sides = ["s1", "s2", "s3", "s4", "s5"].map(side);
+      expect(room([...five, ...sides, ask]).lands).toMatchObject({ kind: "new", name: "ask" });
+      // Of two stacked topics with room, the one whose first plan comes later.
+      const other = plan("o1", "ready", topic("other", { stackedOn: 9 }));
+      expect(room([...five, side("s1"), other, ask]).lands).toMatchObject({ name: "other" });
+      // A plan being built counts no waiting plan; a waiting plan counts them.
+      const waiting = plan("w1", "ready", topic("big"));
+      expect(room([...four, waiting, { ...ask, state: "building" }])).toMatchObject({
+        holds: four.map((one) => one.path),
+        lands: { kind: "in" },
+      });
+      expect(room([...four, waiting, ask])).toMatchObject({
+        holds: [...four.map((one) => one.path), "plans/w1.md"],
+        full: true,
+      });
+      for (const state of ["planned", "handed", "building"])
+        expect(room([...four, { ...waiting, state }, ask]).full).toBe(true);
+      // A handed plan is mid-build, so it counts for a plan being built too (/code-review).
+      expect(
+        room([...four, { ...waiting, state: "handed" }, { ...ask, state: "building" }]).full,
+      ).toBe(true);
+      // It lands on the pull request's topic, the line to write.
+      expect(room([...four, plan("ask", "ready", null)]).lands).toEqual({
+        kind: "in",
+        name: "big",
+        with: [],
+      });
+      // A plan of a stacked topic's own pull request, stacked on its base, counts there (Codex C4).
+      const sideBuilt = ["t1", "t2", "t3", "t4"].map((name) => ({
+        ...built(name, 12),
+        lands: topic("side", { stackedOn: 9 }),
+      }));
+      expect(
+        room([...sideBuilt, plan("t5", "ready", topic("side", { stackedOn: 9 }))], "", 12),
+      ).toMatchObject({ full: true });
+      // A plan stacked on a pull request says nothing of whose it is (Codex C6).
+      expect(
+        room([plan("on", "ready", topic("adapter", { stackedOn: 250 }))], "plans/next.md", 250),
+      ).toMatchObject({ named: false, holds: [] });
+      // A new topic takes the file's name as a topic's is written, with -2 on a clash (Codex C5).
+      expect(room([...five, plan("big", "ready", null)], "plans/Big.md").lands).toMatchObject({
+        kind: "new",
+        name: "big-2",
+      });
+      expect(room([...five], "plans/Fix_Thing.md").lands).toMatchObject({ name: "fix-thing" });
+      // A plan marked as its fix lands in #9 at any count.
+      expect(
+        room([...five, ...sides, { ...ask, lands: topic("big", { into: 9, fix: true }) }]).lands,
+      ).toMatchObject({ kind: "fix", name: "big" });
+      // Not counted: a dropped plan, a brief, a Lands: fix. plan and the asking plan.
+      expect(
+        room([
+          ...four,
+          plan("d1", "dropped", topic("big", { into: 9 })),
+          { path: "plans/br.md", kind: "Brief", state: "brief", lands: topic("big") },
+          plan("f1", "ready", { kind: "fix", now: false }),
+          plan("r1", "ready", { kind: "refresh" }),
+          ask,
+        ]).holds,
+      ).toEqual(four.map((one) => one.path));
+      // A waiting plan of #9's topic with no suffix is counted; one that says lands in #12 is not.
+      expect(
+        room([
+          ...four,
+          plan("w2", "ready", topic("big")),
+          plan("w3", "ready", topic("big", { into: 12 })),
+          ask,
+        ]).holds,
+      ).toEqual([...four.map((one) => one.path), "plans/w2.md"]);
+      // With no path, the count only; a number no plan names is not the queue's.
+      expect(roomIn([...five, waiting] as never, 9)).toEqual({
+        named: true,
+        holds: [...five.map((one) => one.path), "plans/w1.md"],
+        full: true,
+        lands: null,
+      });
+      expect(room([...five, ask], "plans/ask.md", 10)).toMatchObject({ named: false, holds: [] });
     });
 
     it("reads a fix pushed straight, a topic waiting, and a pull request opened or joined later", () => {
@@ -5336,6 +5509,87 @@ describe("the queue's faults, closed", () => {
       });
     },
   );
+
+  // plans/pull-requests-small-and-plain.md, part 2: when a plan would land in a
+  // pull request of the queue's own that holds five plans, then plans full
+  // gives the topic stacked on it and the Lands line to write.
+  it("plans full says each line", { timeout: 120_000 }, () => {
+    const dir = fixture("FullPull", "land: pull-request\n");
+    const day = "27 November 2026";
+    const write = (name: string, text: string) => writeFileSync(join(dir, "plans", name), text);
+    const remove = (...names: string[]) =>
+      names.forEach((name) => rmSync(join(dir, "plans", name), { force: true }));
+    const planText = (lands: string, rest = "") =>
+      `# A plan\n\nPlan only, ${day}, for Javi; the executor builds it.\n\n${lands}\n\n${rest}## What was asked\n`;
+    const built = (name: string) =>
+      write(
+        name,
+        planText(
+          "Lands: topic big.",
+          `## Built, ${day}\n\nPull request #9 (https://github.com/o/r/pull/9) joined, commit 1234abcd.\n\n`,
+        ),
+      );
+    const full = (...args: string[]) => {
+      const done = spawnSync("node", [join(here, queue), "full", ...args], {
+        input: "",
+        encoding: "utf8",
+        env: { ...process.env, CLAUDE_PROJECT_DIR: dir, WORKFLOW_LIVE: "[]" },
+      });
+      return { said: done.stdout, status: done.status };
+    };
+    const said = (line: string) => ({ said: `${line}\n`, status: 0 });
+    ["b1.md", "b2.md", "b3.md", "b4.md"].forEach(built);
+    write("ask.md", planText("Lands: topic big; lands in #9."));
+    expect(full("9", "plans/ask.md")).toEqual(
+      said(
+        "#9 holds 4 of 5 plans: plans/ask.md lands in it. Its line: Lands: topic big; lands in #9.",
+      ),
+    );
+    // A brief, or a plan not written yet, asks as its author writes it (Codex C3).
+    write("brief.md", `# B\n\nBrief for the planner, ${day}, by the assistant with Javi.\n`);
+    expect(full("9", "plans/brief.md").said).toMatch(/^#9 holds 5 of 5 plans|^#9 is full/);
+    expect(full("9", "plans/not-yet.md").said).toMatch(/^#9 is full, 5 plans and 5 at most/);
+    remove("brief.md");
+    // With no path, a waiting plan that lands in it counts.
+    expect(full("#9")).toEqual(said("#9 is full, 5 plans and 5 at most."));
+    remove("ask.md");
+    expect(full("#9")).toEqual(said("#9 holds 4 of 5 plans."));
+    write("ask.md", planText("Lands: topic big; lands in #9."));
+    built("b5.md");
+    expect(full("9", "plans/ask.md")).toEqual(
+      said(
+        "#9 is full, 5 plans and 5 at most, and no topic stacked on it has room: plans/ask.md opens one. Its line: Lands: topic ask; stacked on #9.",
+      ),
+    );
+    write("s1.md", planText("Lands: topic side; stacked on #9."));
+    write("s2.md", planText("Lands: topic side; stacked on #9."));
+    expect(full("9", join(dir, "plans", "ask.md"))).toEqual(
+      said(
+        "#9 is full, 5 plans and 5 at most: plans/ask.md lands on topic side with plans/s1.md and plans/s2.md, stacked on #9. Its line: Lands: topic side; stacked on #9.",
+      ),
+    );
+    write("ask.md", planText("Lands: topic big; lands in #9 as its fix."));
+    expect(full("9", "plans/ask.md")).toEqual(
+      said(
+        "plans/ask.md lands in #9 as its fix, whatever it holds (5 plans, 5 at most). Its line: Lands: topic big; lands in #9 as its fix.",
+      ),
+    );
+    expect(full("10", "plans/ask.md")).toEqual(
+      said("No plan here names #10, so it is not this queue's: nothing is counted."),
+    );
+    // The wrong arguments, and a path that is no plan.
+    const wrong = {
+      said: "plans full takes a pull request's number and one path at most: plans full 167 plans/<x>.md.\n",
+      status: 1,
+    };
+    for (const args of [[], ["x"], ["0"], ["9", "plans/ask.md", "plans/s1.md"], ["9", "--now"]])
+      expect(full(...args)).toEqual(wrong);
+    expect(full("9", "other/none.md")).toEqual({
+      said: "other/none.md is not a plan in the queue; plans shows them.\n",
+      status: 1,
+    });
+    remove("s1.md", "s2.md");
+  });
 
   // plans/merged-pr-refreshes-the-rest.md, part 6: when Javi next writes in his own assistant
   // chat after a refresh was built, then its context names the refresh plan, once.

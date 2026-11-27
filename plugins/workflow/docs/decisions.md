@@ -239,9 +239,8 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   closed at its branch's commit, already holds its work, so a pull request
   closed long ago hides no commit pushed since. Unfinished is said by the draft, as
   GitHub's draft pull requests, GitLab's `merge_request.create` push
-  option and Gerrit's work in progress open the request at the push. The
-  topic's first plan titles it, as gh's `--fill-first` takes the first
-  commit's title. A plan with no `Lands` line is a topic of its own, so
+  option and Gerrit's work in progress open the request at the push. A
+  plan with no `Lands` line is a topic of its own, so
   nothing lands unread by omission. plans/pull-requests-by-topic.md,
   plans/topic-opens-when-nothing-waits.md.
   - ~~A topic's plans are built on one branch, pushed after each, and its
@@ -268,8 +267,9 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
 - `short-description` **The description is a short list of what
   changed: a few bullets, each a bold lead and one plain sentence of
   what a person can now do or see, one screenshot under a bullet only
-  where it shows it, then To try it; no tiers, dates, struck rules or
-  ids.** (Javi, 8 November) Nobody read the long one; the decisions are
+  where it shows it, then To try it; the related pull requests, issues
+  and branches in one list, each once; no tiers, dates, struck rules or
+  ids.** (Javi, 27 November) Nobody read the long one; the decisions are
   in the catalogue, whose diff the pull request shows; Google's CL
   descriptions guide puts one summary first and the detail in an
   informative body, GitHub's "How to write the perfect pull request"
@@ -277,24 +277,37 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   another person's call names them; the commits no plan here accounts
   for stay, as bullets with their author. A section the owner adds
   anywhere in the body, a topic's or the day's fixes, is kept on every
-  rewrite (Javi).
+  rewrite (Javi). GitHub shows a reference alone in a list item with
+  its title and state ("Autolinked references and URLs"), and asks the
+  closing keyword for each issue.
   plans/short-pull-request-descriptions.md,
-  plans/short-pull-request-descriptions-follow-up.md.
+  plans/short-pull-request-descriptions-follow-up.md,
+  plans/pull-requests-small-and-plain.md.
+  - ~~The description is a short list of what changed: a few bullets,
+    each a bold lead and one plain sentence of what a person can now do
+    or see, one screenshot under a bullet only where it shows it, then
+    To try it; no tiers, dates, struck rules or ids.~~ (Javi, 8
+    November)
   - ~~The description is the catalogue's diff: New, Changed and Retired,
     each entry as the catalogue stores it, a conflict first, each
     screenshot under its decision, then Also and To try it.~~ (Javi, 31
     October; replaced 8 November, nobody reading the diff of decisions
     in a description)
 - `stack-only-on-use` **A plan that rests on an open draft pull request
-  of the queue's own lands in it, and one that rests on another person's
-  is stacked on it.** (Javi, 7 November) A draft is not done yet, so
+  of the queue's own lands in it while it has room (`pull-request-full`),
+  and one that rests on another person's is stacked on it.** (Javi, 27
+  November) A draft is not done yet, so
   work that belongs to it goes into it, as he had to ask three times in
   a day for a stacked pull request to be joined into the draft it built
   on; the queue never pushes to another person's branch. How the rest
   group is the project's, since grouping is a cost the project carries,
   not the plugin. plans/stack-only-when-it-depends.md,
   plans/draft-takes-its-follow-ups.md,
-  plans/related-plans-share-a-pull-request.md.
+  plans/related-plans-share-a-pull-request.md,
+  plans/pull-requests-small-and-plain.md.
+  - ~~A plan that rests on an open draft pull request of the queue's own
+    lands in it, and one that rests on another person's is stacked on
+    it.~~ (Javi, 7 November)
   - ~~A plan that rests on an open draft pull request of the queue's own
     lands in it; one that rests on a pull request marked ready, or
     someone else's, is stacked on it; one that only changes the same
@@ -304,12 +317,48 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
     30 October)
 - `pull-requests-heading` **How plans group into pull requests is the
   project's rule, under `## Pull requests` in its file; the plugin
-  suggests one at setup and holds none.** (Javi, 7 November) Grouping is
+  suggests one at setup and holds only how many plans one takes
+  (`pull-request-full`).** (Javi, 27 November) Grouping is
   a cost the project carries, each pull request one more review and one
   more run of its suites, so the project says it; Gerrit's
   submit-whole-topic is a server setting for the same reason. The first
   project to say it chose that related plans share one pull request.
-  plans/related-plans-share-a-pull-request.md.
+  plans/related-plans-share-a-pull-request.md,
+  plans/pull-requests-small-and-plain.md.
+  - ~~How plans group into pull requests is the project's rule, under
+    `## Pull requests` in its file; the plugin suggests one at setup and
+    holds none.~~ (Javi, 7 November)
+- `pull-request-full` **A pull request takes five plans; the next
+  related plan lands on a topic stacked on it, and only a fix to what it
+  added still lands in it.** (Javi, 27 November) In the project that
+  asked, the rule that a related plan joins an open pull request had no
+  end: twenty-six plans landed in one in three days, 264 files and 42
+  bullets under the first plan's title. Google's "Small CLs" asks for
+  one self-contained change, calls 100 lines reasonable and 1000 usually
+  too large, lets a reviewer refuse a change for its size alone and has
+  the next change written on top of the first; GitHub's "Helping others
+  review your changes" splits a change that grows large into pull
+  requests that each serve one purpose. The plan is the unit the queue
+  can cut at, and five is observed there: pull requests of up to five
+  commits merged in a median of six hours, those of six to eleven in
+  twenty-nine. Counted from the plans, never gh, a waiting plan counting
+  those waiting with it; the stacked topics sit side by side on the full
+  one, and a plan that uses what one adds names that one. A fix lands
+  where the fault is, since a pull request is merged working. Known
+  limits: no size of a plan is read, so one plan may still be large, and
+  a stacked topic's merged plans still count. plans/pull-requests-small-and-plain.md.
+- `pull-request-title` **A pull request's title is one sentence saying
+  what the whole pull request does now, written again when a plan adds
+  what it does not cover; a person's title stays.** (Javi, 27 November)
+  He could not tell what a pull request was from a title naming the
+  first of its twenty-six plans. Google's "Writing good CL
+  descriptions": the first line is a short summary of what is being done
+  that stands alone in the history, and the description is read again
+  before submitting, since a change can alter much in review. The queue
+  knows its own title by the `Title:` line of "Built", as it knows the
+  owner's paragraphs in the body. plans/pull-requests-small-and-plain.md.
+  - ~~The topic's first plan titles its pull request, and a join leaves
+    the title as it is.~~ (Javi, 26 November)
 - `merge-never-force` **A branch is brought up to date by merging, never
   force-pushed.** (Javi, 29 October) Merge, never force, which a project
   may enforce in its settings; a squash merge keeps the merge commit off

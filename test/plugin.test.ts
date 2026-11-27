@@ -372,7 +372,16 @@ describe("the plugin's queue in any project", () => {
     expect(executor).toContain(
       "squashed back to the plan's tip, so a commit another person pushed stays theirs",
     );
-    expect(executor).toContain("Related: #<n>. <- plans with a Related line only");
+    // plans/pull-requests-small-and-plain.md, part 4: one Related list, each named once.
+    expect(executor).toContain(
+      "Related: <- when a plan has a Related line - #<n> - branch `<name>` ## Changes",
+    );
+    expect(executor).toContain(
+      "Then one `Related:` line, then a list of everything the topic's plans' `Related` lines name, each once, one item a line with nothing else on it, numbers in order and then branches by name, less a number a `Closes` or `Builds on` line names and the pull request itself; none left, no `Related:` line.",
+    );
+    expect(executor).toContain(
+      "`Closes #`, `For #`, `Builds on #` and `Related:` lines and the list under a `Related:` line, is the owner's",
+    );
     // plans/pull-request-description-standard-follow-up.md: the description lists it under Also.
     expect(executor).toContain("- <The commit's title.> (<author>)");
     expect(executor).not.toContain("credited by GitHub's commits list");
@@ -2019,7 +2028,7 @@ describe("the setup interview", () => {
       "answer replaces the text under `## Pull requests` in the project file's body (the starter's line included)",
     );
     expect(text).toContain(
-      "## Pull requests Related plans share one: a plan related to an open pull request of the queue's own lands in it",
+      "## Pull requests Related plans share one: a plan related to an open pull request of the queue's own lands in it (`Lands: topic <name>; lands in #<n>.`) while it has room, five plans, and a new pull request opens only when none fits or it is full.",
     );
     expect(text).toContain(
       "## Pull requests A pull request per topic: each is merged or held on its own",
@@ -2354,7 +2363,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
 
   it("has the docs, the planner and the assistant name a plan rested on only when it is used", () => {
     expect(read("docs/workflow.md").replace(/\s+/g, " ")).toContain(
-      "**How plans group into pull requests is the project's rule, under `## Pull requests` in its file**, read by the author of a `Lands` line; the plugin suggests one in `/workflow:setup` and keeps only what the queue cannot do without: a plan that rests on an open draft pull request of the queue's own lands in it, and one that rests on another person's pull request is stacked on it, since the queue never pushes to another's branch.",
+      "**How plans group into pull requests is the project's rule, under `## Pull requests` in its file**, read by the author of a `Lands` line; the plugin suggests one in `/workflow:setup` and keeps only what the queue cannot do without: a plan that rests on an open draft pull request of the queue's own lands in it while it has room, and one that rests on another person's pull request is stacked on it, since the queue never pushes to another's branch.",
     );
     // Without the heading, what the queue did before: stacked on a ready one, a Related line for a shared file.
     expect(read("docs/workflow.md").replace(/\s+/g, " ")).toContain(
@@ -2405,7 +2414,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
       "- **Closes** and **Related**: `Closes #<n>.` for each issue a plan of the topic names in its `Issue` line, one line each, no issue twice: GitHub's keyword, so a merge into the default branch closes it and the queue closes it elsewhere (decisions.md#closes-its-issues).",
     );
     expect(landing).toContain(
-      "less its `Closes #`, `For #`, `Builds on #` and `Related:` lines, is the owner's and opens the new body unchanged; a `Closes #` line for an issue no plan of the topic names is the owner's too, and is kept.",
+      "less its `Closes #`, `For #`, `Builds on #` and `Related:` lines and the list under a `Related:` line, is the owner's and opens the new body unchanged; a `Closes #` line for an issue no plan of the topic names is the owner's too, and is kept.",
     );
     expect(landing).toContain(
       "**Each issue it closes is linked** (decisions.md#closes-its-issues). GitHub reads a closing keyword only on a pull request into the default branch.",
@@ -2426,7 +2435,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     expect(docs).toContain(
       "the executor writes `Closes #<n>` on the pull request for each issue its plans carry and links it, and the queue closes each when it merges, whatever branch it merges into.",
     );
-    expect(docs).toContain("the `Closes`, `Builds on` and `Related` lines");
+    expect(docs).toContain("a `Closes` line per issue, `Builds on`, and one `Related` list");
     expect(docs).toContain("closes each issue a merged pull request's description closes;");
     expect(docs).toContain(
       "what it still owes is written into the queue first, and the file is said once to whichever assistant chat speaks next",
@@ -2536,9 +2545,42 @@ describe("a pull request per topic", () => {
     expect(mode).toContain(
       "**Nothing else queued** (`Nothing else is queued for topic <name>: …`): the description (below), written from every plan of the topic so far, oldest first, to `plans/<this plan>/pull-request.md`",
     );
-    expect(mode).toContain('--title "<the title of the topic\'s first plan>"');
+    // plans/pull-requests-small-and-plain.md, part 4: a title for the whole
+    // pull request, written again on a join that it no longer covers, and
+    // five plans to one, the next on a topic stacked on it.
     expect(mode).toContain(
-      "- **The title** is the title of the topic's first plan, the one whose commit is first on the branch; a join leaves the title as it is.",
+      "--title \"<this plan's title, or the sentence for all of the topic's plans when it opens with several>\"",
+    );
+    expect(mode).toContain(
+      "- **The title** is one sentence saying what the whole pull request does now (decisions.md#pull-request-title), in the words of the leads under Changes, with no number and no plan's name. A plan alone in it gives its own title. On a join, read the one it has (`gh pr view <n> --json title`). One that is not the queue's last, the `Title:` line of the topic's latest \"Built\" that has one, else its first plan's title, is a person's: it stays, and \"Built\" says `Title kept: a person's.` The queue's own stays while it covers every bullet under Changes, and is written again when this plan adds one it does not cover: the first plan's thing, then what was added, or the area they share when that is more than three things. \"Built\" gets `Title: <the sentence>` after its first line whenever the executor sets one.",
+    );
+    expect(mode).toContain(
+      "- **A pull request takes five plans** (decisions.md#pull-request-full). Before a plan lands in an open pull request of the queue's own, by its `Lands` line, its topic or a draft it rests on, run `plans full <n> plans/<this plan>.md` and follow its line: it lands in it, or on the topic the line names, stacked on #<n>, its `Lands` line rewritten as the line gives it and that topic's branch taken as below. \"Built\" and the `Built:` message say `#<n> was full: built on topic <name>, stacked on it.`",
+    );
+    expect(mode).toContain(
+      "then its base merged in, origin/<branch> or the head branch it is stacked on,",
+    );
+    const handbook = read("docs/workflow.md");
+    expect(handbook).toContain(
+      "**A pull request takes five plans.** A plan that would land in an open pull request of the queue's own that holds five lands on a topic stacked on it, with the other plans sent there, five to each; `plans full <n> <path>` says which, to the author of a `Lands` line and to the executor at the plan's start. Only a plan that fixes what the pull request itself added, a failed check, a finding of its review or a bug in it, still lands in it, its line saying `; lands in #<n> as its fix.` The day's fixes are not counted. (decisions.md#pull-request-full)",
+    );
+    expect(handbook).toContain(
+      "Its title is one sentence saying what the whole pull request does now, written again when a plan adds what it does not cover; a title a person wrote stays. (decisions.md#pull-request-title)",
+    );
+    expect(handbook).toContain(
+      "a `Closes` line per issue, `Builds on`, and one `Related` list naming each related pull request, issue or branch once",
+    );
+    expect(handbook).toContain("lands in it while it has room, and one that rests");
+    const full =
+      "Before writing `lands in #<n>`, run `plans full <n> plans/<topic>.md` and write the `Lands` line it gives; `as its fix` only for a plan that fixes what #<n> itself added.";
+    expect(read("agents/planner.md")).toContain(full);
+    const assistant = read("agents/assistant.md");
+    expect(assistant).toContain(full);
+    expect(assistant).toContain(
+      "and no question, once `plans full <n> plans/<x>.md` gives that line;",
+    );
+    expect(read("docs/github.md")).toContain(
+      "is a short plan for the fix, `Lands: topic <the head branch>; lands in #<n> as its fix.`",
     );
     expect(mode).toContain(
       "A line written before 26 November 2026 may say `, waiting` or `, ready` after the name: it means nothing now. Follow the line; its author judges whether a change is a fix.",
@@ -2593,7 +2635,7 @@ describe("a pull request per topic", () => {
     expect(mode).not.toContain("gh pr comment");
     expect(mode).not.toContain("in the comment below");
     expect(mode).toContain(
-      "gh pr edit <n> --body-file plans/<this plan>/pull-request.md \\ --attach plans/<topic>/<file>.png#<the line>",
+      'gh pr edit <n> --title "<the sentence>" --body-file plans/<this plan>/pull-request.md \\ --attach plans/<topic>/<file>.png#<the line>',
     );
     expect(mode).toContain("No comment: the description is the record");
     expect(mode).toContain("set it without `--attach`");
@@ -2631,9 +2673,6 @@ describe("a pull request per topic", () => {
     expect(read("docs/workflow.md")).toContain(
       "commit changes a rule lands as a topic of its own. (decisions.md#fix-landing)",
     );
-    expect(read("docs/github.md")).toContain(
-      "is a short plan for the fix, `Lands: topic <the head branch>; lands in #<n>.`",
-    );
     expect(read("skills/setup/SKILL.md")).toContain("(`Lands: topic <name>; lands in #<n>.`)");
     // No file under plugins/workflow writes a marked line.
     const root = new URL("../plugins/workflow/", import.meta.url).pathname;
@@ -2669,7 +2708,7 @@ describe("a pull request per topic", () => {
     expect(read("agents/assistant.md")).toContain("Lands: topic <name>; lands in #<n>.");
     expect(read("agents/assistant.md")).toContain("`Lands: fix, now.` only when");
     expect(read("agents/planner.md")).toContain(
-      "With `land: pull-request`, `Lands: topic <name>.`, optionally `; lands in #<n>.` or `; stacked on #<n>.` after the name. `<name>` is the topic's branch, lower-case words joined by hyphens. A topic's first plan titles its pull request, so title it for the topic. A brief's `Lands` line is carried.",
+      "With `land: pull-request`, `Lands: topic <name>.`, optionally `; lands in #<n>.`, `; lands in #<n> as its fix.` or `; stacked on #<n>.` after the name. `<name>` is the topic's branch, lower-case words joined by hyphens. A plan alone in a pull request titles it, so title it for what the project does after it. A brief's `Lands` line is carried.",
     );
     expect(read("agents/planner.md")).toContain(
       "or the refusal, and with `land: pull-request` the topic. One message per plan.",
@@ -3958,7 +3997,9 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
     expect(reaches).toContain(
       "a task or a change from a person **People** names, by the GitHub login it gives them, or by name where it gives none: when it is clear and not the owner's call, act on it without him.",
     );
-    expect(reaches).toContain("`Lands: topic <the head branch>; lands in #<n>.`");
+    expect(reaches).toContain(
+      "`Lands: topic <the head branch>; lands in #<n> as its fix.` for a fault in what it added, else the line `plans full <n> plans/<x>.md` gives",
+    );
     expect(reaches).toContain(
       "Reply once, as the app, only when they would otherwise not know it was taken: `On it: <what will change, in a line>.`",
     );

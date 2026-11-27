@@ -58,12 +58,21 @@ refresh it is left and named, `left: #<k>, executor-<n> is building on it`.
   rewritten to it. A plan that shares files with an open pull request
   goes where its `Lands` line says; its author read the project's
   **Pull requests** heading.
+- **A pull request takes five plans** (decisions.md#pull-request-full).
+  Before a plan lands in an open pull request of the queue's own, by
+  its `Lands` line, its topic or a draft it rests on, run `plans full
+  <n> plans/<this plan>.md` and follow its line: it lands in it, or on
+  the topic the line names, stacked on #<n>, its `Lands` line
+  rewritten as the line gives it and that topic's branch taken as
+  below. "Built" and the `Built:` message say `#<n> was full: built on
+  topic <name>, stacked on it.`
 - **No branch yet** (no `origin/<name>`, no local `<name>`): `git switch
   -c <name> origin/<branch>`. Stacked: `git switch -c <name> <that head
   branch>`, that branch the pull request's `--base` and the first line
   of its body `Builds on #<n>; merge that first.`
 - **A branch with no pull request yet** (`origin/<name>`, no open pull request): `git
-  switch -C <name> origin/<name>`, then its base merged in, the plan's
+  switch -C <name> origin/<name>`, then its base merged in, origin/<branch>
+  or the head branch it is stacked on, the plan's
   push carrying the merge; an unsettled conflict leaves it as it is.
 - **An open pull request's branch**: `git switch -C <name>
   origin/<name>`, no merge. In both, a local branch with commits the
@@ -149,11 +158,12 @@ retried as for a merge. Then, by the topic:
   body`), this plan's screenshots as local paths; then
 
   ```
-  gh pr edit <n> --body-file plans/<this plan>/pull-request.md \
+  gh pr edit <n> --title "<the sentence>" --body-file plans/<this plan>/pull-request.md \
     --attach plans/<topic>/<file>.png#<the line> ...
   ```
 
-  one `--attach` per local screenshot the body names, the uploaded ones
+  `--title` when the title is written again ("The title", below), one
+  `--attach` per local screenshot the body names, the uploaded ones
   kept as they are.
   No comment: the description is the record
   (decisions.md#joined-pull-request). "Built" opens with
@@ -172,7 +182,7 @@ retried as for a merge. Then, by the topic:
 
     ```
     gh pr create --draft --base <branch, or the head branch it is stacked on> \
-      --title "<the title of the topic's first plan>" \
+      --title "<this plan's title, or the sentence for all of the topic's plans when it opens with several>" \
       --body-file plans/<this plan>/pull-request.md \
       --attach plans/<topic>/<file>.png#<the line> ...
     ```
@@ -299,7 +309,11 @@ catalogue, a commit's title as written; on one screen, pictures aside.
 
 Closes #<n>.                                  <- one per issue its plans' Issue lines name
 Builds on #<n>; merge that first.             <- stacked plans only
-Related: #<n>.                                <- plans with a Related line only
+
+Related:                                      <- when a plan has a Related line
+
+- #<n>
+- branch `<name>`
 
 ## Changes
 
@@ -323,7 +337,8 @@ to a Claude session left out>
 
 - **The owner's paragraphs**: on a rewrite (`gh pr view <n> --json
   body`), everything above the body's first `## ` heading, less its
-  `Closes #`, `For #`, `Builds on #` and `Related:` lines, is the owner's
+  `Closes #`, `For #`, `Builds on #` and `Related:` lines and the list
+  under a `Related:` line, is the owner's
   and opens the new body unchanged; a `Closes #` line for an issue no
   plan of the topic names is the owner's too, and is kept. With nothing
   there, the body opens with the three lines that apply, so a pull
@@ -335,10 +350,13 @@ to a Claude session left out>
 - **Closes** and **Related**: `Closes #<n>.` for each issue a plan of
   the topic names in its `Issue` line, one line each, no issue twice:
   GitHub's keyword, so a merge into the default branch closes it and the
-  queue closes it elsewhere (decisions.md#closes-its-issues). Then the
-  plans' `Related` lines as written (`Related: #31.`), less a number a
-  `Closes` line names. Look for no related work yourself, and comment on no other
-  person's pull request.
+  queue closes it elsewhere (decisions.md#closes-its-issues). Then one
+  `Related:` line, then a list of everything the topic's plans'
+  `Related` lines name, each once, one item a line with nothing else on
+  it, numbers in order and then branches by name, less a number a
+  `Closes` or `Builds on` line names and the pull request itself; none
+  left, no `Related:` line. Look for no related work yourself, and
+  comment on no other person's pull request.
 - **Changes**: one bullet per thing a person can now do or see, from
   every plan of the topic, oldest first: a plan's central decision, each
   "Done when" scenario a person sees, and a plan's small changes folded
@@ -371,8 +389,19 @@ to a Claude session left out>
   attached. A bullet with nothing to show has no picture.
 - **To try it**: a line from the project file's "After the push", else
   "Check out the branch."
-- **The title** is the title of the topic's first plan, the one whose
-  commit is first on the branch; a join leaves the title as it is.
+- **The title** is one sentence saying what the whole pull request
+  does now (decisions.md#pull-request-title), in the words of the
+  leads under Changes, with no number and no plan's name. A plan alone
+  in it gives its own title. On a join, read the one it has (`gh pr
+  view <n> --json title`). One that is not the queue's last, the
+  `Title:` line of the topic's latest "Built" that has one, else its
+  first plan's title, is a person's: it stays, and "Built" says `Title
+  kept: a person's.` The queue's own stays while it covers every
+  bullet under Changes, and is written again when this plan adds one
+  it does not cover: the first plan's thing, then what was added, or
+  the area they share when that is more than three things. "Built"
+  gets `Title: <the sentence>` after its first line whenever the
+  executor sets one.
 - **The attribution**: the session's lines for a pull request, less
   any line with a `claude.ai/code/session_` address, old ones included.
   On a rewrite, the attribution lines at the old body's end belong to

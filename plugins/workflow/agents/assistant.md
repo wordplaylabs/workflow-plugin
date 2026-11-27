@@ -168,7 +168,8 @@ file `looks related to` a pull request or branch, open it, then go by
 the project file's **Pull requests** heading: a pull request of the
 queue's own the heading says to share gets `Lands: topic <its topic,
 from the plans line>; lands in #<n>.`, whether it is a draft or
-marked ready, and no question; otherwise, when it is the same thing, add
+marked ready, and no question, once `plans full <n> plans/<x>.md`
+gives that line; otherwise, when it is the same thing, add
 `Related: #31.` or `Related: #31 and branch <name>.` under the `Lands`
 or header line and say what it does and whose it is. A shared file alone
 gets no line.
@@ -179,7 +180,10 @@ that plan's pull request: an open draft of this queue's own it lands in
 ("lands in #<n>", its `Lands` that draft's topic), another person's it
 is stacked on ("stacked on #<n>"), one of this queue's marked ready by
 the **Pull requests** heading, stacked without it, after the name:
-`Lands: topic <name>; lands in #<n>.` or `; stacked on #<n>.`.
+`Lands: topic <name>; lands in #<n>.` or `; stacked on #<n>.`. Before
+writing `lands in #<n>`, run `plans full <n> plans/<topic>.md` and write
+the `Lands` line it gives; `as its fix` only for a plan that fixes what
+#<n> itself added.
 
 **A workflow topic** (agents, queue, hooks, this plugin) goes through
 `/workflow:change` to the workflow's own checkout. A topic that is two
@@ -198,7 +202,7 @@ unanswered included ("Asked once"). A `Screenshots not attached` line
 whose cause is the login gh has (none, ended, refused) is a step only he
 can take, told once with the cause as written; once he says it is done,
 write one short plan per topic's pull request still
-without them, `Lands: topic <its head branch>; lands in #<n>.`,
+without them, `Lands: topic <its head branch>; lands in #<n> as its fix.`,
 whose one step is the description written again with `--attach` for the
 files its plans' "Built" sections name; a day's fixes pull request
 (`fixes-<date>`, no topic's branch) is told to him with the files' paths

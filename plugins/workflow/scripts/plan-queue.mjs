@@ -340,21 +340,27 @@ export function withoutStatus(text) {
  * name the pull request it lands in or is stacked on, `; lands in #52` or `;
  * stacked on #52`, where agents write it: `into` or `stackedOn`, beside the
  * topic, so an agent's placement does not change where the queue thinks the
- * plan lands. `, waiting` and `, ready` after the name were a topic's marks
- * until 26 November 2026 (decisions.md#topic-landing): still read, so every
- * older plan's topic is, and they mean nothing.
+ * plan lands. `; lands in #52 as its fix` marks a plan that fixes what #52
+ * itself added (decisions.md#pull-request-full): `fix: true` beside `into`, so
+ * it lands there whatever the pull request holds; a stacked plan is never its
+ * fix. `, waiting` and `, ready` after the name were a topic's marks until 26
+ * November 2026 (decisions.md#topic-landing): still read, so every older
+ * plan's topic is, and they mean nothing.
  */
 export function landsOf(text = "") {
   // Hand-wrapped prose: the line may wrap anywhere a space is.
   const m =
-    /^Lands:\s+(?:fix(,\s+now)?|(refresh)|topic\s+([a-z0-9]+(?:-[a-z0-9]+)*)(?:,\s+(?:waiting|ready))?(?:;\s+(lands\s+in|stacked\s+on)\s+#(\d+))?)\.?[ \t]*$/m.exec(
+    /^Lands:\s+(?:fix(,\s+now)?|(refresh)|topic\s+([a-z0-9]+(?:-[a-z0-9]+)*)(?:,\s+(?:waiting|ready))?(?:;\s+(lands\s+in|stacked\s+on)\s+#(\d+)(\s+as\s+its\s+fix)?)?)\.?[ \t]*$/m.exec(
       headOf(text),
     );
   if (!m) return null;
   if (m[2]) return { kind: "refresh" };
   if (m[3]) {
+    const into = /^lands/.test(m[4] || "");
+    if (m[6] && !into) return null;
     const lands = { kind: "topic", name: m[3] };
-    if (m[4]) lands[/^lands/.test(m[4]) ? "into" : "stackedOn"] = Number(m[5]);
+    if (m[4]) lands[into ? "into" : "stackedOn"] = Number(m[5]);
+    if (m[6]) lands.fix = true;
     return lands;
   }
   return { kind: "fix", now: Boolean(m[1]) };
@@ -4796,6 +4802,100 @@ export function topicQueued(plans, topic, but = "") {
 }
 
 /**
+ * **A pull request takes five plans** (decisions.md#pull-request-full): the
+ * most plans one of the queue's own takes before the next related plan lands
+ * on a topic stacked on it.
+ */
+export const PULL_PLANS = 5;
+
+/**
+ * **How many plans pull request `number` holds, and where the plan at `path`
+ * lands** (decisions.md#pull-request-full), from the plans read already, never
+ * gh. Counted: a plan built, being built or handed over, and, unless the asking
+ * plan is being built, one ready or planned; never a brief, a dropped or old
+ * plan, a fix or a refresh by its `Lands` kind, or the asking plan, which may
+ * be a brief or a file not written yet. The pull request's topics are those of
+ * its built plans; it holds the counted plans built in it, and those not built
+ * that land in it by their `Lands` line or by its topic with no other pull
+ * request to land in named. It is the queue's own (`named`) when a plan is
+ * built in it or says it lands in it; a plan stacked on it says nothing of
+ * whose it is (Codex C6). A topic stacked on it is any plan's that says
+ * `stacked on #<number>`, holding the counted plans of its name. The asking
+ * plan lands in it, on its topic, when it is marked as its fix or there is
+ * room; else on the stacked topic with room whose first plan is the latest in
+ * the queue's order; else on a new one named for its file, as a topic's name
+ * is written, with `-2` or the next free number when another plan's topic has
+ * that name (Codex C5). `{ named, holds, full, lands }`, `holds` the counted
+ * paths, `lands` null with no path, else `{ kind: "in" | "fix" | "stacked" |
+ * "new", name, with }`.
+ */
+export function roomIn(plans = [], number, path = "") {
+  const topic = (plan) => plan.lands?.name || basename(plan.path, ".md");
+  const asking = path ? plans.find((plan) => plan.path === path) : null;
+  const waiting = asking?.state !== "building";
+  const live = plans.filter(
+    (plan) =>
+      plan.path !== path && plan.kind !== "Brief" && !["dropped", "old"].includes(plan.state),
+  );
+  // A handed plan is mid-build, so it counts whoever asks (/code-review).
+  const counted = live.filter(
+    (plan) =>
+      !["fix", "refresh"].includes(plan.lands?.kind) &&
+      (["built", "building", "handed"].includes(plan.state) ||
+        (waiting && ["ready", "planned"].includes(plan.state))),
+  );
+  const topics = new Set(
+    counted.filter((plan) => plan.state === "built" && plan.pr === number).map(topic),
+  );
+  // A plan of its topic stacked on its base still lands in it (Codex C4).
+  const holds = counted.filter((plan) =>
+    plan.state === "built"
+      ? plan.pr === number
+      : plan.lands?.into === number || (topics.has(topic(plan)) && !plan.lands?.into),
+  );
+  const stacked = [
+    ...new Set(
+      live.filter((plan) => plan.lands?.stackedOn === number).map((plan) => plan.lands.name),
+    ),
+  ];
+  const named =
+    holds.length > 0 ||
+    live.some(
+      (plan) => (plan.state === "built" && plan.pr === number) || plan.lands?.into === number,
+    );
+  const full = holds.length >= PULL_PLANS;
+  const result = { named, holds: holds.map((plan) => plan.path), full, lands: null };
+  if (!path) return result;
+  const own =
+    [...topics][0] ||
+    live.find((plan) => plan.lands?.into === number)?.lands.name ||
+    asking?.lands?.name ||
+    basename(path, ".md");
+  if (asking?.lands?.fix && asking.lands.into === number)
+    return { ...result, lands: { kind: "fix", name: own, with: [] } };
+  if (!full) return { ...result, lands: { kind: "in", name: own, with: [] } };
+  // The latest stacked topic with room: the one whose first plan comes last.
+  const first = (name) => live.findIndex((plan) => topic(plan) === name);
+  const room = stacked
+    .map((name) => ({
+      name,
+      with: counted.filter((plan) => topic(plan) === name).map((plan) => plan.path),
+    }))
+    .filter((topic) => topic.with.length < PULL_PLANS)
+    .sort((a, b) => first(b.name) - first(a.name))[0];
+  if (room) return { ...result, lands: { kind: "stacked", ...room } };
+  const taken = new Set([...topics, ...stacked, ...live.map(topic)]);
+  const base =
+    basename(path, ".md")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "topic";
+  let name = base;
+  for (let n = 2; taken.has(name); n += 1) name = `${base}-${n}`;
+  return { ...result, lands: { kind: "new", name, with: [] } };
+}
+
+/**
  * **`plans topic <path>`** (decisions.md#topic-landing): whether the build of
  * the plan at `path` opens its topic's pull request, or what it waits for,
  * in one line the executor follows at the landing. It reads the plans and the
@@ -4832,6 +4932,75 @@ function topicCommand(args = [], { live } = {}) {
   const one = queued.length === 1;
   return {
     said: `${andList(queued)} ${one ? "is" : "are"} still queued for topic ${topic}: its pull request waits for ${one ? "it" : "them"}.`,
+    status: 0,
+  };
+}
+
+/**
+ * **`plans full <n> [<path>]`** (decisions.md#pull-request-full): how many
+ * plans pull request `n` of the queue's own holds and, with a path, whether
+ * that plan lands in it or on which topic stacked on it, with the `Lands` line
+ * to write, in one line the author of a `Lands` line and the executor at a
+ * plan's start follow. It reads the plans, never gh. `{ said, status }`.
+ */
+function fullCommand(args = [], { live } = {}) {
+  if (!proj().found) return { said: NO_PROJECT, status: 1 };
+  if (proj().form === "compact") return { said: COMPACT, status: 1 };
+  const wrong = {
+    said: "plans full takes a pull request's number and one path at most: plans full 167 plans/<x>.md.",
+    status: 1,
+  };
+  if (!args.length || args.length > 2 || args.some((arg) => arg.startsWith("--"))) return wrong;
+  const digits = /^#?(\d+)$/.exec(args[0]);
+  if (!digits || !Number(digits[1])) return wrong;
+  const number = Number(digits[1]);
+  live = live === undefined ? liveSessions() : live;
+  const plans = readPlans(join(root, "plans"), liveIds(live));
+  const path = args[1] ? queuePath(args[1]) : "";
+  if (path) {
+    // A brief, or a plan not written yet, asks as its author writes it
+    // (Codex C3): only a path outside the queue's plans is refused.
+    const plan = plans.find((p) => p.path === path);
+    if (plan?.state === "old" || (!plan && !/^plans\/[^/]+\.md$/.test(path)))
+      return { said: `${path} is not a plan in the queue; plans shows them.`, status: 1 };
+    if (plan?.state === "dropped") return { said: droppedWords(plan), status: 1 };
+    if (plan?.lands?.kind === "fix" || plan?.lands?.kind === "refresh")
+      return { said: `${path} is no topic's: it lands as ${landsWords(plan.lands)}.`, status: 0 };
+  }
+  const room = roomIn(plans, number, path);
+  if (!room.named)
+    return {
+      said: `No plan here names #${number}, so it is not this queue's: nothing is counted.`,
+      status: 0,
+    };
+  const k = room.holds.length;
+  const most = PULL_PLANS;
+  const fullWords = `#${number} is full, ${k} plans and ${most} at most`;
+  if (!room.lands)
+    return {
+      said: room.full ? `${fullWords}.` : `#${number} holds ${k} of ${most} plans.`,
+      status: 0,
+    };
+  const { kind, name, with: others } = room.lands;
+  // Every line ends with the `Lands` line to write (Codex C3).
+  if (kind === "fix")
+    return {
+      said: `${path} lands in #${number} as its fix, whatever it holds (${k} plans, ${most} at most). Its line: Lands: topic ${name}; lands in #${number} as its fix.`,
+      status: 0,
+    };
+  if (kind === "in")
+    return {
+      said: `#${number} holds ${k} of ${most} plans: ${path} lands in it. Its line: Lands: topic ${name}; lands in #${number}.`,
+      status: 0,
+    };
+  const line = `Its line: Lands: topic ${name}; stacked on #${number}.`;
+  if (kind === "stacked")
+    return {
+      said: `${fullWords}: ${path} lands on topic ${name}${others.length ? ` with ${andList(others)}` : ""}, stacked on #${number}. ${line}`,
+      status: 0,
+    };
+  return {
+    said: `${fullWords}, and no topic stacked on it has room: ${path} opens one. ${line}`,
     status: 0,
   };
 }
@@ -6910,7 +7079,8 @@ function relatedReaders({ budget = 25_000 } = {}) {
  * never related to it; `own` is `ownOf(plans)`, built once by a caller with
  * many rows. A pull request of this queue's own names its topic, the head
  * branch a `Lands` line needs to land in it
- * (decisions.md#pull-requests-heading); the hook decides nothing.
+ * (decisions.md#pull-requests-heading), and says when it is full
+ * (decisions.md#pull-request-full); the hook decides nothing.
  */
 export function relatedLines(
   text,
@@ -6934,7 +7104,11 @@ export function relatedLines(
       !/^(?:fixes-|main$)/.test(one.head)
         ? `, topic ${one.head}`
         : "";
-    const whose = one.own ? `this queue's, ${one.own}${topicOf}` : one.author;
+    // One of the queue's own that holds five plans takes no more but its fixes
+    // (decisions.md#pull-request-full).
+    const room = one.kind === "pull" && one.own ? roomIn(plans, one.number) : null;
+    const full = room?.full ? `, full at ${room.holds.length} plans` : "";
+    const whose = one.own ? `this queue's, ${one.own}${topicOf}${full}` : one.author;
     const what =
       one.kind === "pull" ? `#${one.number} "${one.title}"` : `branch ${one.name}, "${one.title}"`;
     return `looks related to ${what} (${whose ? `${whose}; ` : ""}both name ${files})`;
@@ -7143,13 +7317,13 @@ function doneWith(text = "") {
   return planTaken(text) || Boolean(droppedOf(text));
 }
 
-/** A plan's `Lands` line in words, for a Ready row, with the pull request it lands in or is stacked on; "" with none. */
+/** A plan's `Lands` line in words, for a Ready row, with the pull request it lands in, as its fix or not, or is stacked on; "" with none. */
 export function landsWords(lands) {
   if (!lands) return "";
   if (lands.kind === "fix") return lands.now ? "a fix, now" : "a fix";
   if (lands.kind === "refresh") return "a refresh";
   const where = lands.into
-    ? `, lands in #${lands.into}`
+    ? `, lands in #${lands.into}${lands.fix ? " as its fix" : ""}`
     : lands.stackedOn
       ? `, stacked on #${lands.stackedOn}`
       : "";
@@ -10897,6 +11071,7 @@ plans start --agent assistant <plan>  open it on a built plan, or name the one o
 plans start --owner-said "<words>" [path...]  start one more past a refusal that says the owner decides, on the owner's yes
 plans first <path> [--undo]  put a waiting plan or brief first, on the owner's word, or take that back
 plans topic <path>    say whether a plan's build opens its topic's pull request, or what it waits for
+plans full <n> [<path>]   say whether a pull request has room for a plan, or where the plan lands instead
 plans pause | resume  stop and restart starting sessions
 plans end [id...] [--now]  end this queue's finished chats, or these; --now ends a named one, or an assistant chat, whatever it is doing
 plans sync            move a clean checkout with no commit of its own to the branch, detached
@@ -11040,6 +11215,13 @@ export function main(args = process.argv.slice(2)) {
   // **`plans topic`** (decisions.md#topic-landing).
   if (mode === "topic") {
     const { said, status } = topicCommand(rest);
+    process.stdout.write(`${said}\n`);
+    if (status) process.exitCode = status;
+    return;
+  }
+  // **`plans full`** (decisions.md#pull-request-full).
+  if (mode === "full") {
+    const { said, status } = fullCommand(rest);
     process.stdout.write(`${said}\n`);
     if (status) process.exitCode = status;
     return;

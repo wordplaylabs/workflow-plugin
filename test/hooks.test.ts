@@ -15683,6 +15683,57 @@ describe("several executors build at once", () => {
     expect(freePlans([one, live]).map((p) => p.waitsOn)).toEqual([{ path: "plans/live.md", why }]);
   });
 
+  // plans/handed-plans-order-holds-everywhere.md
+  it("between two handed plans, one held by what it rests on never goes first, and two both claimed fall to the queue's order", () => {
+    const at = (path: string, text: string, state: string) => ({ path, text, state });
+    const lands = "\n\nLands: topic chat.";
+    const why = "the same topic, chat";
+    const one = at(
+      "plans/one.md",
+      plan("One", "Change src/one.js.", ` It rests on plans/c.md.${lands}`),
+      "handed",
+    );
+    const two = at("plans/two.md", plan("Two", "Change src/two.js.", lands), "handed");
+    const c = at(
+      "plans/c.md",
+      plan("C", "Change src/c.js.", " It rests on plans/two.md."),
+      "ready",
+    );
+    expect(freePlans([one, two, c]).map((p) => p.waitsOn)).toEqual([
+      { path: "plans/c.md", why: "it rests on it" },
+      null,
+      { path: "plans/two.md", why: "it rests on it" },
+    ]);
+    // Both claimed: the earlier goes, the other waits on it.
+    const a = at("plans/one.md", plan("One", "Change src/one.js.", lands), "handed");
+    const hold = { holder: "someone", until: Infinity };
+    const both = { "plans/one.md": hold, "plans/two.md": hold };
+    expect(freePlans([a, two], { claims: both }).map((p) => p.waitsOn)).toEqual([
+      null,
+      { path: "plans/one.md", why },
+    ]);
+    // A claim counts for the order whoever holds it, own or another's.
+    expect(
+      freePlans([a, two], {
+        claims: { "plans/one.md": hold },
+        own: { "plans/two.md": hold },
+      }).map((p) => p.waitsOn),
+    ).toEqual([null, { path: "plans/one.md", why }]);
+    expect(freePlans([a, two], { own: { "plans/two.md": hold } }).map((p) => p.waitsOn)).toEqual([
+      { path: "plans/two.md", why },
+      null,
+    ]);
+    // A claimed plan that rests on the other waits on it, and the other goes.
+    const rests = at(
+      "plans/one.md",
+      plan("One", "Change src/one.js.", ` It rests on plans/two.md.${lands}`),
+      "handed",
+    );
+    expect(
+      freePlans([rests, two], { claims: { "plans/one.md": hold } }).map((p) => p.waitsOn),
+    ).toEqual([{ path: "plans/two.md", why: "it rests on it" }, null]);
+  });
+
   it(
     "starts the first of two handed plans of a topic and lets its Building line through",
     { timeout: 60_000 },
@@ -15720,6 +15771,11 @@ describe("several executors build at once", () => {
       );
       expect(building("one.md")).toBe("");
       expect(building("two.md", "pool-other-0000")).toContain("plans/two.md waits on plans/one.md");
+      // Its own claim on one.md orders the two for it too
+      // (plans/handed-plans-order-holds-everywhere.md).
+      expect(building("two.md")).toContain(
+        "plans/two.md waits on plans/one.md (the same topic, chat)",
+      );
     },
   );
 
@@ -15739,6 +15795,14 @@ describe("several executors build at once", () => {
       rmSync(join(one.dir, ".claude", "executor.claims.json"), { force: true });
       const file = join(one.dir, "plans", "one.md");
       const line = `## Building, 27 November 2026, session ${first.sessionId}`;
+      // The tool hook records the plans' times before the command, as in use.
+      one.queue(["tool"], {
+        session_id: first.sessionId,
+        agent_type: "workflow:executor",
+        cwd: one.tree(1),
+        tool_name: "Bash",
+        tool_input: { command: "cat >> plans/one.md" },
+      });
       writeFileSync(
         file,
         readFileSync(file, "utf8").replace("\n\n## Handing over", `\n\n${line}\n\n## Handing over`),
@@ -15754,6 +15818,172 @@ describe("several executors build at once", () => {
         expect(readFileSync(file, "utf8")).toContain(line);
       } finally {
         rmSync(stateFile(first.sessionId), { force: true });
+      }
+    },
+  );
+
+  // plans/handed-plans-order-holds-everywhere.md: two handed plans of the
+  // topic chat, one.md before two.md, the first started on one.md and
+  // holding its claim.
+  const handedPair = (name: string) => {
+    const handed = (title: string) =>
+      plan(title, `Change src/${title}.js.`, "\n\nLands: topic chat.").replace(
+        "\n\nPlan only",
+        "\n\n## Handing over, 27 November 2026\n\nStep in hand: 2.\n\nPlan only",
+      );
+    const one = pool(name, { "one.md": handed("one"), "two.md": handed("two") });
+    expect(one.queue(["start"])).toContain("was started on: plans/one.md");
+    const [first] = one.read();
+    const id: string = first.sessionId;
+    const hook = (mode: string, input: object, extra: Record<string, string> = {}) =>
+      one.queue(
+        [mode],
+        { session_id: id, agent_type: "workflow:executor", cwd: one.tree(1), ...input },
+        extra,
+      );
+    // A shell command writing this session's Building line into `file`, with
+    // the tool hook before it (`tool` false leaves it out) and the wrote hook after.
+    const line = `## Building, 27 November 2026, session ${id}`;
+    const shell = (
+      file: string,
+      { tool = true, extra = {} as Record<string, string>, touch = "" } = {},
+    ) => {
+      const bash = { tool_name: "Bash", tool_input: { command: `cat >> plans/${file}` } };
+      if (tool) hook("tool", bash, extra);
+      // The command touches another plan's file too.
+      if (touch) utimesSync(join(one.dir, "plans", touch), new Date(), new Date());
+      const path = join(one.dir, "plans", file);
+      writeFileSync(
+        path,
+        readFileSync(path, "utf8").replace("\n\n## Handing over", `\n\n${line}\n\n## Handing over`),
+      );
+      const out = hook("wrote", bash, extra);
+      return {
+        kept: readFileSync(path, "utf8").includes(line),
+        reason: out && JSON.parse(out).reason,
+      };
+    };
+    const putFirst = (file: string, title: string) => {
+      const path = join(one.dir, "plans", file);
+      writeFileSync(
+        path,
+        readFileSync(path, "utf8").replace(
+          `# ${title}\n`,
+          `# ${title}\n\nFirst: 27 November 2026 06:30.\n`,
+        ),
+      );
+    };
+    return { one, id, hook, shell, putFirst };
+  };
+  const twoWaits =
+    "plans/two.md waits on plans/one.md (the same topic, chat): leave it, and build what the queue names.";
+
+  it(
+    "starts the handed plan that waits on nothing when the earlier one rests on a ready plan resting on it",
+    { timeout: 60_000 },
+    () => {
+      const handed = (title: string, rests = "") =>
+        plan(title, `Change src/${title}.js.`, `${rests}\n\nLands: topic chat.`).replace(
+          "\n\nPlan only",
+          "\n\n## Handing over, 27 November 2026\n\nStep in hand: 2.\n\nPlan only",
+        );
+      const one = pool("Rests", {
+        "one.md": handed("one", " It rests on plans/c.md."),
+        "two.md": handed("two"),
+        "c.md": plan("c", "Change src/c.js.", " It rests on plans/two.md."),
+      });
+      expect(one.queue(["start"])).toContain("was started on: plans/two.md");
+    },
+  );
+
+  it(
+    "takes out its own session's line a shell command wrote on the other of two handed plans, and its stop starts the one it claimed",
+    { timeout: 60_000 },
+    () => {
+      const { one, id, shell, putFirst, hook } = handedPair("Own");
+      putFirst("two.md", "two");
+      try {
+        expect(shell("two.md")).toEqual({
+          kept: false,
+          reason: `${twoWaits} Its Building line was taken out.`,
+        });
+        writeFileSync(stateFile(id), JSON.stringify({ agent: "executor" }));
+        expect(hook("stop", { agent_type: "executor" })).toContain("was started on: plans/one.md");
+      } finally {
+        rmSync(stateFile(id), { force: true });
+      }
+    },
+  );
+
+  it(
+    "a timer's start replacing the session that claimed one of two handed plans starts that one",
+    { timeout: 60_000 },
+    () => {
+      const { one, id, putFirst } = handedPair("Timer");
+      putFirst("two.md", "two");
+      const log = () =>
+        readFileSync(join(one.dir, ".claude", "starts.log"), "utf8")
+          .trim()
+          .split("\n");
+      const claims = () =>
+        JSON.parse(readFileSync(join(one.dir, ".claude", "executor.claims.json"), "utf8"));
+      const timer = (extra: Record<string, string> = {}) =>
+        one.queue(
+          ["start", "--replace", id, "--timer", String(Date.now()), "plans/one.md", "plans/two.md"],
+          {},
+          extra,
+        );
+      // A launch that fails gives the replaced session its claim back (Codex C1).
+      const held = claims()["plans/one.md"];
+      expect(held).toBeTruthy();
+      const before = log().length;
+      timer({ STUB: "untrusted" });
+      expect(log()).toHaveLength(before);
+      expect(claims()["plans/one.md"]).toEqual(held);
+      // Then the timer's start takes the plan it claimed (Codex C3: a new row).
+      timer();
+      expect(log()).toHaveLength(before + 1);
+      expect(JSON.parse(log().at(-1) || "{}").paths).toEqual(["plans/one.md"]);
+    },
+  );
+
+  it(
+    "judges a Building line a shell command wrote with no sessions read as the queue's order gives it",
+    { timeout: 60_000 },
+    () => {
+      const { one, id, shell } = handedPair("Unread");
+      rmSync(join(one.dir, ".claude", "executor.claims.json"), { force: true });
+      const unread = { WORKFLOW_LIVE: "", WORKFLOW_CLAUDE: "/bin/false" };
+      try {
+        expect(shell("two.md", { extra: unread })).toEqual({
+          kept: false,
+          reason: `${twoWaits} Its Building line was taken out.`,
+        });
+        expect(shell("one.md", { extra: unread }).kept).toBe(true);
+      } finally {
+        rmSync(stateFile(id), { force: true });
+      }
+    },
+  );
+
+  it(
+    "orders a plan whose time before the command is not recorded by its file's time",
+    { timeout: 60_000 },
+    () => {
+      const { one, id, shell } = handedPair("Untimed");
+      rmSync(join(one.dir, ".claude", "executor.claims.json"), { force: true });
+      try {
+        expect(shell("two.md", { tool: false })).toEqual({
+          kept: false,
+          reason: `${twoWaits} Its Building line was taken out.`,
+        });
+        // A plan file the command touched keeps its time before it (Codex C2).
+        expect(shell("two.md", { touch: "one.md" })).toEqual({
+          kept: false,
+          reason: `${twoWaits} Its Building line was taken out.`,
+        });
+      } finally {
+        rmSync(stateFile(id), { force: true });
       }
     },
   );

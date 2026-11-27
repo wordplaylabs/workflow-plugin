@@ -4113,15 +4113,19 @@ function changedFiles(text = "") {
  * holding neither; and on a plan in progress (building by a live session,
  * handed over, or claimed) that lands on its topic, or is one of the day's
  * fixes as it is, or changes a file it changes. Between two handed plans one
- * goes first and only the other waits (plans/handed-plans-no-mutual-wait.md):
- * the one claimed, else the one the other rests on, else the one put first,
- * else the earlier in the queue's order; one claimed is waited on as before.
- * A handed plan is never asking (`askingIn` reads ready and planned plans), so
- * the one that goes first is never one held as asking
- * (plans/handed-plan-asking-not-ahead.md). A plan held is passed over, never
- * reordered.
+ * goes first and only the other waits (plans/handed-plans-no-mutual-wait.md,
+ * plans/handed-plans-order-holds-everywhere.md): never one that itself waits
+ * on a plan it rests on, then the one claimed, by whichever session, then the
+ * one put first, else the earlier in the queue's order; two both claimed fall
+ * to the last two. `claims` are the other sessions' and hold a plan; `own`,
+ * the claims of the session the caller acts for, count only for that order,
+ * so every path gives the same plan. One building by a live session, or
+ * claimed, is waited on as before. A handed plan is never asking (`askingIn`
+ * reads ready and planned plans), so the one that goes first is never one
+ * held as asking (plans/handed-plan-asking-not-ahead.md). A plan held is
+ * passed over, never reordered.
  */
-export function freePlans(plans, { claims = {} } = {}) {
+export function freePlans(plans, { claims = {}, own = {} } = {}) {
   const byPath = new Map(plans.map((plan) => [plan.path, plan]));
   const order = new Map(plans.map((plan, i) => [plan.path, i]));
   // As `readPlans` sorts: put first ahead, the later put first ahead of the
@@ -4135,25 +4139,26 @@ export function freePlans(plans, { claims = {} } = {}) {
   const inProgress = plans.filter(
     (plan) => plan.state === "building" || plan.state === "handed" || claims[plan.path],
   );
-  return readyForExecutor(plans).map((plan) => {
-    for (const path of restsOn(plan)) {
+  // The first plan `p` rests on that is not built and does not rest on `p`, else "".
+  const restedOn = (p) =>
+    restsOn(p).find((path) => {
       const other = byPath.get(path);
-      if (!other || !unbuilt.includes(other.state)) continue;
-      if (restsOn(other).includes(plan.path)) continue;
-      return { ...plan, waitsOn: { path, why: "it rests on it" } };
-    }
+      return other && unbuilt.includes(other.state) && !restsOn(other).includes(p.path);
+    }) || "";
+  const claimed = (p) => Boolean(claims[p.path] || own[p.path]);
+  // Between two handed plans, whether `plan`, not held by what it rests on,
+  // goes before `other`.
+  const handedBefore = (plan, other) =>
+    Boolean(restedOn(other)) ||
+    (claimed(plan) !== claimed(other) ? claimed(plan) : goesBefore(plan, other));
+  return readyForExecutor(plans).map((plan) => {
+    const rested = restedOn(plan);
+    if (rested) return { ...plan, waitsOn: { path: rested, why: "it rests on it" } };
     const topic = topicOf(plan);
     const files = changedFiles(plan.text);
     for (const other of inProgress) {
       if (other.path === plan.path) continue;
-      if (
-        plan.state === "handed" &&
-        other.state === "handed" &&
-        !claims[other.path] &&
-        (claims[plan.path] ||
-          (restsOn(other).includes(plan.path) && !restsOn(plan).includes(other.path)) ||
-          goesBefore(plan, other))
-      )
+      if (plan.state === "handed" && other.state === "handed" && handedBefore(plan, other))
         continue;
       if (topicOf(other) === topic)
         return {
@@ -4223,6 +4228,20 @@ function holdsClaim(one, sessionId, live) {
 }
 
 /**
+ * The live claims split for the session a path acts for: `others`, which
+ * hold a plan from it, and `own`, `sessionId`'s, which only order two handed
+ * plans (`freePlans`). Every path that acts for a session reads them so, and
+ * gives the same plan (decisions.md#plan-waits-on).
+ */
+function claimsFor(plans, live, sessionId) {
+  const others = {};
+  const own = {};
+  for (const [path, one] of Object.entries(readClaims(plans, live)))
+    (holdsClaim(one, sessionId, live) ? own : others)[path] = one;
+  return { others, own };
+}
+
+/**
  * Whether an id holder names session `sessionId`: the same id; a start of it
  * of eight or more (`sameSession`), as `claude --bg` prints one, that starts
  * no other row's id; or the `id` `claude agents` gives that session's row. A
@@ -4257,9 +4276,10 @@ function holderRuns(one, live, now = Date.now()) {
 /**
  * Ends a session's claim on a plan, under the guard: the claim `holder`
  * holds; given the live rows (`{ live }`), any claim `holdsClaim` says is
- * that session's, by a start of its id or by its name.
+ * that session's, by a start of its id or by its name. With `back`, the
+ * claim it took over, that one is put back in the same write.
  */
-function unclaim(path, holder, { live } = {}) {
+function unclaim(path, holder, { live, back } = {}) {
   const guard = `${files.claims()}.guard`;
   const guarded = takeGuard(guard);
   try {
@@ -4269,7 +4289,8 @@ function unclaim(path, holder, { live } = {}) {
       one?.holder === holder ||
       (live !== undefined && Boolean(one) && holdsClaim(one, holder, live));
     if (!mine) return;
-    delete table[path];
+    if (back) table[path] = back;
+    else delete table[path];
     writeJson(files.claims(), table);
   } finally {
     if (guarded)
@@ -4300,7 +4321,7 @@ function claim(path, { holder, name, now = Date.now(), live = null, from = "", l
     const own =
       held &&
       (held.holder === holder ||
-        (from && held.holder === from) ||
+        (from && (held.holder === from || holdsClaim(held, from, live))) ||
         (!/^start:/.test(held.holder) && holdsClaim(held, holder, live)));
     if (held && !own && held.until > now && !gone) return false;
     table[path] = {
@@ -4901,14 +4922,15 @@ function startHere(
   let batch = null;
   let sessionAt = false;
   if (kind === "executor" && agent === "executor") {
+    // The replaced session's claims order two handed plans as its own hooks
+    // do, and hold none from this start.
+    const replaced = claimsFor(plans, live, replace);
     const claims = Object.fromEntries([
-      ...Object.entries(readClaims(plans, live)).filter(
-        ([, one]) => !holdsClaim(one, replace, live),
-      ),
+      ...Object.entries(replaced.others),
       // The numbers this timer started or was refused at, held as a start holds its own.
       ...passed.map((n) => [`slot:${n}`, { holder: "started", until: Infinity }]),
     ]);
-    const free = freePlans(plans, { claims });
+    const free = freePlans(plans, { claims, own: replaced.own });
     const sessions = sessionsOf("executor", live, readLocks(), { plans })
       // A chat in the checkout is no number's: it builds nothing there.
       .filter((one) => one.sessionId !== replace && one.number);
@@ -5263,14 +5285,18 @@ function startHere(
     !claim("slot:assistant", { holder: starter, name: decision.name, live })
   )
     return `${decision.name} is being opened by another start at this moment: send it the message once plans lists it.`;
-  // The session this start replaces gives up the plan its stop claimed.
-  if (tree && replace) unclaim(paths[0], replace, { live });
+  // The session this start replaces hands this start the plan its stop
+  // claimed in the same write, so no start beside it sees the plan
+  // unclaimed, and gets it back when the start fails: its claim orders two
+  // handed plans (decisions.md#plan-waits-on).
+  const before = tree && replace ? (readJson(files.claims()) || {})[paths[0]] : null;
+  const back = before && holdsClaim(before, replace, live) ? before : undefined;
   if (tree) {
-    const plan = claim(paths[0], { holder: starter, name, live });
+    const plan = claim(paths[0], { holder: starter, name, live, from: back ? replace : "" });
     const slot = plan && claim(`slot:${number}`, { holder: starter, name, live });
     if (!slot) {
       dropName(name);
-      if (plan) unclaim(paths[0], starter);
+      if (plan) unclaim(paths[0], starter, { back });
       for (const { old, state, lock } of replaced) {
         writeJson(files.state(old.sessionId), state);
         if (lock?.sessionId === old.sessionId) writeJson(files.lock(number), lock);
@@ -5290,7 +5316,7 @@ function startHere(
     // slow launcher's as a silent one's, so the name stays held until its
     // span lapses and no start numbers it again meanwhile
     // (plans/late-session-keeps-its-name.md).
-    if (tree) unclaim(paths[0], starter);
+    if (tree) unclaim(paths[0], starter, { back });
     for (const { old, state, lock } of replaced) {
       writeJson(files.state(old.sessionId), state);
       if (lock?.sessionId === old.sessionId) writeJson(files.lock(number), lock);
@@ -7516,22 +7542,16 @@ function takenWords(path, plans, live, sessionId) {
     const name = live?.find((row) => row.sessionId === plan.session)?.name;
     return claimedWords(path, { holder: plan.session, name, at: plan.mtime || Date.now() });
   }
-  const claims = readClaims(plans, live);
-  if (claims[path] && !holdsClaim(claims[path], sessionId, live))
-    return claimedWords(path, claims[path], live);
-  const others = Object.fromEntries(
-    Object.entries(claims).filter(([, one]) => !holdsClaim(one, sessionId, live)),
-  );
+  const { others, own } = claimsFor(plans, live, sessionId);
+  if (others[path]) return claimedWords(path, others[path], live);
   // A handed plan resumed stays handed, so it goes before the other handed
   // plans as `freePlans` gave it to its start.
-  const own = plans.map((p) =>
+  const asStood = plans.map((p) =>
     p.path === path && p.state !== "handed" ? { ...p, state: "ready" } : p,
   );
-  // This session's own claim on it is kept: a handed plan claimed goes first.
-  const held = claims[path] ? { [path]: claims[path] } : {};
-  const waits = freePlans(own, { claims: { ...others, ...held } }).find(
-    (p) => p.path === path,
-  )?.waitsOn;
+  // This session's own claims order two handed plans as every path does: a
+  // handed plan claimed goes first, and on another its line is refused.
+  const waits = freePlans(asStood, { claims: others, own }).find((p) => p.path === path)?.waitsOn;
   return waits
     ? `${path} waits on ${waits.path} (${waits.why}): leave it, and build what the queue names.`
     : "";
@@ -7998,54 +8018,50 @@ function hook(mode, input) {
       if (unjudged.length) {
         const live = liveSessions({ timeout: 4000 });
         const own = new RegExp(`${building.source}[^\\n]*\\n?`, "gm");
-        // The queue with the sessions in hand, for a plan put first ahead
-        // (decisions.md#plan-put-first); none with no sessions read. The plans
-        // this command claimed are judged as they stood before it, so one
-        // command claiming two is not let through by its own lines, their times
-        // too: the command's write would open a plan's window again, and a plan
-        // put first still asking would stop holding the other back. One time
-        // per plan for its asking window, its own Building line's and a plan
-        // put first's alike: its time before the command; with none, a plan
-        // this command claimed has none, since the command's write would open
-        // its window again, and any other its file's, written by someone else.
+        // The queue as it stood before the command, with the sessions read or
+        // not, so the line is judged as an edit's (decisions.md#plan-waits-on):
+        // the plans this command claimed are judged without their lines, so
+        // one command claiming two is not let through by its own lines. Two
+        // times. For a plan's asking window, its own Building line's and a
+        // plan put first's alike (`hookTime`): its time before the command;
+        // with none, a plan this command claimed has none, since the command's
+        // write would open its window again, and any other its file's, written
+        // by someone else. For the queue's order alone (`stoodAt`), every
+        // plan's: its time before the command, else its file's, so a line a
+        // command wrote, or a file it touched, gains no place over an edit's.
         const claimed = (p) => unjudged.some((one) => one.path === p.path);
         const hookTime = (p) => state.plansAt?.[p.path] || (claimed(p) ? 0 : p.mtime || 0);
-        const queued = live
-          ? readPlans(join(root, "plans"), liveIds(live))
-              .map((p) =>
-                claimed(p)
-                  ? {
-                      ...p,
-                      ...stateOf(p.text.replace(own, ""), {
-                        mtime: hookTime(p),
-                        live: liveIds(live),
-                      }),
-                    }
-                  : p,
-              )
-              // In the queue's order as it stood, so a plan taken keeps its place.
-              .sort(queueOrder)
-          : [];
+        const stoodAt = (p) => state.plansAt?.[p.path] || p.mtime || 0;
+        const asStood = readPlans(join(root, "plans"), liveIds(live))
+          .map((p) =>
+            claimed(p)
+              ? {
+                  ...p,
+                  ...stateOf(p.text.replace(own, ""), { mtime: stoodAt(p), live: liveIds(live) }),
+                }
+              : { ...p, mtime: stoodAt(p) },
+          )
+          // In the queue's order as it stood, so a plan taken keeps its place.
+          .sort(queueOrder);
+        // A plan put first ahead (decisions.md#plan-put-first) is read with the
+        // sessions in hand only.
+        const queued = live ? asStood : [];
         for (const plan of unjudged) {
           const asking = heldFromBuilding(plan.path, plan.text, live, { mtime: hookTime(plan) });
           const ahead = asking
             ? []
             : firstAhead(plan.path, queued, { live, timeOf: hookTime, sessionId });
-          // No sessions read is the hook doing nothing, as when it fails:
-          // judged, so a failing list is not asked again on every command.
-          // Judged as the plans stood before the line. One line a
+          // No sessions read is judged from the plans and the claims alone, as
+          // an edit's line is, and the plan counts as judged, so a failing
+          // list is not asked again on every command. Judged as the plans
+          // stood before the line. One line a
           // command: a second taken in it is refused.
           const refused =
             asking || ahead.length
               ? ""
               : newly.length
                 ? oneAtATime(plan.path, newly[0])
-                : takenWords(
-                    plan.path,
-                    live ? queued : readPlans(join(root, "plans")),
-                    live,
-                    sessionId,
-                  );
+                : takenWords(plan.path, asStood, live, sessionId);
           if (!asking && !ahead.length && !refused) {
             taken.push(plan.path);
             newly.push(plan.path);
@@ -8178,12 +8194,8 @@ function hook(mode, input) {
     // handed plan only its own number's, or one whose worktree is no
     // executor's now.
     const mine = executorNumber(input) || 1;
-    const claims = Object.fromEntries(
-      Object.entries(readClaims(plans, live)).filter(
-        ([, one]) => !holdsClaim(one, sessionId, live),
-      ),
-    );
-    const free = freePlans(withAsking(plans, live), { claims }).filter(
+    const { others: claims, own } = claimsFor(plans, live, sessionId);
+    const free = freePlans(withAsking(plans, live), { claims, own }).filter(
       (p) => !p.waitsOn && !claims[p.path],
     );
     // Claimed before it is named, so two stops at one moment name it once.
@@ -8204,14 +8216,11 @@ function hook(mode, input) {
       // Judged again with the claims as they are now: another stop may have
       // claimed a plan this one waits on meanwhile.
       .filter((p) => {
-        const now = Object.fromEntries(
-          Object.entries(readClaims(plans, live)).filter(
-            ([, one]) => !holdsClaim(one, sessionId, live),
-          ),
-        );
-        const still = freePlans(withAsking(plans, live), { claims: now }).find(
-          (one) => one.path === p.path,
-        );
+        const now = claimsFor(plans, live, sessionId);
+        const still = freePlans(withAsking(plans, live), {
+          claims: now.others,
+          own: now.own,
+        }).find((one) => one.path === p.path);
         if (still && !still.waitsOn) return true;
         unclaim(p.path, sessionId);
         return false;

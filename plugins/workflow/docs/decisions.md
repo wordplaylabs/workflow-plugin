@@ -560,21 +560,39 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   its own files, hand out no blocked task and claim under a file
   lock; git refuses one branch in two worktrees. Waiting too often
   costs time, never a conflict. Between two handed plans one goes first
-  and only the other waits on it: the one claimed, else the one the other
-  rests on, else the one put first, else the earlier in the queue's
-  order. Two each waiting on the other held a topic's plans and spent a
-  fresh executor at every start (27 November); one building by a live
-  session, or claimed, is waited on as before. A plan asking or held from
-  building is never the one that goes first, since a handed plan never
-  asks: `askingIn` reads only ready and planned plans, and a test pins
-  it, so the order needs no rule for one. A start's claim holds the
+  and only the other waits on it: never one that itself waits on a plan it
+  rests on, then the one claimed, by whichever session, then the one put
+  first, else the earlier in the queue's order; two both claimed fall to
+  the last two. Two each waiting on the other held a topic's plans and
+  spent a fresh executor at every start (27 November); one building by a
+  live session, or claimed, is waited on as before. Every path gives the
+  same one: a claim counts for the order whoever holds it, and the
+  session a hook or a start acts for, its own or the one a start
+  replaces, is only never kept from a plan by its own claim; the shell
+  command's check judges the plans as they stood before the command
+  with the sessions unread too, and a plan whose earlier time it does
+  not have keeps its file's time, so a line a command wrote gains no
+  place over one an edit wrote. A plan asking or held from building is
+  never the one that goes first, since a handed plan never asks:
+  `askingIn` reads only ready and planned plans, and a test pins it, so
+  the order needs no rule for one. Known limits, each a wait `plans`
+  says and none a conflict: the order reads no executor, since the
+  hooks judge with no sessions read and every path must give the same
+  plan, so the plan that goes first may wait for its own worktree's
+  executor while a free one could take the other, until that executor
+  is free or the owner puts the other first; and a handed plan that
+  rests on a ready plan of its own topic or files, or three or more
+  plans that rest on each other in a ring, hold each other, which takes
+  a header changed after its Building line, since the line is refused
+  on a plan that rests on one not built. A start's claim holds the
   session it started: its row's id, else the id `claude --bg` printed
   before `claude agents` lists it, and its name only when neither is
   read; a name claim is that session's wherever a claim is read, and its
   refusal shows no name in the id's place. plans/parallel-executors.md,
   plans/claim-carries-the-launched-id.md,
   plans/handed-plans-no-mutual-wait.md,
-  plans/handed-plan-asking-not-ahead.md.
+  plans/handed-plan-asking-not-ahead.md,
+  plans/handed-plans-order-holds-everywhere.md.
 - `push-not-waited-on` **The executor runs the checks once, before the
   push, and waits on no pull request's run of them; a failed run
   reaches the assistant by the webhook.** (Javi, 14 November) The pull

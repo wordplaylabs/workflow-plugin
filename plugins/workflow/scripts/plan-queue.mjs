@@ -4116,7 +4116,10 @@ function changedFiles(text = "") {
  * goes first and only the other waits (plans/handed-plans-no-mutual-wait.md):
  * the one claimed, else the one the other rests on, else the one put first,
  * else the earlier in the queue's order; one claimed is waited on as before.
- * A plan held is passed over, never reordered.
+ * A handed plan is never asking (`askingIn` reads ready and planned plans), so
+ * the one that goes first is never one held as asking
+ * (plans/handed-plan-asking-not-ahead.md). A plan held is passed over, never
+ * reordered.
  */
 export function freePlans(plans, { claims = {} } = {}) {
   const byPath = new Map(plans.map((plan) => [plan.path, plan]));

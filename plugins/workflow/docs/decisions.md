@@ -564,13 +564,17 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   rests on, else the one put first, else the earlier in the queue's
   order. Two each waiting on the other held a topic's plans and spent a
   fresh executor at every start (27 November); one building by a live
-  session, or claimed, is waited on as before. A start's claim holds the
+  session, or claimed, is waited on as before. A plan asking or held from
+  building is never the one that goes first, since a handed plan never
+  asks: `askingIn` reads only ready and planned plans, and a test pins
+  it, so the order needs no rule for one. A start's claim holds the
   session it started: its row's id, else the id `claude --bg` printed
   before `claude agents` lists it, and its name only when neither is
   read; a name claim is that session's wherever a claim is read, and its
   refusal shows no name in the id's place. plans/parallel-executors.md,
   plans/claim-carries-the-launched-id.md,
-  plans/handed-plans-no-mutual-wait.md.
+  plans/handed-plans-no-mutual-wait.md,
+  plans/handed-plan-asking-not-ahead.md.
 - `push-not-waited-on` **The executor runs the checks once, before the
   push, and waits on no pull request's run of them; a failed run
   reaches the assistant by the webhook.** (Javi, 14 November) The pull

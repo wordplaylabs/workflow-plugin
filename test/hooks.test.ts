@@ -8953,6 +8953,23 @@ describe("asked once", () => {
     ).toBeNull();
   });
 
+  // plans/handed-plan-asking-not-ahead.md: a handed plan is never the one of
+  // two that goes first while asking, since it never asks.
+  it("a handed plan is never asking, so it is never held from going first", () => {
+    const handed = asks.replace(
+      "\n## Decisions for",
+      "\n## Handing over, 28 October 2026\n\nStep in hand: 2.\n\n## Decisions for",
+    );
+    const state = stateOf(handed);
+    expect(state).toMatchObject({ state: "handed" });
+    expect(state.asks).toBeFalsy();
+    // Its planner live and asking within the window: still not asking.
+    expect(askingIn({ path: "plans/asks.md", ...state }, [row], options(5))).toBeNull();
+    expect(askingIn({ path: "plans/asks.md", ...state, asks: true }, [row], options(5))).toBeNull();
+    // The same plan not yet handed over is asking.
+    expect(askingIn(ready("plans/asks.md"), [row], options(5))).not.toBeNull();
+  });
+
   it("plannerContext says how long the plan is held", () => {
     const texts: Record<string, string> = { "plans/asks.md": asks };
     const within = plannerContext(

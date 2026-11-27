@@ -559,13 +559,22 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   behind one another; Claude Code's agent teams give each teammate
   its own files, hand out no blocked task and claim under a file
   lock; git refuses one branch in two worktrees. Waiting too often
-  costs time, never a conflict. Between two handed plans one goes first
+  costs time, never a conflict. Between two plans in hand, each handed
+  over or claimed and neither building by a live session, one goes first
   and only the other waits on it: never one that itself waits on a plan it
-  rests on, then the one claimed, by whichever session, then the one put
-  first, else the earlier in the queue's order; two both claimed fall to
-  the last two. Two each waiting on the other held a topic's plans and
-  spent a fresh executor at every start (27 November); one building by a
-  live session, or claimed, is waited on as before. Every path gives the
+  rests on, then the one claimed, by whichever session, of two both
+  claimed the one claimed first, then the one put first, else the earlier
+  in the queue's order; the claim first, so a stop that claims a plan and
+  judges it again gives it back when another was claimed before it, and
+  no executor already started on one is refused for a claim taken after.
+  Two each waiting on the other held a topic's plans and
+  spent a fresh executor at every start (27 November), and two plans of
+  one topic claimed by two executors started fifteen seconds apart did
+  the same that day; one building by a live session is waited on as
+  before, and a plan in hand by a ready plan neither claimed nor handed.
+  A usage reset's start that starts several executors holds the plans it
+  started as claimed from its next start, so it leases at most one plan
+  of a topic and one of the day's fixes. Every path gives the
   same one: a claim counts for the order whoever holds it, and the
   session a hook or a start acts for, its own or the one a start
   replaces, is only never kept from a plan by its own claim; the shell
@@ -592,7 +601,8 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/claim-carries-the-launched-id.md,
   plans/handed-plans-no-mutual-wait.md,
   plans/handed-plan-asking-not-ahead.md,
-  plans/handed-plans-order-holds-everywhere.md.
+  plans/handed-plans-order-holds-everywhere.md,
+  plans/claimed-plans-no-mutual-wait.md.
 - `push-not-waited-on` **The executor runs the checks once, before the
   push, and waits on no pull request's run of them; a failed run
   reaches the assistant by the webhook.** (Javi, 14 November) The pull

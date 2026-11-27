@@ -4028,8 +4028,9 @@ export function start(paths, options = {}) {
   // a path and a number. A number started here, or refused for the session
   // there, is passed over by the next start, which may read the sessions
   // before the new chat is listed; a chat started here is at work beside the
-  // next start, listed or not; the session replaced and the owner's word go
-  // with the first start.
+  // next start, listed or not, and a plan started here is held from it as
+  // claimed, so it leases at most one plan of a topic, or of the day's
+  // fixes; the session replaced and the owner's word go with the first start.
   let out = {};
   let said = startHere(paths, { ...options, out });
   const kind = options.agent === "planner" || options.agent === "assistant" ? "" : "executor";
@@ -4048,7 +4049,7 @@ export function start(paths, options = {}) {
       const rest = paths.filter((path) => !started.includes(queuePath(path)));
       if (!rest.length) break;
       out = {};
-      said = `${said}\n${startHere(rest, { ...next, passed, going, again: true, out })}`;
+      said = `${said}\n${startHere(rest, { ...next, passed, going, leased: started, again: true, out })}`;
     }
   }
   // **The listener is armed with a start** (decisions.md#github-webhook).
@@ -4112,18 +4113,21 @@ function changedFiles(text = "") {
  * (ready, asking, planned, handed or building), two that name each other
  * holding neither; and on a plan in progress (building by a live session,
  * handed over, or claimed) that lands on its topic, or is one of the day's
- * fixes as it is, or changes a file it changes. Between two handed plans one
- * goes first and only the other waits (plans/handed-plans-no-mutual-wait.md,
- * plans/handed-plans-order-holds-everywhere.md): never one that itself waits
- * on a plan it rests on, then the one claimed, by whichever session, then the
- * one put first, else the earlier in the queue's order; two both claimed fall
- * to the last two. `claims` are the other sessions' and hold a plan; `own`,
- * the claims of the session the caller acts for, count only for that order,
- * so every path gives the same plan. One building by a live session, or
- * claimed, is waited on as before. A handed plan is never asking (`askingIn`
- * reads ready and planned plans), so the one that goes first is never one
- * held as asking (plans/handed-plan-asking-not-ahead.md). A plan held is
- * passed over, never reordered.
+ * fixes as it is, or changes a file it changes. Between two plans in hand,
+ * each handed or claimed and neither building by a live session, one goes
+ * first and only the other waits (plans/handed-plans-no-mutual-wait.md,
+ * plans/handed-plans-order-holds-everywhere.md,
+ * plans/claimed-plans-no-mutual-wait.md): never one that itself waits on a
+ * plan it rests on, then the one claimed, by whichever session, of two both
+ * claimed the one claimed first, then the one put first, else the earlier in
+ * the queue's order. `claims` are the other sessions' and hold a plan; `own`, the
+ * claims of the session the caller acts for, count only for that order, so
+ * every path gives the same plan. One building by a live session is waited
+ * on as before, and a plan in hand by a ready plan neither claimed nor
+ * handed. A handed plan is never asking (`askingIn` reads ready and planned
+ * plans), so the one that goes first is never one held as asking
+ * (plans/handed-plan-asking-not-ahead.md). A plan held is passed over, never
+ * reordered.
  */
 export function freePlans(plans, { claims = {}, own = {} } = {}) {
   const byPath = new Map(plans.map((plan) => [plan.path, plan]));
@@ -4146,11 +4150,20 @@ export function freePlans(plans, { claims = {}, own = {} } = {}) {
       return other && unbuilt.includes(other.state) && !restsOn(other).includes(p.path);
     }) || "";
   const claimed = (p) => Boolean(claims[p.path] || own[p.path]);
-  // Between two handed plans, whether `plan`, not held by what it rests on,
+  const claimedAt = (p) => (claims[p.path] || own[p.path])?.at || 0;
+  // Handed or claimed, and not building by a live session.
+  const inHand = (p) => p.state === "handed" || (p.state === "ready" && claimed(p));
+  // Between two plans in hand, whether `plan`, not held by what it rests on,
   // goes before `other`.
-  const handedBefore = (plan, other) =>
+  // Two both claimed: the earlier claim, so a claim taken later, and judged
+  // again by the stop that took it, never displaces one already started on.
+  const inHandBefore = (plan, other) =>
     Boolean(restedOn(other)) ||
-    (claimed(plan) !== claimed(other) ? claimed(plan) : goesBefore(plan, other));
+    (claimed(plan) !== claimed(other)
+      ? claimed(plan)
+      : claimedAt(plan) && claimedAt(other) && claimedAt(plan) !== claimedAt(other)
+        ? claimedAt(plan) < claimedAt(other)
+        : goesBefore(plan, other));
   return readyForExecutor(plans).map((plan) => {
     const rested = restedOn(plan);
     if (rested) return { ...plan, waitsOn: { path: rested, why: "it rests on it" } };
@@ -4158,8 +4171,7 @@ export function freePlans(plans, { claims = {}, own = {} } = {}) {
     const files = changedFiles(plan.text);
     for (const other of inProgress) {
       if (other.path === plan.path) continue;
-      if (plan.state === "handed" && other.state === "handed" && handedBefore(plan, other))
-        continue;
+      if (inHand(plan) && inHand(other) && inHandBefore(plan, other)) continue;
       if (topicOf(other) === topic)
         return {
           ...plan,
@@ -4813,6 +4825,7 @@ function startHere(
     net = false,
     passed = [],
     going = [],
+    leased = [],
     again = false,
     out = {},
   } = {},
@@ -4926,6 +4939,10 @@ function startHere(
     // do, and hold none from this start.
     const replaced = claimsFor(plans, live, replace);
     const claims = Object.fromEntries([
+      // The plans it started, so a plan of one of their topics, or of the
+      // day's fixes with one, waits on it (plans/claimed-plans-no-mutual-wait.md);
+      // a claim read for one is kept, its holder and time with it.
+      ...leased.map((path) => [path, { holder: "started", until: Infinity }]),
       ...Object.entries(replaced.others),
       // The numbers this timer started or was refused at, held as a start holds its own.
       ...passed.map((n) => [`slot:${n}`, { holder: "started", until: Infinity }]),

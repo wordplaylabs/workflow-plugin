@@ -15330,8 +15330,13 @@ describe("an executor builds in its own worktree", () => {
 describe("several executors build at once", () => {
   const plan = (title: string, body = "", head = "") =>
     `# ${title}\n\nPlan only, 24 November 2026, for Javi.${head}\n\n## The change, part by part\n\n${body}\n`;
-  /** A checkout with `executors: 3`, origin/test, the plans given, and a `claude` whose started chats are busy. */
-  const pool = (name: string, plans: Record<string, string>, front = "executors: 3\n") => {
+  /** A checkout with `executors: 3`, origin/test, the plans given, and a `claude` whose started chats are `status`, busy by default. */
+  const pool = (
+    name: string,
+    plans: Record<string, string>,
+    front = "executors: 3\n",
+    status = "busy",
+  ) => {
     const dir = temp(`pool-${name.toLowerCase()}-`);
     g(dir, "init", "-q");
     mkdirSync(join(dir, ".claude"));
@@ -15353,7 +15358,7 @@ describe("several executors build at once", () => {
     const script = fakeClaude(temp("pool-claude-"), {
       prefix: "pool",
       numbered: true,
-      status: "busy",
+      status,
       rows,
     });
     const { WORKFLOW_LIVE: _, ...rest } = process.env;
@@ -15466,6 +15471,31 @@ describe("several executors build at once", () => {
       const listed = one.queue(["list"]);
       expect(listed).toContain("1 plan free, but none starts: every executor is at work.");
       expect(listed).toMatch(/\n  plans\/c\.md +Plan only, 24 November\n/);
+    },
+  );
+
+  // plans/claimed-plans-no-mutual-wait.md
+  it(
+    "starts one executor at a usage reset on two plans of one topic, the other waiting on it",
+    { timeout: 60_000 },
+    () => {
+      const one = pool(
+        "Topic",
+        {
+          "a.md": plan("A", "Change src/a.js.", "\n\nLands: topic chat."),
+          "b.md": plan("B", "Change src/b.js.", "\n\nLands: topic chat."),
+        },
+        "executors: 2\n",
+        // Listed with no status, so the first start's claim is not read as
+        // its session's by the next: the plan it started holds the other.
+        "",
+      );
+      reset(one, ["plans/a.md", "plans/b.md"]);
+      expect(startedBy(one)).toEqual(["Topic Executor 1 (lab): plans/a.md in executor-1"]);
+      one.write(one.read().map((row: object) => ({ ...row, status: "busy" })));
+      expect(one.queue(["list"])).toMatch(
+        /plans\/b\.md +Plan only, 24 November, waits on plans\/a\.md \(the same topic, chat\)/,
+      );
     },
   );
 
@@ -15681,6 +15711,65 @@ describe("several executors build at once", () => {
     // A handed plan and one building of its topic: the handed one still waits.
     const live = at("plans/live.md", plan("Live", "Change src/live.js.", lands), "building");
     expect(freePlans([one, live]).map((p) => p.waitsOn)).toEqual([{ path: "plans/live.md", why }]);
+  });
+
+  // plans/claimed-plans-no-mutual-wait.md
+  it("lets one of two claimed plans of a topic go, and a claimed one still waits on one building", () => {
+    const at = (path: string, text: string, state: string) => ({ path, text, state });
+    const lands = "\n\nLands: topic chat.";
+    const why = "the same topic, chat";
+    const one = at("plans/one.md", plan("One", "Change src/one.js.", lands), "ready");
+    const two = at("plans/two.md", plan("Two", "Change src/two.js.", lands), "ready");
+    const hold = { holder: "someone", until: Infinity };
+    const both = { "plans/one.md": hold, "plans/two.md": hold };
+    // Both claimed: the earlier goes, the later waits on it.
+    expect(freePlans([one, two], { claims: both }).map((p) => p.waitsOn)).toEqual([
+      null,
+      { path: "plans/one.md", why },
+    ]);
+    // The later put first goes, and the earlier waits on it.
+    const put = {
+      ...two,
+      first: { day: "27 November 2026", time: "12:20", at: 1_795_781_000_000 },
+    };
+    expect(freePlans([one, put], { claims: both }).map((p) => p.waitsOn)).toEqual([
+      { path: "plans/two.md", why },
+      null,
+    ]);
+    // Two of the day's fixes, claimed both.
+    const x = at("plans/x.md", plan("X", "Change src/x.js.", "\n\nLands: fix."), "ready");
+    const y = at("plans/y.md", plan("Y", "Change src/y.js.", "\n\nLands: fix."), "ready");
+    const fixes = { "plans/x.md": hold, "plans/y.md": hold };
+    expect(freePlans([x, y], { claims: fixes }).map((p) => p.waitsOn)).toEqual([
+      null,
+      { path: "plans/x.md", why: "the day's fixes" },
+    ]);
+    // One claimed by this session, one by another: the same order; the
+    // other's is not waited on here, since this session's own claim holds nothing.
+    expect(
+      freePlans([one, two], {
+        claims: { "plans/two.md": hold },
+        own: { "plans/one.md": hold },
+      }).map((p) => p.waitsOn),
+    ).toEqual([null, null]);
+    // Both claimed at known times: the one claimed first goes, ahead in the
+    // queue or not, so a stop judging again the plan it claimed second gives it back.
+    const early = { holder: "someone", at: 1000, until: Infinity };
+    const late = { holder: "me", at: 2000, until: Infinity };
+    expect(
+      freePlans([one, two], { claims: { "plans/two.md": early }, own: { "plans/one.md": late } })[0]
+        .waitsOn,
+    ).toEqual({ path: "plans/two.md", why });
+    expect(
+      freePlans([one, put], {
+        claims: { "plans/one.md": early, "plans/two.md": late },
+      }).map((p) => p.waitsOn),
+    ).toEqual([null, { path: "plans/one.md", why }]);
+    // A claimed plan and one building of its topic: the claimed one waits.
+    const live = at("plans/live.md", plan("Live", "Change src/live.js.", lands), "building");
+    expect(
+      freePlans([one, live], { claims: { "plans/one.md": hold } }).map((p) => p.waitsOn),
+    ).toEqual([{ path: "plans/live.md", why }]);
   });
 
   // plans/handed-plans-order-holds-everywhere.md

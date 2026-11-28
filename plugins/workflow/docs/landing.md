@@ -39,15 +39,71 @@ name that is the branch, `main` or `fixes-` followed by anything is no
 topic's: build the plan as `topic <the plan's file name without .md>`,
 its `Lands` line rewritten to it, its "Built" saying why.
 
-**A topic's base** is the head branch it is stacked on when its plans'
-`Lands` line says `stacked on #<n>` (`gh pr view <n> --json
-headRefName,state`), since its pull request opens against that head and
-the parent's commits are not its own. It is `<branch>` for any other
-topic, and for a stacked one whose parent is MERGED or whose head is
-gone from origin (no `origin/<headRefName>` after `git fetch --prune`), as "A pull request is refreshed" retargets a stack
-whose parent merged. Every step below that names `<base>` takes it so:
-the new branch, the start's merge, the create's `--base` and the
+**A topic's base** is the head branch it is stacked on when a `Lands`
+line of its plans says `stacked on #<n>` (`gh pr view <n> --json
+headRefName,state,isCrossRepository`), since its pull request opens
+against that head and the parent's commits are not its own. A line
+without it takes nothing away; of lines that name different pull
+requests, the one of the plan whose commit is first on the topic's branch
+counts, the branch having started from that head, and with none built
+the plan in hand's. It is `<branch>` for any other topic, and for a
+stacked one whose parent is MERGED, is from a fork (`isCrossRepository`:
+GitHub stacks no pull request across forks, and an `origin/<headRefName>`
+of that name is another branch) or whose head is gone from origin (no
+`origin/<headRefName>` after `git fetch --prune`), as "A pull request is
+refreshed" retargets a stack whose parent merged. A fork's commits are
+not merged in, and "Built" gets, after its first line, `#<n> is from a
+fork: built on <branch>, not stacked on it.` A parent CLOSED without
+merging stays the base while its head is on origin, as GitHub keeps a
+stack whose pull request was closed: "Built" gets, after its first line,
+`Stacked on #<n>, closed without merging: its base stays <head> while
+that branch is on origin.` Every step below that names `<base>` takes it
+so: the new branch, the start's merge, the create's `--base` and the
 recovery.
+
+**A merged parent's work comes in once.** A topic stacked on #<n> still
+holds the parent's own commits once it is squash merged, and
+`origin/<branch>` merged in plainly conflicts on every line both
+changed. So wherever `origin/<branch>` is merged into a stacked topic
+(the start's merge, the retarget, a refresh), read `gh pr view <n> --json
+state,headRefOid,mergeCommit,isCrossRepository` first (`<mergeCommit>`
+its `oid`), `<n>` the pull request "A topic's base" reads from its
+plans' `Lands` lines, or its body's `Builds on #<n>`. With the parent MERGED and not from a fork, its merge commit on the branch and not in the topic (`git
+merge-base --is-ancestor <mergeCommit> origin/<branch>` holds, `...
+<mergeCommit> HEAD` does not) and its head not on the branch (`git
+merge-base --is-ancestor <headRefOid> origin/<branch>` does not hold),
+merge in this order, each as a merge above, its message naming what it
+merges (`Merge #<n>'s head into <name>`, `Merge <branch> before #<n>
+into <name>`, `Merge #<n>'s squash into <name>, its work here already`,
+then `Merge origin/<branch> into <name>`):
+
+1. `<headRefOid>`, the parent as it merged (`git fetch origin
+   pull/<n>/head` when the commit is not here), a conflict settled from
+   the two plans;
+2. `<mergeCommit>^`, the branch before the parent landed;
+3. `<mergeCommit>` with `-s ours`, which records the squash and changes
+   no file, its work being here since the first;
+4. `origin/<branch>`.
+
+The second and third only when the squash is the parent's work alone:
+`git merge-tree --write-tree <mergeCommit>^ <headRefOid>` gives `git
+rev-parse <mergeCommit>^{tree}`, so `-s ours` passes over nothing else
+on the branch, and `git diff -U0 <mergeCommit>^ <mergeCommit> | git
+patch-id --stable` gives the id that `git diff -U0 $(git merge-base
+<mergeCommit>^ <headRefOid>) <headRefOid> | git patch-id --stable`
+gives, without context so a line the branch changed nearby is not
+read as the parent's, so
+`<mergeCommit>^` holds none of the parent's work. Otherwise (a rebase
+merge) merge the first, then `origin/<branch>`: a conflict whose
+`<branch>` side reads as the parent's head has it (`git show
+<headRefOid>:<file>`) takes the topic's side, which holds the parent's
+work and its own; any other is settled from the plans. A conflict left
+unsettled takes the topic back to the tip it had before the first (`git
+reset --keep <that tip>`), so no part of them is pushed. "Built" gets
+one line for the four, `Merged <branch> <date> past #<n>'s squash,
+commits <sha>, <sha>: <files or none>`, a merge that was already up to
+date naming no commit, and the two of the fallback a line each, as a
+merge above.
 
 **A branch another worktree has checked out is that executor's** (git
 refuses the switch and names the worktree): at a plan's start and in a
@@ -65,7 +121,10 @@ refresh it is left and named, `left: #<k>, executor-<n> is building on it`.
   stacked on it. A stacked plan is built as `topic <the plan's file name
   without .md>` (with `-2` when that is the head branch) when its
   `Lands` line names that pull request's topic. A plan sent to another topic has its `Lands` line
-  rewritten to it. A plan that shares files with an open pull request
+  rewritten to it. A stacked plan's line ends `; stacked on #<n>.`,
+  written when it lacks it, as `plans full` gives it; so does the line
+  of a plan built on a topic already stacked on one not from a fork,
+  when it names no pull request. A plan that shares files with an open pull request
   goes where its `Lands` line says; its author read the project's
   **Pull requests** heading.
 - **A pull request takes five plans** (decisions.md#pull-request-full).
@@ -83,8 +142,9 @@ refresh it is left and named, `left: #<k>, executor-<n> is building on it`.
 - **A branch with no pull request yet** (`origin/<name>`, no open pull request): `git
   switch -C <name> origin/<name>`, then `origin/<base>` merged in, the
   topic's base above: the head branch it is stacked on, or
-  `origin/<branch>` once that pull request is MERGED or its head is gone
-  from origin; the plan's push carrying the merge; an unsettled conflict
+  `origin/<branch>` once that pull request is MERGED, is a fork's or its
+  head is gone from origin; the plan's push carrying the merge, a merged
+  parent's work coming in once (above); an unsettled conflict
   leaves it as it is.
 - **An open pull request's branch**: `git switch -C <name>
   origin/<name>`, no merge. In both, a local branch with commits the
@@ -98,7 +158,8 @@ requests are the open ones a plan in this checkout's `plans/` names as
 its own, by its "Built" or its `Lands` topic; a `Related` line names
 another's (decisions.md#refresh-only-your-own). Each whose base's pull
 request has merged is retargeted, `gh pr edit <n> --base <branch>`, and
-`origin/<branch>` merged into its head and pushed.
+`origin/<branch>` merged into its head, a merged parent's work coming in
+once (above), and pushed.
 Delete a local branch only when `gh pr view <name> --json
 state,headRefOid` says MERGED at its own commit; others stay, named in
 the final message.
@@ -137,7 +198,8 @@ origin/<branch>`.
 
 **A pull request is refreshed**: start from its head as GitHub has it,
 `git switch -C <head branch> origin/<head branch>`; a local branch holding commits that head
-lacks is left and named. Merge its base, `origin/<baseRefName>`, in (one
+lacks is left and named. Merge its base, `origin/<baseRefName>`, in, a merged parent's work as
+"A merged parent's work comes in once" says (one
 stacked on a pull request just refreshed merges that one's new head),
 the conflicts settled from the two plans; run the project's checks, not
 the suites, since its CI runs on the push; push it with `git push origin
@@ -310,7 +372,8 @@ requests.
 
 **The `Built:` message to the assistant leads with** each pull request opened or joined, its
 link and what it was marked related to, for one opened at five plans the plans sent
-on from it, and, for a draft: `Pull request
+on from it, for a topic stacked on a pull request closed without
+merging, that line of its "Built", and, for a draft: `Pull request
 #<n> (<link>) is a draft and waits on you: read its description and
 screenshots, then mark it ready for review on GitHub (the Ready for
 review button at the bottom of the pull request). Until then it asks

@@ -255,7 +255,17 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   pull request yet and the one its pull request opens against, its
   `Builds on #<n>` line only while it is the parent's head, so a topic
   has one base at every step and never takes a merged parent's stale
-  head. Unfinished is
+  head. A topic is stacked when any of its plans' lines says so, since
+  a later plan joins it by name alone; of lines naming different pull
+  requests the first built plan's counts, its branch having started from
+  that head. A fork's pull request is never the base: GitHub's stacked
+  pull requests need every branch in one repository, and a branch of
+  origin with the fork head's name is another branch. A parent closed
+  without merging stays the base while its head is on origin, as GitHub
+  keeps a stack whose pull request was closed and blocks what is above
+  it: opened against the branch, the topic would bring the owner the
+  work he closed inside another pull request, so he is told instead.
+  Unfinished is
   said by the draft, as GitHub's draft pull requests, GitLab's
   `merge_request.create` push option and Gerrit's work in progress open the request at the push. A
   plan with no `Lands` line is a topic of its own, so
@@ -263,7 +273,8 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/topic-opens-when-nothing-waits.md,
   plans/topic-first-pull-request-five.md,
   plans/stacked-topic-recovery-compares-parent.md,
-  plans/stacked-branch-merge-base-fallback.md.
+  plans/stacked-branch-merge-base-fallback.md,
+  plans/stacked-base-edge-cases.md.
   - ~~A topic's plans are built on one branch, pushed after each, and its
     pull request opens by itself once a plan of it is built and no other
     plan of it is queued.~~ (Javi, 26 November)
@@ -323,12 +334,17 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   November) A draft is not done yet, so
   work that belongs to it goes into it, as he had to ask three times in
   a day for a stacked pull request to be joined into the draft it built
-  on; the queue never pushes to another person's branch. How the rest
+  on; the queue never pushes to another person's branch. A fork's pull
+  request is not stacked on, and its commits are not merged in: they are
+  unreviewed, and the queue builds with the container's tokens, as
+  GitHub Actions passes a fork's pull request no secrets; the plan is
+  built on the branch and its "Built" says so. How the rest
   group is the project's, since grouping is a cost the project carries,
   not the plugin. plans/stack-only-when-it-depends.md,
   plans/draft-takes-its-follow-ups.md,
   plans/related-plans-share-a-pull-request.md,
-  plans/pull-requests-small-and-plain.md.
+  plans/pull-requests-small-and-plain.md,
+  plans/stacked-base-edge-cases.md.
   - ~~A plan that rests on an open draft pull request of the queue's own
     lands in it, and one that rests on another person's is stacked on
     it.~~ (Javi, 7 November)
@@ -393,8 +409,18 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
 - `merge-never-force` **A branch is brought up to date by merging, never
   force-pushed.** (Javi, 29 October) Merge, never force, which a project
   may enforce in its settings; a squash merge keeps the merge commit off
-  the branch, and another person's commits on it stay as they are.
-  plans/refresh-by-merge.md.
+  the branch, and another person's commits on it stay as they are. A
+  stacked topic whose parent was squash merged still holds the parent's
+  commits, and the branch merged in plainly conflicts on every line both
+  changed, Git Town's phantom conflicts. Git Town and `gh stack` rebase
+  them away; the queue records them: the parent's head, the branch
+  before the squash, the squash by git's `ours` strategy, "meant to be
+  used to supersede old development history of side branches", then the
+  branch, the squash taken so only when its tree is the parent merged
+  into the branch before it, so nothing else on the branch is passed
+  over, and its change is the parent's whole change, so the branch
+  before it holds none of the parent's work.
+  plans/refresh-by-merge.md, plans/stacked-base-edge-cases.md.
 - `refresh-only-your-own` **The executor refreshes only the queue's own
   pull requests, those its plans name as their own, with the checks
   alone.** (Javi, 3

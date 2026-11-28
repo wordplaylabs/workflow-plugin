@@ -98,17 +98,24 @@ number,url,state,headRefOid,isCrossRepository`, a pull request from a
 fork being another person's and not this topic's: one found open, or
 merged or closed at `origin/<name>`'s commit, is written into each of its
 plans' "Built" after the first line, `Pull request #<n> (<url>) found
-<open | merged | closed> <date>.`; none such, with `origin/<name>`
-adding something to the branch (`git merge-tree --write-tree
-origin/<branch> origin/<name>` giving a first line other than `git
-rev-parse origin/<branch>^{tree}`, so work a squash merge took is
-nothing), is opened as "Nothing else queued" says with `--head <name>` added,
+<open | merged | closed> <date>.`. Its base is the head branch it is
+stacked on when its plans' `Lands` line says `stacked on #<n>` (`gh pr
+view <n> --json headRefName,state`), since its pull request opens against
+that head and the parent's commits are not its own; it is `<branch>` for
+any other topic, and for a stacked one whose parent merged or whose head
+is gone from origin, as "A pull request is refreshed" retargets a stack
+whose parent merged, its description then without the `Builds on #<n>`
+line. One with none found, and `origin/<name>` adding something to its
+base (`git merge-tree --write-tree origin/<base> origin/<name>` giving a
+first line other than `git rev-parse origin/<base>^{tree}`, so work a
+squash merge took is nothing), is opened as "Nothing else queued" says
+with `--head <name>` added and `--base <base>`,
 from the branch the plan in hand is on, the description written to
 `plans/<its last built plan>/pull-request.md`, each of its plans' "Built"
 getting `Pull request #<n> (<url>) opened <date> with plans/<the plan in
 hand>.md.`; none and
 no such branch, or nothing ahead, gets `No pull request: <branch <name>
-is gone from origin | its commits are on <branch> already>.` in each. A
+is gone from origin | its commits are on <base> already>.` in each. A
 create refused because another executor opened it first is read again
 and written as found. The plan in hand's "Built" and its `Built:`
 message name each.

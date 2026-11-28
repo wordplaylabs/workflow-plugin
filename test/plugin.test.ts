@@ -2613,8 +2613,18 @@ describe("a pull request per topic", () => {
     expect(mode).toContain("so work a squash merge took is nothing");
     expect(mode).toContain('is opened as "Nothing else queued" says with `--head <name>` added');
     expect(mode).toContain(
-      "`No pull request: <branch <name> is gone from origin | its commits are on <branch> already>.` in each. A create refused because another executor opened it first is read again and written as found.",
+      "`No pull request: <branch <name> is gone from origin | its commits are on <base> already>.` in each. A create refused because another executor opened it first is read again and written as found.",
     );
+    // plans/stacked-topic-recovery-compares-parent.md: a stacked topic is compared with the
+    // head it is stacked on, and with the branch once that head is gone or, Codex C2, its
+    // pull request merged; Codex C3: then its description builds on nothing.
+    expect(mode).toContain(
+      "Its base is the head branch it is stacked on when its plans' `Lands` line says `stacked on #<n>` (`gh pr view <n> --json headRefName,state`), since its pull request opens against that head and the parent's commits are not its own; it is `<branch>` for any other topic, and for a stacked one whose parent merged or whose head is gone from origin, as \"A pull request is refreshed\" retargets a stack whose parent merged, its description then without the `Builds on #<n>` line.",
+    );
+    expect(mode).toContain(
+      '(`git merge-tree --write-tree origin/<base> origin/<name>` giving a first line other than `git rev-parse origin/<base>^{tree}`, so work a squash merge took is nothing), is opened as "Nothing else queued" says with `--head <name>` added and `--base <base>`,',
+    );
+    expect(mode).not.toContain("adding something to the branch");
     expect(mode).toContain(
       'lands as `topic <the plan\'s file name without .md>`, its `Lands` line rewritten to it, its "Built" and the final message saying why (decisions.md#fix-landing).',
     );

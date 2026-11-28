@@ -245,13 +245,19 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   drafts while work goes on above them. A topic left with no pull request
   is opened at the next plan's start, unless one found open, or merged or
   closed at its branch's commit, already holds its work, so a pull request
-  closed long ago hides no commit pushed since. Unfinished is said by the draft, as
+  closed long ago hides no commit pushed since. Its work is what it adds
+  to its base: a stacked topic is compared with the head it is stacked on,
+  which its pull request opens against, so its parent's commits open no
+  empty pull request; once its parent has merged, or that head is gone
+  from origin, it is compared with the branch, the base a refresh
+  retargets it to. Unfinished is said by the draft, as
   GitHub's draft pull requests, GitLab's `merge_request.create` push
   option and Gerrit's work in progress open the request at the push. A
   plan with no `Lands` line is a topic of its own, so
   nothing lands unread by omission. plans/pull-requests-by-topic.md,
   plans/topic-opens-when-nothing-waits.md,
-  plans/topic-first-pull-request-five.md.
+  plans/topic-first-pull-request-five.md,
+  plans/stacked-topic-recovery-compares-parent.md.
   - ~~A topic's plans are built on one branch, pushed after each, and its
     pull request opens by itself once a plan of it is built and no other
     plan of it is queued.~~ (Javi, 26 November)

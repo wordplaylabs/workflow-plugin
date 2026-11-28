@@ -12014,6 +12014,12 @@ describe("github webhook", () => {
       expect(closesOf("<!---->\n<!--->\n<!-->\nCloses #8.\n")).toEqual([8]);
       expect(closesOf("    <!-- x\nCloses #3.\n-->\n")).toEqual([3]);
       expect(closesOf("Closes #5.\rCloses #7.\r")).toEqual([5, 7]);
+      // plans/stacked-parent-recorded.md, part 5: the comment that keeps a merged parent's
+      // number hides no Closes line beside, above or under it.
+      const m = "<!-- workflow: stacked on #5 -->";
+      expect(closesOf("Closes #7.\n" + m + "\n\nRelated:\n\n- #9\n\n## Changes\n")).toEqual([7]);
+      expect(closesOf(m + "\nCloses #7.\nCloses #8.\n\n## Changes\n")).toEqual([7, 8]);
+      expect(closesOf(m + "\n\n## Changes\n\n- x\n")).toEqual([]);
     });
 
     // plans/closes-reads-comments-as-github.md: each answer is what GitHub's renderer shows.

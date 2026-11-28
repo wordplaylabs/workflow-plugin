@@ -74,7 +74,9 @@ changed. So wherever `origin/<branch>` is merged into a stacked topic
 (the start's merge, the retarget, a refresh), read `gh pr view <n> --json
 state,headRefOid,mergeCommit,isCrossRepository` first (`<mergeCommit>`
 its `oid`), `<n>` the pull request "A topic's base" reads from its
-plans' `Lands` lines, or its body's `Builds on #<n>`. With the parent MERGED and not from a fork, its merge commit on the branch and not in the topic (`git
+plans' `Lands` lines, or its body's `Builds on #<n>` or
+`<!-- workflow: stacked on #<n> -->`. With the parent MERGED and not
+from a fork, its merge commit on the branch and not in the topic (`git
 merge-base --is-ancestor <mergeCommit> origin/<branch>` holds, `...
 <mergeCommit> HEAD` does not) and its head not on the branch (`git
 merge-base --is-ancestor <headRefOid> origin/<branch>` does not hold),
@@ -433,6 +435,7 @@ an earlier plan of it added changes that line's sentence and adds none.
 
 Closes #<n>.                                  <- one per issue its plans' Issue lines name
 Builds on #<n>; merge that first.             <- while its base is the head it is stacked on
+<!-- workflow: stacked on #<n> -->            <- in its place once its base is <branch>
 
 Related:                                      <- when a plan has a Related line
 
@@ -467,8 +470,9 @@ to a Claude session left out>
 
 - **The owner's paragraphs**: on a rewrite (`gh pr view <n> --json
   body`), everything above the body's first `## ` heading, less its
-  `Closes #`, `For #`, `Builds on #` and `Related:` lines and the list
-  under a `Related:` line, is the owner's
+  `Closes #`, `For #`, `Builds on #`,
+  `<!-- workflow: stacked on #` and `Related:` lines and the list under a
+  `Related:` line, is the owner's
   and opens the new body unchanged; a `Closes #` line for an issue no
   plan of the topic names is the owner's too, and is kept. With nothing
   there, the body opens with the three lines that apply, so a pull
@@ -487,6 +491,14 @@ to a Claude session left out>
   `Closes` or `Builds on` line names and the pull request itself; none
   left, no `Related:` line. Look for no related work yourself, and
   comment on no other person's pull request.
+- **Builds on**: a topic stacked on #<n>, not a fork's, says so in its
+  body on every write, `<n>` as "A topic's base" reads it from the
+  topic's plans' `Lands` lines, else as the old body's own line gives
+  it: `Builds on #<n>; merge that first.` while its base is that head,
+  and once its base is `<branch>` the comment
+  `<!-- workflow: stacked on #<n> -->` in its place, which GitHub shows
+  nobody and no rewrite drops, so a merged parent stays named where no
+  plan of the topic is (decisions.md#plans-account-for-commits).
 - **Changes**: the main changes, five bullets at most, oldest first. A
   main change is a plan's central decision, what its title says the
   project now does; plans that did one thing share a bullet. Under five,
@@ -523,11 +535,11 @@ to a Claude session left out>
   is the `stacked on #<n>` "A topic's base" reads from the topic's plans'
   `Lands` lines, a parent's own parent the `stacked on #<n>` of that pull
   request's plans' `Lands` lines in this checkout, and either, with no
-  such line, the `Builds on #<n>` line of the body above it, which a
-  rewrite drops once the base is `<branch>` (`gh api --paginate
-  repos/{owner}/{repo}/pulls/<n>/commits --jq '.[].sha'`). Nothing is
-  left out by author or by title. With no line, no section. An old fold
-  is not the owner's, and ends his section.
+  such line, the line of the body above it, `Builds on #<n>` or, once
+  the base is `<branch>`, `<!-- workflow: stacked on #<n> -->` (`gh api
+  --paginate repos/{owner}/{repo}/pulls/<n>/commits --jq '.[].sha'`).
+  Nothing is left out by author or by title. With no line, no section.
+  An old fold is not the owner's, and ends his section.
 - **Left out**: housekeeping, which changes nothing for a person once
   the pull request is merged: a merge of the base and a refresh, a
   test's timeout or flake, and a fix to what this pull request itself

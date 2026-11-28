@@ -380,7 +380,8 @@ describe("the plugin's queue in any project", () => {
       "Then one `Related:` line, then a list of everything the topic's plans' `Related` lines name, each once, one item a line with nothing else on it, numbers in order and then branches by name, less a number a `Closes` or `Builds on` line names and the pull request itself; none left, no `Related:` line.",
     );
     expect(executor).toContain(
-      "`Closes #`, `For #`, `Builds on #` and `Related:` lines and the list under a `Related:` line, is the owner's",
+      // plans/stacked-parent-recorded.md, part 2: the comment is not the owner's.
+      "`Closes #`, `For #`, `Builds on #`, `<!-- workflow: stacked on #` and `Related:` lines and the list under a `Related:` line, is the owner's",
     );
     // plans/pull-request-description-standard-follow-up.md: the description lists it under Also.
     expect(executor).toContain("- <The commit's title.> (<author>)");
@@ -408,16 +409,21 @@ describe("the plugin's queue in any project", () => {
     );
     expect(executor).not.toContain("`git config user.name`");
     expect(doc).toContain("**The plans account for the queue's commits.**");
+    // plans/stacked-parent-recorded.md, part 4: the catalogue says why the comment.
+    expect(text("docs/decisions.md")).toContain(
+      "once its base is the branch, the comment `<!-- workflow: stacked on #<n> -->` in that line's place",
+    );
     // plans/also-knows-whose-commit-follow-up.md: every merged base down the stack, read in pages.
     expect(executor).toContain("each merged pull request down the stack");
-    // plans/also-list-reads-lands-first.md: the Lands lines first, as a rewrite drops Builds on.
+    // plans/also-list-reads-lands-first.md: the Lands lines first, then the body's line, which
+    // since plans/stacked-parent-recorded.md is the comment once the base is the branch.
     // Scoped to the description's Other changes, where the accounting is written (Codex C3).
     const otherChanges = executor.slice(
       executor.indexOf("- **Other changes**"),
       executor.indexOf("- **Left out**"),
     );
     expect(otherChanges).toContain(
-      "the commits of each merged pull request down the stack: the topic's parent is the `stacked on #<n>` \"A topic's base\" reads from the topic's plans' `Lands` lines, a parent's own parent the `stacked on #<n>` of that pull request's plans' `Lands` lines in this checkout, and either, with no such line, the `Builds on #<n>` line of the body above it, which a rewrite drops once the base is `<branch>` (`gh api --paginate repos/{owner}/{repo}/pulls/<n>/commits --jq '.[].sha'`)",
+      "the commits of each merged pull request down the stack: the topic's parent is the `stacked on #<n>` \"A topic's base\" reads from the topic's plans' `Lands` lines, a parent's own parent the `stacked on #<n>` of that pull request's plans' `Lands` lines in this checkout, and either, with no such line, the line of the body above it, `Builds on #<n>` or, once the base is `<branch>`, `<!-- workflow: stacked on #<n> -->` (`gh api --paginate repos/{owner}/{repo}/pulls/<n>/commits --jq '.[].sha'`)",
     );
     expect(executor).toContain(
       "`gh api --paginate repos/{owner}/{repo}/pulls/<n>/commits --jq '.[].sha'`",
@@ -2406,7 +2412,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     // by three checks and four merges, and the three steps that merge the branch in say so.
     const once = part("**A merged parent's work comes in once.**", "**A branch another worktree");
     expect(once).toContain(
-      "So wherever `origin/<branch>` is merged into a stacked topic (the start's merge, the retarget, a refresh), read `gh pr view <n> --json state,headRefOid,mergeCommit,isCrossRepository` first (`<mergeCommit>` its `oid`), `<n>` the pull request \"A topic's base\" reads from its plans' `Lands` lines, or its body's `Builds on #<n>`.",
+      "So wherever `origin/<branch>` is merged into a stacked topic (the start's merge, the retarget, a refresh), read `gh pr view <n> --json state,headRefOid,mergeCommit,isCrossRepository` first (`<mergeCommit>` its `oid`), `<n>` the pull request \"A topic's base\" reads from its plans' `Lands` lines, or its body's `Builds on #<n>` or `<!-- workflow: stacked on #<n> -->`.",
     );
     expect(once).toContain(
       "With the parent MERGED and not from a fork, its merge commit on the branch and not in the topic (`git merge-base --is-ancestor <mergeCommit> origin/<branch>` holds, `... <mergeCommit> HEAD` does not) and its head not on the branch (`git merge-base --is-ancestor <headRefOid> origin/<branch>` does not hold), merge in this order, each as a merge above, its message naming what it merges (`Merge #<n>'s head into <name>`, `Merge <branch> before #<n> into <name>`, `Merge #<n>'s squash into <name>, its work here already`, then `Merge origin/<branch> into <name>`):",
@@ -2779,7 +2785,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
       "- **Closes** and **Related**: `Closes #<n>.` for each issue a plan of the topic names in its `Issue` line, one line each, no issue twice: GitHub's keyword, so a merge into the default branch closes it and the queue closes it elsewhere (decisions.md#closes-its-issues).",
     );
     expect(landing).toContain(
-      "less its `Closes #`, `For #`, `Builds on #` and `Related:` lines and the list under a `Related:` line, is the owner's and opens the new body unchanged; a `Closes #` line for an issue no plan of the topic names is the owner's too, and is kept.",
+      "less its `Closes #`, `For #`, `Builds on #`, `<!-- workflow: stacked on #` and `Related:` lines and the list under a `Related:` line, is the owner's and opens the new body unchanged; a `Closes #` line for an issue no plan of the topic names is the owner's too, and is kept.",
     );
     expect(landing).toContain(
       "**Each issue it closes is linked** (decisions.md#closes-its-issues). GitHub reads a closing keyword only on a pull request into the default branch.",
@@ -3009,6 +3015,14 @@ describe("a pull request per topic", () => {
     expect(mode).not.toContain("--base <branch, or the head branch it is stacked on>");
     expect(mode).toContain(
       "Builds on #<n>; merge that first. <- while its base is the head it is stacked on",
+    );
+    // plans/stacked-parent-recorded.md, part 1: the body keeps the parent's number, in a
+    // comment GitHub shows nobody, once its base is the branch.
+    expect(mode).toContain(
+      "<!-- workflow: stacked on #<n> --> <- in its place once its base is <branch>",
+    );
+    expect(mode).toContain(
+      "- **Builds on**: a topic stacked on #<n>, not a fork's, says so in its body on every write, `<n>` as \"A topic's base\" reads it from the topic's plans' `Lands` lines, else as the old body's own line gives it: `Builds on #<n>; merge that first.` while its base is that head, and once its base is `<branch>` the comment `<!-- workflow: stacked on #<n> -->` in its place, which GitHub shows nobody and no rewrite drops",
     );
     expect(mode).toContain(
       "Its base is the topic's base (above); a stacked topic whose base is `<branch>` gets its description without the `Builds on #<n>` line.",

@@ -609,8 +609,20 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   commits, by hash.** (Javi, 31 October) Every queue commits as `Claude
   <noreply@anthropic.com>`, one shared account on GitHub, so no reader
   tells one person's Claude from another's by the author; only the plan
-  that made a commit knows it. plans/also-knows-whose-commit.md,
-  plans/also-knows-whose-commit-follow-up.md, plans/also-docs-match-the-rule.md.
+  that made a commit knows it. A merged parent's commits are its own,
+  and the parent is named by the topic's plans or by its body: `Builds
+  on #<n>` while the topic is stacked on it and, once its base is the
+  branch, the comment `<!-- workflow: stacked on #<n> -->` in that
+  line's place, as the plan comment on an issue is found by its own
+  first line and Git Town's action keeps a `<!-- branch-stack -->`
+  comment in a description across its rewrites. The plans are on the
+  machine that planned them, and a body that only dropped its line named
+  the parent nowhere, so its commits were listed as the topic's. A pull
+  request further down the stack needs no line once its own base is the
+  branch: GitHub's list of its commits then holds every commit of the
+  one under it that its head held. plans/also-knows-whose-commit.md,
+  plans/also-knows-whose-commit-follow-up.md, plans/also-docs-match-the-rule.md,
+  plans/stacked-parent-recorded.md.
 - `string-rests-on-source` **A string rests on what produced it: an
   entry or house rule, a product looked up, a person, or free.** (Javi,
   29 October) Even simple text goes through the research, so a grounded

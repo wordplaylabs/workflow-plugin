@@ -4132,7 +4132,12 @@ function changedFiles(text = "") {
  * (ready, asking, planned, handed or building), two that name each other
  * holding neither; and on a plan in progress (building by a live session,
  * handed over, or claimed) that lands on its topic, or is one of the day's
- * fixes as it is, or changes a file it changes. Between two plans in hand,
+ * fixes as it is, or changes a file it changes. A plan a full pull request
+ * would send on lands where `plans full` sends it, so it waits on one being
+ * built on the topic stacked on that pull request that `roomIn` names for it:
+ * its own `Lands` line names the full one's topic until its executor rewrites
+ * it, and two executors would meet on one branch
+ * (plans/topic-first-pull-request-five.md). Between two plans in hand,
  * each handed or claimed and neither building by a live session, one goes
  * first and only the other waits (plans/handed-plans-no-mutual-wait.md,
  * plans/handed-plans-order-holds-everywhere.md,
@@ -4183,6 +4188,32 @@ export function freePlans(plans, { claims = {}, own = {} } = {}) {
       : claimedAt(plan) && claimedAt(other) && claimedAt(plan) !== claimedAt(other)
         ? claimedAt(plan) < claimedAt(other)
         : goesBefore(plan, other));
+  // As `roomIn` reads them, each plan with its `Lands` line.
+  let withLands = null;
+  // Whether `plan` lands in pull request `n`: by its `Lands` line, or, naming
+  // none or only the one it is stacked on, by its topic, that of a plan built
+  // in `n`, so a topic stacked on another lands in its own once open (Codex
+  // C3) and an older pull request of the topic's name is not taken for it
+  // (/code-review). Never as its fix.
+  const landsIn = (plan, n) => {
+    const lands = plan.lands || landsOf(plan.text);
+    if (lands && (lands.kind !== "topic" || lands.fix)) return false;
+    if (lands?.into) return lands.into === n;
+    const topic = topicOf(plan);
+    return plans.some((p) => p.state === "built" && p.pr === n && topicOf(p) === topic);
+  };
+  // Whether `plan` would be sent to the topic `onto` lands on, stacked on a
+  // full pull request `plan` lands in, judged as its executor will count, its
+  // plan in hand (decisions.md#pull-request-full, Codex C2).
+  const sentTo = (plan, onto) => {
+    const stacked = (onto.lands || landsOf(onto.text))?.stackedOn;
+    if (!stacked || !landsIn(plan, stacked)) return "";
+    withLands ||= plans.map((p) => (p.lands === undefined ? { ...p, lands: landsOf(p.text) } : p));
+    const lands = roomIn(inHandAs(withLands, plan.path), stacked, plan.path).lands;
+    return lands?.kind === "stacked" && lands.name === topicOf(onto)
+      ? `both land on topic ${lands.name}, stacked on #${stacked}`
+      : "";
+  };
   return readyForExecutor(plans).map((plan) => {
     const rested = restedOn(plan);
     if (rested) return { ...plan, waitsOn: { path: rested, why: "it rests on it" } };
@@ -4199,6 +4230,9 @@ export function freePlans(plans, { claims = {}, own = {} } = {}) {
             why: topic === "fix" ? "the day's fixes" : `the same topic, ${topic}`,
           },
         };
+      // Either way: one in hand not yet sent on lands where this one does (/code-review).
+      const sent = sentTo(plan, other) || sentTo(other, plan);
+      if (sent) return { ...plan, waitsOn: { path: other.path, why: sent } };
       const common = changedFiles(other.text).filter((path) => files.includes(path));
       if (common.length)
         return {
@@ -4802,11 +4836,33 @@ export function topicQueued(plans, topic, but = "") {
 }
 
 /**
+ * **What a topic with no pull request yet holds** (decisions.md#topic-landing):
+ * the plans built on `topic`'s branch that name no pull request and do not say
+ * it has none to open, in the queue's order. At `PULL_PLANS` the pull request
+ * opens whatever else of the topic is queued.
+ */
+export function topicHolds(plans, topic) {
+  return plans.filter(
+    (plan) => plan.state === "built" && plan.topic === topic && !plan.pr && !plan.noPull,
+  );
+}
+
+/**
  * **A pull request takes five plans** (decisions.md#pull-request-full): the
  * most plans one of the queue's own takes before the next related plan lands
  * on a topic stacked on it.
  */
 export const PULL_PLANS = 5;
+
+/**
+ * **The plans as an executor counts them** (decisions.md#pull-request-full):
+ * the plan at `path` in hand, as being built, so `roomIn` counts what is built
+ * or in hand and no plan still waiting. Its executor asks before its Building
+ * line, its plan claimed, and the queue's wait judges a plan as it will.
+ */
+function inHandAs(plans, path) {
+  return plans.map((plan) => (plan.path === path ? { ...plan, state: "building" } : plan));
+}
 
 /**
  * **How many plans pull request `number` holds, and where the plan at `path`
@@ -4815,7 +4871,9 @@ export const PULL_PLANS = 5;
  * plan is being built, one ready or planned; never a brief, a dropped or old
  * plan, a fix or a refresh by its `Lands` kind, or the asking plan, which may
  * be a brief or a file not written yet. The pull request's topics are those of
- * its built plans; it holds the counted plans built in it, and those not built
+ * its built plans; it holds the counted plans built in it, or built on one of
+ * its topics with no pull request named (an opening cut off before their
+ * "Built" said it), and those not built
  * that land in it by their `Lands` line or by its topic with no other pull
  * request to land in named. It is the queue's own (`named`) when a plan is
  * built in it or says it lands in it; a plan stacked on it says nothing of
@@ -4847,10 +4905,13 @@ export function roomIn(plans = [], number, path = "") {
   const topics = new Set(
     counted.filter((plan) => plan.state === "built" && plan.pr === number).map(topic),
   );
-  // A plan of its topic stacked on its base still lands in it (Codex C4).
+  // A plan of its topic stacked on its base still lands in it (Codex C4). A
+  // plan built on its topic's branch whose "Built" was never given the pull
+  // request is in it all the same, its commits being the branch's
+  // (plans/topic-first-pull-request-five.md, Codex C1).
   const holds = counted.filter((plan) =>
     plan.state === "built"
-      ? plan.pr === number
+      ? plan.pr === number || (!plan.pr && !plan.noPull && topics.has(topic(plan)))
       : plan.lands?.into === number || (topics.has(topic(plan)) && !plan.lands?.into),
   );
   const stacked = [
@@ -4930,6 +4991,15 @@ function topicCommand(args = [], { live } = {}) {
       status: 0,
     };
   const one = queued.length === 1;
+  // **Five plans open it** whatever else is queued: a full pull request takes
+  // nothing still queued, so it has nothing to wait for; those plans are sent
+  // to a topic stacked on it at their own start, by `plans full`.
+  const k = topicHolds(plans, topic).filter((p) => p.path !== path).length + 1;
+  if (k >= PULL_PLANS)
+    return {
+      said: `Topic ${topic} holds ${k} plans with ${path}, ${PULL_PLANS} at most: its pull request opens with it, and ${andList(queued)} ${one ? "lands" : "land"} on a topic stacked on it.`,
+      status: 0,
+    };
   return {
     said: `${andList(queued)} ${one ? "is" : "are"} still queued for topic ${topic}: its pull request waits for ${one ? "it" : "them"}.`,
     status: 0,
@@ -4967,7 +5037,10 @@ function fullCommand(args = [], { live } = {}) {
     if (plan?.lands?.kind === "fix" || plan?.lands?.kind === "refresh")
       return { said: `${path} is no topic's: it lands as ${landsWords(plan.lands)}.`, status: 0 };
   }
-  const room = roomIn(plans, number, path);
+  // A plan claimed by a start is its executor's, asking before its Building
+  // line: counted as in hand (Codex C2).
+  const claimed = path && readClaims(plans, live)[path];
+  const room = roomIn(claimed ? inHandAs(plans, path) : plans, number, path);
   if (!room.named)
     return {
       said: `No plan here names #${number}, so it is not this queue's: nothing is counted.`,
@@ -6569,6 +6642,11 @@ export function list({ all = false, live, related = true, readers = null } = {})
       return "the day's fixes, opened at a plan's start once its day has come";
     const queued = topicQueued(plans, name).map((p) => p.path);
     if (!queued.length) return "nothing is queued for it, so the next plan's start opens it";
+    // Five plans open it whatever is queued (decisions.md#topic-landing).
+    const k = topicHolds(plans, name).length;
+    if (k >= PULL_PLANS)
+      return `it holds ${k} plans, ${PULL_PLANS} at most, so the next plan's start opens it`;
+    if (k + queued.length >= PULL_PLANS) return `opens once it holds ${PULL_PLANS} plans`;
     return `opens once ${andList(queued)} ${queued.length === 1 ? "is" : "are"} built`;
   };
   const waitingTopics = [...topics].filter(([, ps]) => !ps.every((p) => p.noPull));

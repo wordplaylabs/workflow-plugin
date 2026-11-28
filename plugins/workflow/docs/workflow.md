@@ -289,8 +289,9 @@ nothing; `docs/landing.md` holds the executor's steps.
 - **A topic** (`Lands: topic <name>.`): one branch named for the topic,
   a commit per plan, pushed after each; its pull request opens by itself
   when a plan of it is built and no other plan of it is ready, handed
-  over or being built, and nobody marks a topic ready; a plan with no
-  `Lands` line is a topic of its own; the pull request it lands in or is
+  over or being built, or when it holds five plans, and nobody marks a
+  topic ready; a plan with no `Lands` line is a topic of its own; the
+  pull request it lands in or is
   stacked on may follow the name (`; lands in #52.`), and `plans` says a
   `Lands` line it cannot read and the topics still waiting for a pull
   request, each with why. (decisions.md#topic-landing)
@@ -337,8 +338,10 @@ decisions.md#pull-requests-heading)
 pull request of the queue's own that holds five lands on a topic stacked
 on it, with the other plans sent there, five to each; `plans full <n>
 <path>` says which, to the author of a `Lands` line and to the executor
-at the plan's start. Only a plan that fixes what the pull request itself
-added, a failed check, a finding of its review or a bug in it, still
+at the plan's start. A topic with no pull request yet opens it once
+it holds five plans, whatever else of it is queued, and those still
+queued are sent on the same way. Only a plan that fixes what the pull
+request itself added, a failed check, a finding of its review or a bug in it, still
 lands in it, its line saying `; lands in #<n> as its fix.` The day's
 fixes are not counted. (decisions.md#pull-request-full)
 
@@ -562,8 +565,9 @@ is written "Built" with the item and handed to the assistant.
 (decisions.md#executor-pool)
 
 **A plan waits on another** when it rests on it (its header
-paragraph names it and it is not built), lands on its topic, or
-changes a file it changes while that one is being built; `plans`
+paragraph names it and it is not built), lands on its topic or on
+the topic stacked on a full pull request that one is being built on,
+or changes a file it changes while that one is being built; `plans`
 says which and why, a Building line on it is refused, and the next
 free plan is taken meanwhile. A plan is claimed for the executor it
 is named to, so two never take one. (decisions.md#plan-waits-on)

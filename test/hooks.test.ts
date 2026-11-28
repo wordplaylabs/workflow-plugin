@@ -5369,6 +5369,22 @@ describe("the queue's faults, closed", () => {
     expect(runIn(dir, ["list"], { PATH: empty })).toContain(
       "  pictures: plans/x.md; opens once plans/ready-topic.md and plans/ready-topic-2.md are built\n",
     );
+    // plans/topic-first-pull-request-five.md, part 2: five built open it
+    // whatever is queued; fewer, with enough queued, open once five are built.
+    for (const name of ["big1.md", "big2.md", "big3.md", "big4.md", "big5.md"])
+      built(name, "B", "On topic big, commit 7234abcd, branch pushed; its pull request waits.");
+    ready("big-next.md", "Lands: topic big.");
+    for (const name of ["mid1.md", "mid2.md", "mid3.md"])
+      built(name, "M", "On topic mid, commit 8234abcd, branch pushed; its pull request waits.");
+    ready("mid-next.md", "Lands: topic mid.");
+    ready("mid-last.md", "Lands: topic mid.");
+    const five = runIn(dir, ["list"], { PATH: empty });
+    expect(five).toContain(
+      "\n  big: plans/big1.md, plans/big2.md, plans/big3.md, plans/big4.md, plans/big5.md; it holds 5 plans, 5 at most, so the next plan's start opens it\n",
+    );
+    expect(five).toContain(
+      "\n  mid: plans/mid1.md, plans/mid2.md, plans/mid3.md; opens once it holds 5 plans\n",
+    );
     // A topic with no pull request to open: its row says so, and it waits for nothing.
     built(
       "x.md",
@@ -5510,6 +5526,82 @@ describe("the queue's faults, closed", () => {
     },
   );
 
+  // plans/topic-first-pull-request-five.md, part 1: when the fifth plan of a
+  // topic with no pull request is built while more of it are queued, then plans
+  // topic says its pull request opens with it and the rest go on.
+  it(
+    "a topic's pull request opens at five plans, whatever else is queued",
+    { timeout: 120_000 },
+    () => {
+      const dir = fixture("TopicFive", "land: pull-request\n");
+      const day = "27 November 2026";
+      const live = "a0c0ffee-0000-4000-8000-000000000005";
+      const write = (name: string, text: string) => writeFileSync(join(dir, "plans", name), text);
+      const remove = (...names: string[]) =>
+        names.forEach((name) => rmSync(join(dir, "plans", name), { force: true }));
+      const planText = (rest = "") =>
+        `# A plan\n\nPlan only, ${day}, for Javi; the executor builds it.\n\nLands: topic t.\n\n${rest}## What was asked\n`;
+      const built = (name: string, more = "") =>
+        write(
+          name,
+          planText(
+            `## Built, ${day}\n\nOn topic t, commit 1234abcd, branch pushed; its pull request waits.\n${more}\n`,
+          ),
+        );
+      const topic = (path: string) => {
+        const done = spawnSync("node", [join(here, queue), "topic", path], {
+          input: "",
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            CLAUDE_PROJECT_DIR: dir,
+            WORKFLOW_LIVE: JSON.stringify([
+              { sessionId: live, name: "Five Executor 1", kind: "background", cwd: dir },
+            ]),
+          },
+        });
+        return { said: done.stdout, status: done.status };
+      };
+      const said = (line: string) => ({ said: `${line}\n`, status: 0 });
+      ["b1.md", "b2.md", "b3.md", "b4.md"].forEach((name) => built(name));
+      write("ask.md", planText(`## Building, ${day}, session ${live}\n\n`));
+      write("r1.md", planText());
+      write("r2.md", planText());
+      expect(topic("plans/ask.md")).toEqual(
+        said(
+          "Topic t holds 5 plans with plans/ask.md, 5 at most: its pull request opens with it, and plans/r1.md and plans/r2.md land on a topic stacked on it.",
+        ),
+      );
+      // Three built: it waits, as before.
+      const waits = said(
+        "plans/r1.md and plans/r2.md are still queued for topic t: its pull request waits for them.",
+      );
+      remove("b4.md");
+      expect(topic("plans/ask.md")).toEqual(waits);
+      // A built plan that names a pull request, or says it has none, is not counted.
+      built(
+        "b4.md",
+        "Pull request #9 (https://github.com/o/r/pull/9) found open 27 November 2026.\n",
+      );
+      expect(topic("plans/ask.md")).toEqual(waits);
+      built("b4.md", "No pull request: branch t is gone from origin.\n");
+      expect(topic("plans/ask.md")).toEqual(waits);
+      // Six built and one queued: the count is said as it is.
+      ["b4.md", "b5.md", "b6.md"].forEach((name) => built(name));
+      remove("r2.md");
+      expect(topic("plans/ask.md")).toEqual(
+        said(
+          "Topic t holds 7 plans with plans/ask.md, 5 at most: its pull request opens with it, and plans/r1.md lands on a topic stacked on it.",
+        ),
+      );
+      // Five with nothing queued: it opens as before.
+      remove("b5.md", "b6.md", "r1.md");
+      expect(topic("plans/ask.md")).toEqual(
+        said("Nothing else is queued for topic t: its pull request opens with plans/ask.md."),
+      );
+    },
+  );
+
   // plans/pull-requests-small-and-plain.md, part 2: when a plan would land in a
   // pull request of the queue's own that holds five plans, then plans full
   // gives the topic stacked on it and the Lands line to write.
@@ -5577,6 +5669,35 @@ describe("the queue's faults, closed", () => {
     expect(full("10", "plans/ask.md")).toEqual(
       said("No plan here names #10, so it is not this queue's: nothing is counted."),
     );
+    // plans/topic-first-pull-request-five.md, Codex C2: a plan a start claimed
+    // is its executor's, asking before its Building line, and counts what is
+    // built or in hand, never the plans still waiting.
+    write("ask.md", planText("Lands: topic big; lands in #9."));
+    ["s3.md", "s4.md", "s5.md"].forEach((name) =>
+      write(name, planText("Lands: topic side; stacked on #9.")),
+    );
+    const sent = "Its line: Lands: topic side; stacked on #9.";
+    expect(full("9", "plans/ask.md").said).toMatch(/no topic stacked on it has room/);
+    const now = Date.now();
+    writeFileSync(
+      join(dir, ".claude", "executor.claims.json"),
+      JSON.stringify({
+        "plans/ask.md": {
+          holder: "a0c0ffee-0000-4000-8000-0000000000c2",
+          name: "Full Executor 1",
+          at: now,
+          until: now + 600_000,
+          started: now,
+        },
+      }),
+    );
+    expect(full("9", "plans/ask.md")).toEqual(
+      said(
+        `#9 is full, 5 plans and 5 at most: plans/ask.md lands on topic side, stacked on #9. ${sent}`,
+      ),
+    );
+    rmSync(join(dir, ".claude", "executor.claims.json"));
+    remove("s3.md", "s4.md", "s5.md");
     // The wrong arguments, and a path that is no plan.
     const wrong = {
       said: "plans full takes a pull request's number and one path at most: plans full 167 plans/<x>.md.\n",
@@ -15694,6 +15815,69 @@ describe("several executors build at once", () => {
     },
   );
 
+  // plans/topic-first-pull-request-five.md: when the sixth plan of a new topic
+  // is started, then it is built on a topic stacked on the pull request opened
+  // at five, and the seventh waits for it and joins it.
+  it(
+    "six plans queued on a new topic end in pull requests of five at most",
+    { timeout: 90_000 },
+    () => {
+      const head = (lands: string, built = "") =>
+        `\n\nLands: ${lands}${built ? `\n\n## Built, 24 November 2026\n\n${built}` : ""}`;
+      const waiting = "On topic t, commit 1234abcd, branch pushed; its pull request waits.";
+      const one = pool(
+        "Six",
+        Object.fromEntries(
+          ["a", "b", "c", "d", "e", "f", "g"].map((name) => [
+            `${name}.md`,
+            plan(
+              name,
+              `Change src/${name}.js.`,
+              head("topic t.", "abcd".includes(name) ? waiting : ""),
+            ),
+          ]),
+        ),
+        "executors: 2\nland: pull-request\n",
+      );
+      const file = (name: string) => join(one.dir, "plans", name);
+      expect(one.queue(["topic", "plans/e.md"])).toBe(
+        "Topic t holds 5 plans with plans/e.md, 5 at most: its pull request opens with it, and plans/f.md and plans/g.md land on a topic stacked on it.\n",
+      );
+      for (const name of ["a", "b", "c", "d", "e"])
+        writeFileSync(
+          file(`${name}.md`),
+          plan(
+            name,
+            `Change src/${name}.js.`,
+            head(
+              "topic t.",
+              name === "e"
+                ? "Pull request #9 (https://github.com/o/r/pull/9) to test from branch t, commit 5234abcd; draft."
+                : // Codex C1: an opening cut off before c and d got the line.
+                  "cd".includes(name)
+                  ? waiting
+                  : `${waiting}\nPull request #9 (https://github.com/o/r/pull/9) opened 24 November 2026 with plans/e.md.`,
+            ),
+          ),
+        );
+      expect(one.queue(["full", "9", "plans/f.md"])).toBe(
+        "#9 is full, 6 plans and 5 at most, and no topic stacked on it has room: plans/f.md opens one. Its line: Lands: topic f; stacked on #9.\n",
+      );
+      writeFileSync(file("f.md"), plan("f", "Change src/f.js.", head("topic f; stacked on #9.")));
+      expect(one.queue(["start", "plans/f.md"])).toContain(
+        "Six Executor 1 (lab) was started on: plans/f.md, in executor-1.",
+      );
+      one.building("f.md", one.read()[0].sessionId);
+      expect(one.queue(["full", "9", "plans/g.md"])).toBe(
+        "#9 is full, 5 plans and 5 at most: plans/g.md lands on topic f with plans/f.md, stacked on #9. Its line: Lands: topic f; stacked on #9.\n",
+      );
+      expect(one.queue(["start", "plans/g.md"]).trim()).toContain(
+        "plans/g.md waits on plans/f.md (both land on topic f, stacked on #9): it is taken once that one is built.",
+      );
+      expect(one.read()).toHaveLength(1);
+    },
+  );
+
   /** Fires a usage reset's timer on `paths`, as `defer` arms it; it prints nothing. */
   const reset = (one: ReturnType<typeof pool>, paths: string[]) =>
     one.queue(["start", "--timer", String(Date.now()), ...paths]);
@@ -16285,6 +16469,98 @@ describe("several executors build at once", () => {
     });
     const brief = at("plans/d.md", "# D\n\nBrief for the planner, 24 November 2026.\n", "brief");
     expect(freePlans([c, brief])[0].waitsOn).toEqual({ path: "plans/d.md", why: "it rests on it" });
+  });
+
+  // plans/topic-first-pull-request-five.md, part 3: when a plan would be sent
+  // to the topic stacked on a full pull request that another is being built
+  // on, then it waits on that one.
+  it("a plan sent to the topic stacked on a full pull request waits on the one being built there", () => {
+    const at = (path: string, text: string, state = "ready", extra: object = {}) => ({
+      path,
+      text,
+      state,
+      ...extra,
+    });
+    const builtIn9 = (name: string) =>
+      at(`plans/${name}.md`, plan(name, `Change src/${name}.js.`, "\n\nLands: topic t."), "built", {
+        pr: 9,
+      });
+    const nine = ["a", "b", "c", "d", "e"].map(builtIn9);
+    const f = at(
+      "plans/f.md",
+      plan("F", "Change src/f.js.", "\n\nLands: topic f; stacked on #9."),
+      "building",
+    );
+    const g = (lands: string) => at("plans/g.md", plan("G", "Change src/g.js.", `\n\n${lands}`));
+    const waits = { path: "plans/f.md", why: "both land on topic f, stacked on #9" };
+    const waitsOn = (plans: object[]) =>
+      freePlans(plans as Parameters<typeof freePlans>[0]).find((p) => p.path === "plans/g.md")
+        ?.waitsOn;
+    expect(waitsOn([...nine, f, g("Lands: topic t.")])).toEqual(waits);
+    expect(waitsOn([...nine, f, g("Lands: topic t; lands in #9.")])).toEqual(waits);
+    // An older pull request of the topic's name is not taken for #9 (/code-review).
+    const old = at(
+      "plans/old.md",
+      plan("Old", "Change src/old.js.", "\n\nLands: topic t."),
+      "built",
+      {
+        pr: 3,
+      },
+    );
+    expect(waitsOn([old, ...nine, f, g("Lands: topic t.")])).toEqual(waits);
+    // Counted as its executor will, in hand: plans still waiting on topic f leave it room (Codex C2).
+    const waitingOnF = ["w1", "w2", "w3", "w4"].map((name) =>
+      at(
+        `plans/${name}.md`,
+        plan(name, `Change src/${name}.js.`, "\n\nLands: topic f; stacked on #9."),
+      ),
+    );
+    expect(waitsOn([...nine, f, ...waitingOnF, g("Lands: topic t.")])).toEqual(waits);
+    // Either way: a plan of the stacked topic waits on one claimed that will be sent there (/code-review).
+    const fReady = at("plans/f.md", f.text);
+    const claimed = { "plans/g.md": { holder: "s", name: "S", at: 1, until: Date.now() + 60_000 } };
+    expect(
+      freePlans([...nine, fReady, g("Lands: topic t.")] as Parameters<typeof freePlans>[0], {
+        claims: claimed,
+      }).find((p) => p.path === "plans/f.md")?.waitsOn,
+    ).toEqual({ path: "plans/g.md", why: "both land on topic f, stacked on #9" });
+    // A full pull request itself stacked: its topic's plans land in it, not its base (Codex C3).
+    const ten = ["s1", "s2", "s3", "s4", "s5"].map((name) =>
+      at(
+        `plans/${name}.md`,
+        plan(name, `Change src/${name}.js.`, "\n\nLands: topic s; stacked on #9."),
+        "built",
+        {
+          pr: 10,
+        },
+      ),
+    );
+    const c = at(
+      "plans/c.md",
+      plan("C", "Change src/cc.js.", "\n\nLands: topic c; stacked on #10."),
+      "building",
+    );
+    const s6 = at(
+      "plans/s6.md",
+      plan("S6", "Change src/s6.js.", "\n\nLands: topic s; stacked on #9."),
+    );
+    expect(
+      freePlans([...nine, ...ten, c, s6] as Parameters<typeof freePlans>[0]).find(
+        (p) => p.path === "plans/s6.md",
+      )?.waitsOn,
+    ).toEqual({ path: "plans/c.md", why: "both land on topic c, stacked on #10" });
+    // #9 with room, a fix to it, a stacked topic full, or a topic not #9's: no wait.
+    expect(waitsOn([...nine.slice(0, 3), f, g("Lands: topic t.")])).toBeNull();
+    expect(waitsOn([...nine, f, g("Lands: topic t; lands in #9 as its fix.")])).toBeNull();
+    const more = ["h1", "h2", "h3", "h4"].map((name) =>
+      at(
+        `plans/${name}.md`,
+        plan(name, `Change src/${name}.js.`, "\n\nLands: topic f; stacked on #9."),
+        "handed",
+      ),
+    );
+    expect(waitsOn([...nine, f, ...more, g("Lands: topic t.")])).toBeNull();
+    expect(waitsOn([...nine, f, g("Lands: topic other.")])).toBeNull();
   });
 
   // plans/handed-plans-no-mutual-wait.md

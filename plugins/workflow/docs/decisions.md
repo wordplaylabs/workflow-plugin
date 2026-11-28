@@ -218,15 +218,17 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
 - `land-by-pull-request` **With `land: pull-request`, a plan lands by its
   `Lands` line: a topic's pull request, the day's fixes or straight to
   the branch.** (Javi, 30 October) A pull request per topic, opened once
-  nothing more of the topic is queued; the fixes, with no decision, one
+  nothing more of the topic is queued or it holds five plans; the fixes, with no decision, one
   pull request a day; one wanted at once straight to the branch.
   plans/land-by-pull-request.md, plans/pull-requests-by-topic.md,
-  plans/topic-opens-when-nothing-waits.md.
+  plans/topic-opens-when-nothing-waits.md,
+  plans/topic-first-pull-request-five.md.
   - ~~One pull request per plan.~~ (Javi, 28 October; made nine in a
     day)
 - `topic-landing` **A topic's plans are built on one branch, pushed after
   each, and its pull request opens by itself once a plan of it is built
-  and no other plan of it is queued.** (Javi, 26 November) In the project
+  and no other plan of it is queued, or once it holds five plans.**
+  (Javi, 27 November) In the project
   that asked, four plans of one topic were built over a day and no pull
   request opened, each marked waiting, until the assistant asked him; two
   more topics had sat built for eleven and twelve days. Nobody marks a
@@ -234,7 +236,13 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   after the name is still read and means nothing. Queued is ready, handed
   over or being built; a plan held for his word, a brief and a dropped
   plan hold nothing back, since held work would hide built work.
-  `plans topic <path>` says which it is; a topic left with no pull request
+  `plans topic <path>` says which it is. At five the pull request is full
+  (`pull-request-full`), so nothing still queued would land in it and it
+  has nothing to wait for: six plans queued on a new topic had all landed
+  on its branch before a pull request existed to count them. Google's
+  "Small CLs" has a change sent for review once it is whole and the next
+  written on top of it, and Graphite opens a stack's pull requests as
+  drafts while work goes on above them. A topic left with no pull request
   is opened at the next plan's start, unless one found open, or merged or
   closed at its branch's commit, already holds its work, so a pull request
   closed long ago hides no commit pushed since. Unfinished is said by the draft, as
@@ -242,7 +250,11 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   option and Gerrit's work in progress open the request at the push. A
   plan with no `Lands` line is a topic of its own, so
   nothing lands unread by omission. plans/pull-requests-by-topic.md,
-  plans/topic-opens-when-nothing-waits.md.
+  plans/topic-opens-when-nothing-waits.md,
+  plans/topic-first-pull-request-five.md.
+  - ~~A topic's plans are built on one branch, pushed after each, and its
+    pull request opens by itself once a plan of it is built and no other
+    plan of it is queued.~~ (Javi, 26 November)
   - ~~A topic's plans are built on one branch, pushed after each, and its
     pull request opens with the first plan marked ready.~~ (Javi, 30
     October)
@@ -341,12 +353,19 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   requests that each serve one purpose. The plan is the unit the queue
   can cut at, and five is observed there: pull requests of up to five
   commits merged in a median of six hours, those of six to eleven in
-  twenty-nine. Counted from the plans, never gh, a waiting plan counting
-  those waiting with it; the stacked topics sit side by side on the full
+  twenty-nine. Counted from the plans, never gh: an author asking for a
+  waiting plan counts the plans waiting with it, so plans written together
+  are spread before any is built; an executor counts what is built or in
+  hand, since a waiting plan may still be dropped or sent elsewhere, and
+  its answer is the one followed, so the two differ only toward a pull
+  request under five. A topic with no pull request yet counts the plans
+  built on its branch and opens at five (`topic-landing`); the stacked topics sit side by side on the full
   one, and a plan that uses what one adds names that one. A fix lands
   where the fault is, since a pull request is merged working. Known
   limits: no size of a plan is read, so one plan may still be large, and
-  a stacked topic's merged plans still count. plans/pull-requests-small-and-plain.md.
+  a stacked topic's merged plans still count, and a branch that already
+  holds more than five plans opens with them all.
+  plans/pull-requests-small-and-plain.md, plans/topic-first-pull-request-five.md.
 - `pull-request-title` **A pull request's title is one sentence saying
   what the whole pull request does now, written again when a plan adds
   what it does not cover; a person's title stays.** (Javi, 27 November)
@@ -607,7 +626,12 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   no impacted target in common side by side and queues the rest
   behind one another; Claude Code's agent teams give each teammate
   its own files, hand out no blocked task and claim under a file
-  lock; git refuses one branch in two worktrees. Waiting too often
+  lock; git refuses one branch in two worktrees. Where a plan lands is
+  its `Lands` topic, or, for a plan a full pull request sends on, the
+  topic stacked on it that `plans full` names while a plan is being built
+  there, or while one in hand that it will send there is, since a line
+  names the full one's topic until its executor rewrites it; judged as
+  that executor counts, its plan in hand. Waiting too often
   costs time, never a conflict. Between two plans in hand, each handed
   over or claimed and neither building by a live session, one goes first
   and only the other waits on it: never one that itself waits on a plan it
@@ -684,7 +708,8 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/handed-plans-order-holds-everywhere.md,
   plans/claimed-plans-no-mutual-wait.md,
   plans/claims-held-across-starts.md, plans/claims-held-follow-up.md,
-  plans/lapsed-claims-and-handover-text.md.
+  plans/lapsed-claims-and-handover-text.md,
+  plans/topic-first-pull-request-five.md.
 - `push-not-waited-on` **The executor runs the checks once, before the
   push, and waits on no pull request's run of them; a failed run
   reaches the assistant by the webhook.** (Javi, 14 November) The pull

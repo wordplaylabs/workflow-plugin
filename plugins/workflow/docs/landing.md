@@ -92,7 +92,7 @@ state,headRefOid` says MERGED at its own commit; others stay, named in
 the final message.
 
 **A topic left with no pull request** is opened: each topic `plans` lists
-under `Topics waiting for a pull request` as `nothing is queued for it`.
+under `Topics waiting for a pull request` with `so the next plan's start opens it`.
 `gh pr list --state all --head <name> --json
 number,url,state,headRefOid,isCrossRepository`, a pull request from a
 fork being another person's and not this topic's: one found open, or
@@ -192,6 +192,12 @@ retried as for a merge. Then, by the topic:
     <sha>; draft.`, and each earlier plan of the topic gets, after its
     "Built" section's first line, `Pull request #<n> (<url>) opened
     <date> with plans/<x>.md.`
+  - **Five plans** (`Topic <name> holds … plans with …: its pull request
+    opens with it, …`): opened as "Nothing else queued" says, whatever
+    is queued (decisions.md#pull-request-full). "Built" gets, after its
+    first line, `Opened at 5 plans: <the paths the line names> land on a
+    topic stacked on it.` Each of those is sent on at its own start, by
+    `plans full`.
 
 **Each issue it closes is linked** (decisions.md#closes-its-issues).
 GitHub reads a closing keyword only on a pull request into the default
@@ -289,7 +295,8 @@ origin/<branch>`; keep the local branches, the hook's match for pull
 requests.
 
 **The `Built:` message to the assistant leads with** each pull request opened or joined, its
-link and what it was marked related to, and, for a draft: `Pull request
+link and what it was marked related to, for one opened at five plans the plans sent
+on from it, and, for a draft: `Pull request
 #<n> (<link>) is a draft and waits on you: read its description and
 screenshots, then mark it ready for review on GitHub (the Ready for
 review button at the bottom of the pull request). Until then it asks

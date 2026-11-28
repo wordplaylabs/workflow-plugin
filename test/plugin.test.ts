@@ -2560,9 +2560,24 @@ describe("a pull request per topic", () => {
     expect(mode).toContain(
       "then its base merged in, origin/<branch> or the head branch it is stacked on,",
     );
+    // plans/topic-first-pull-request-five.md, part 4: a topic's pull request
+    // opens at five plans, and the plans still queued go on.
+    expect(mode).toContain(
+      '- **Five plans** (`Topic <name> holds … plans with …: its pull request opens with it, …`): opened as "Nothing else queued" says, whatever is queued (decisions.md#pull-request-full). "Built" gets, after its first line, `Opened at 5 plans: <the paths the line names> land on a topic stacked on it.` Each of those is sent on at its own start, by `plans full`.',
+    );
+    expect(mode).toContain(
+      "link and what it was marked related to, for one opened at five plans the plans sent on from it, and, for a draft",
+    );
     const handbook = read("docs/workflow.md");
+    // Part 5: the rules say it.
     expect(handbook).toContain(
-      "**A pull request takes five plans.** A plan that would land in an open pull request of the queue's own that holds five lands on a topic stacked on it, with the other plans sent there, five to each; `plans full <n> <path>` says which, to the author of a `Lands` line and to the executor at the plan's start. Only a plan that fixes what the pull request itself added, a failed check, a finding of its review or a bug in it, still lands in it, its line saying `; lands in #<n> as its fix.` The day's fixes are not counted. (decisions.md#pull-request-full)",
+      "A topic with no pull request yet opens it once it holds five plans, whatever else of it is queued, and those still queued are sent on the same way.",
+    );
+    expect(handbook).toContain(
+      "lands on its topic or on the topic stacked on a full pull request that one is being built on, or changes a file it changes",
+    );
+    expect(handbook).toContain(
+      "**A pull request takes five plans.** A plan that would land in an open pull request of the queue's own that holds five lands on a topic stacked on it, with the other plans sent there, five to each; `plans full <n> <path>` says which, to the author of a `Lands` line and to the executor at the plan's start. A topic with no pull request yet opens it once it holds five plans, whatever else of it is queued, and those still queued are sent on the same way. Only a plan that fixes what the pull request itself added, a failed check, a finding of its review or a bug in it, still lands in it, its line saying `; lands in #<n> as its fix.` The day's fixes are not counted. (decisions.md#pull-request-full)",
     );
     expect(handbook).toContain(
       "Its title is one sentence saying what the whole pull request does now, written again when a plan adds what it does not cover; a title a person wrote stays. (decisions.md#pull-request-title)",
@@ -2586,7 +2601,7 @@ describe("a pull request per topic", () => {
       "A line written before 26 November 2026 may say `, waiting` or `, ready` after the name: it means nothing now. Follow the line; its author judges whether a change is a fix.",
     );
     expect(mode).toContain(
-      "**A topic left with no pull request** is opened: each topic `plans` lists under `Topics waiting for a pull request` as `nothing is queued for it`.",
+      "**A topic left with no pull request** is opened: each topic `plans` lists under `Topics waiting for a pull request` with `so the next plan's start opens it`.",
     );
     expect(mode).toContain("`Pull request #<n> (<url>) found <open | merged | closed> <date>.`");
     // Codex C1 to C3: its own branch, not a fork's, and a closed one only at the branch's commit.
@@ -2653,10 +2668,19 @@ describe("a pull request per topic", () => {
     // plans/docs-as-a-prompt.md: the reason and the date are the catalogue's entry.
     // plans/topic-opens-when-nothing-waits.md: nobody marks a topic ready.
     expect(read("docs/decisions.md")).toContain(
-      "A pull request per topic, opened once nothing more of the topic is queued; the fixes, with no decision, one pull request a day; one wanted at once straight to the branch.",
+      "A pull request per topic, opened once nothing more of the topic is queued or it holds five plans; the fixes, with no decision, one pull request a day; one wanted at once straight to the branch.",
     );
     expect(read("docs/decisions.md")).toContain(
-      "- `topic-landing` **A topic's plans are built on one branch, pushed after each, and its pull request opens by itself once a plan of it is built and no other plan of it is queued.** (Javi, 26 November)",
+      "- `topic-landing` **A topic's plans are built on one branch, pushed after each, and its pull request opens by itself once a plan of it is built and no other plan of it is queued, or once it holds five plans.** (Javi, 27 November)",
+    );
+    expect(read("docs/decisions.md")).toContain(
+      "- ~~A topic's plans are built on one branch, pushed after each, and its pull request opens by itself once a plan of it is built and no other plan of it is queued.~~ (Javi, 26 November)",
+    );
+    expect(read("docs/decisions.md")).toContain(
+      "At five the pull request is full (`pull-request-full`), so nothing still queued would land in it and it has nothing to wait for",
+    );
+    expect(read("docs/decisions.md")).toContain(
+      "an executor counts what is built or in hand, since a waiting plan may still be dropped or sent elsewhere, and its answer is the one followed",
     );
     expect(read("docs/decisions.md")).toContain(
       "Queued is ready, handed over or being built; a plan held for his word, a brief and a dropped plan hold nothing back, since held work would hide built work.",
@@ -2668,7 +2692,7 @@ describe("a pull request per topic", () => {
       "one whose commit changes a rule lands as a topic of its own, whose pull request opens at once, since review beats silence.",
     );
     expect(read("docs/workflow.md")).toContain(
-      "- **A topic** (`Lands: topic <name>.`): one branch named for the topic, a commit per plan, pushed after each; its pull request opens by itself when a plan of it is built and no other plan of it is ready, handed over or being built, and nobody marks a topic ready;",
+      "- **A topic** (`Lands: topic <name>.`): one branch named for the topic, a commit per plan, pushed after each; its pull request opens by itself when a plan of it is built and no other plan of it is ready, handed over or being built, or when it holds five plans, and nobody marks a topic ready;",
     );
     expect(read("docs/workflow.md")).toContain(
       "commit changes a rule lands as a topic of its own. (decisions.md#fix-landing)",

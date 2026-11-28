@@ -12293,7 +12293,10 @@ else say([]);
           const dir = project(false);
           try {
             deliver(dir, "m1", merged);
-            const said = run(dir, ["github", "--inbox"]);
+            // Its own starts log, so the start is not held back by an earlier case's.
+            const said = run(dir, ["github", "--inbox"], {
+              WORKFLOW_STARTS_LOG: join(dir, "starts.log"),
+            });
             expect(said).toMatch(
               /^GitHub: #41 merged into test, noted: 2 behind; assistant started\. /,
             );
@@ -12573,10 +12576,14 @@ else say([]);
             appToken(dir);
             const app = { WORKFLOW_APP_ID: "12", WORKFLOW_APP_KEY: "key", STUB_NOT_CLOSED: "13" };
             deliver(dir, "m1", closesTwo);
-            const said = run(dir, ["github", "--inbox"], app);
+            // Its own starts log, so the start is not held back by an earlier case's.
+            const said = run(dir, ["github", "--inbox"], {
+              ...app,
+              WORKFLOW_STARTS_LOG: join(dir, "starts.log"),
+            });
             expect(said).toContain("GitHub: #12 closed, merged as #41.");
             expect(said).toMatch(
-              /^GitHub: #13 was not closed, merged as #41, noted: GraphQL: Resource not accessible by integration \(closeIssue\)/m,
+              /^GitHub: #13 was not closed, merged as #41, noted: GraphQL: Resource not accessible by integration \(closeIssue\); assistant started\. /m,
             );
             const file = join(dir, "plans", "github", "41.md");
             expect(readFileSync(file, "utf8")).toMatch(
@@ -12588,7 +12595,13 @@ else say([]);
             );
             // A redelivery of the merge, still failing: tried once, said once.
             deliver(dir, "m2", closesTwo);
-            run(dir, ["github", "--inbox"], app);
+            run(dir, ["github", "--inbox"], {
+              ...app,
+              WORKFLOW_STARTS_LOG: join(dir, "starts.log"),
+            });
+            // The redelivery was read, not passed over (Codex C1).
+            const seen = JSON.parse(readFileSync(join(dir, ".claude", "github-seen.json"), "utf8"));
+            expect(seen.deliveries).toContain("m2");
             expect(readFileSync(file, "utf8").match(/^unclosed, /gm)).toHaveLength(1);
             const asked = readFileSync(join(dir, "asked.log"), "utf8");
             expect(asked.match(/^issue close 13 /gm)).toHaveLength(1);

@@ -4701,12 +4701,25 @@ describe("a file an agent reads whole at a step is thirty thousand characters at
       .filter((name) => name.endsWith(".md"))
       .map((name) => `skills/${name}`);
     expect(skills).toContain("skills/setup/SKILL.md");
-    for (const path of [
-      ...["landing.md", "description.md", "github.md"].map((name) => `docs/${name}`),
-      ...skills,
+    // plans/step-file-cap-second-follow-up.md: the writing plugin's skills are read whole too,
+    // named by their path from the repository's root.
+    const repo = new URL("../", import.meta.url).pathname;
+    const writing = readdirSync(join(repo, "plugins/writing/skills"), {
+      recursive: true,
+      encoding: "utf8",
+    })
+      .filter((name) => name.endsWith(".md"))
+      .map((name) => `plugins/writing/skills/${name}`);
+    expect(writing).toContain("plugins/writing/skills/draft/SKILL.md");
+    for (const [path, text] of [
+      ...[
+        ...["landing.md", "description.md", "github.md"].map((name) => `docs/${name}`),
+        ...skills,
+      ].map((path) => [path, read(path)]),
+      ...writing.map((path) => [path, readFileSync(join(repo, path), "utf8")]),
     ]) {
       // Counted as `wc -m` counts, by character and not by UTF-16 unit.
-      const length = [...read(path)].length;
+      const length = [...text].length;
       expect(
         length,
         `${path} is ${length} characters, over the 30,000 of decisions.md#step-file-length: split it by the step each part is read at, or trim it; a bigger cap is the owner's call`,

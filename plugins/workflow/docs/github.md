@@ -104,9 +104,7 @@ once:
   and its Handled line says so. One that fits a short plan ("Which
   session a topic goes to") is written and started at once,
   landing in that pull request when it was said on one of the queue's
-  own (`Lands: topic <the head branch>; lands in #<n> as its fix.` for a
-  fault in what it added, else the line `plans full <n> plans/<x>.md`
-  gives), or is
+  own (`Lands: topic <the head branch>; lands in #<n>.`), or is
   a "Decided" line with their name when the plan is planned and has no
   Building line; anything bigger is a brief, with its `Issue` line when
   it was said on an issue, or that `Lands` line when on one of the
@@ -131,11 +129,12 @@ once:
   in a chat; `plans first` it, on his standing word, and hand it on as
   any short plan. Several `merged` notes not handled are one plan. A refresh plan that waits with no Building
   line gains the pull requests it lacks, and no second is written;
-- `unclosed`, an issue a merged pull request's description closes that
-  the queue could not close (a number that is a pull request is left
-  open, and noted nowhere): its line names the issue, the line under it
-  the cause. A hiccup ("Hiccups"). Read `plans gh issue view <i> --json
-  state,url,comments --jq '.state, .url, .comments[-1].body'`: `CLOSED`,
+- `unclosed`, an issue a merged pull request is linked to, names in
+  a `Closes` line or its plans carry, that the queue could not close (a
+  number that is a pull request is left open, and noted nowhere): its
+  line names the issue, the line under it the cause. A hiccup
+  ("Hiccups"). Read `plans gh issue view <i> --json state,url,comments
+  --jq '.state, .url, .comments[-1].body'`: `CLOSED`,
   nothing more; an address with `/pull/` is a pull request's, never
   closed this way, told as below. An open issue, `plans gh issue close
   <i> --reason completed --comment "Merged as #<m>."`, without
@@ -156,7 +155,7 @@ once:
   failure the diff does not explain, on attempt 1, is rerun once, `plans
   gh run rerun <id> --failed`; one it explains, a rerun's, or a rerun
   refused, is a short plan for the fix, `Lands: topic <the head branch>;
-  lands in #<n> as its fix.` (`Lands: fix.` on the day's fixes), started at
+  lands in #<n>.` (`Lands: fix.` on the day's fixes), started at
   once. Several `failed` lines on one commit that fail the same way are
   one failure: each run is rerun at most once, and one short plan is
   written.

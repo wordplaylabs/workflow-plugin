@@ -290,18 +290,20 @@ nothing; `docs/landing.md` holds the executor's steps.
 - **A topic** (`Lands: topic <name>.`): one branch named for the topic,
   a commit per plan, pushed after each; its pull request opens by itself
   when a plan of it is built and no other plan of it is ready, handed
-  over or being built, or when it holds five plans, and nobody marks a
+  over or being built, and nobody marks a
   topic ready; a plan with no `Lands` line is a topic of its own; the
   pull request it lands in or is
   stacked on may follow the name (`; lands in #52.`), and `plans` says a
   `Lands` line it cannot read and the topics still waiting for a pull
   request, each with why. (decisions.md#topic-landing)
-  A later plan joins an open pull request while it has room: the description is written
-  again, its screenshots attached with `gh pr edit --attach`, and nothing
+  A later plan joins an open pull request, however many plans it
+  holds: the description is written again, its screenshots attached with `gh pr edit --attach`, and nothing
   is posted. (decisions.md#joined-pull-request)
-- **A fix** (`Lands: fix.`): no decision, no catalogue or doc rule
-  changed; it goes into the day's fixes pull request, and one whose
-  commit changes a rule lands as a topic of its own. (decisions.md#fix-landing)
+- **A fix** (`Lands: fix.`): no decision; it goes into the day's fixes
+  pull request, with its tests and any doc line that only records how
+  the product already works, and one whose commit decides something, a
+  change to what a person sees or does that no rule settles or to a rule
+  with a person's name, lands as a topic of its own. (decisions.md#fix-landing)
 - **A fix wanted now** (`Lands: fix, now.`, on the owner's word only):
   pushed straight to the branch, its `run` read, and listed in the day's
   fixes. (decisions.md#fix-now-landing)
@@ -309,9 +311,9 @@ nothing; `docs/landing.md` holds the executor's steps.
   commit of its own. (decisions.md#merge-refreshes-the-rest)
 
 **The description is a short list of what changed**: the owner's
-paragraphs when he wrote some, a `Closes` line per issue, `Builds on`,
-and one `Related` list naming each related pull request, issue or branch
-once, then `Changes`, the main changes, five bullets at most, each a
+paragraphs when he wrote some, a `Closes` line only for an issue that
+could not be linked, `Builds on`, and one `Related` list naming each
+related pull request, issue or branch once, then `Changes`, the main changes, five bullets at most, each a
 bold lead and one plain sentence of what a person can now do or see,
 with one screenshot under a bullet only where it shows it; a bullet that
 replaces another person's call says so by name and is always among them,
@@ -331,8 +333,8 @@ merge is the people's, and no agent merges.
 **How plans group into pull requests is the project's rule, under
 `## Pull requests` in its file**, read by the author of a `Lands` line;
 the plugin suggests one in `/workflow:setup` and keeps only what the queue cannot do without: a plan that
-rests on an open draft pull request of the queue's own lands in it while
-it has room, and one that rests on another person's pull request is stacked on it, since
+rests on an open draft pull request of the queue's own lands in it,
+and one that rests on another person's pull request is stacked on it, since
 the queue never pushes to another's branch. To rest on a pull request is
 to use what it adds; landing in it, the plan's `Lands` is that pull
 request's topic. Without the heading, a plan resting on the queue's own
@@ -341,16 +343,13 @@ with an open pull request gets a `Related` line and a pull request of
 its own. (decisions.md#stack-only-on-use,
 decisions.md#pull-requests-heading)
 
-**A pull request takes five plans.** A plan that would land in an open
-pull request of the queue's own that holds five lands on a topic stacked
-on it, with the other plans sent there, five to each; `plans full <n>
-<path>` says which, to the author of a `Lands` line and to the executor
-at the plan's start. A topic with no pull request yet opens it once
-it holds five plans, whatever else of it is queued, and those still
-queued are sent on the same way. Only a plan that fixes what the pull
-request itself added, a failed check, a finding of its review or a bug in it, still
-lands in it, its line saying `; lands in #<n> as its fix.` The day's
-fixes are not counted. (decisions.md#pull-request-full)
+**A pull request takes every related plan.** A plan that would land
+in an open pull request of the queue's own lands in it however many
+plans it holds, and nothing is stacked for its size: its description
+shows five main changes and folds the rest. A plan is stacked only on
+another person's pull request, or on the queue's own marked ready
+where the project's heading does not share.
+(decisions.md#stack-only-on-use)
 
 **A branch is brought up to date by merging, never force-pushed**, a
 conflicting pull request at a plan's start included, pushed to its own
@@ -572,8 +571,7 @@ is written "Built" with the item and handed to the assistant.
 (decisions.md#executor-pool)
 
 **A plan waits on another** when it rests on it (its header
-paragraph names it and it is not built), lands on its topic or on
-the topic stacked on a full pull request that one is being built on,
+paragraph names it and it is not built), lands on its topic,
 or changes a file it changes while that one is being built; `plans`
 says which and why, a Building line on it is refused, and the next
 free plan is taken meanwhile. A plan is claimed for the executor it
@@ -795,8 +793,8 @@ is made, and never edited by an agent after; the plan behind it is one
 collapsed comment, the planner's, found again by its hidden first line
 and edited in place on a change, or the project's Detail address in that
 comment; anyone opens one, the assistant writes them on the owner's
-word, the executor writes `Closes #<n>` on the pull request for each
-issue its plans carry and links it, and the queue closes each when it
+word, the executor links the pull request to each issue its
+plans carry, with no line in its description, and the queue closes each when it
 merges, whatever branch it merges into. A plan or a brief quoted
 anywhere on GitHub is collapsed under a one-line summary.
 (decisions.md#issue-is-the-overview, decisions.md#closes-its-issues)
@@ -821,8 +819,8 @@ section, comments folded by whose call each is; the issue's stage is one
 app's webhook**: `plans webhook` listens on the container behind the
 host's reverse proxy, checks each delivery's signature, notes each event in
 `plans/github/`, starts the assistant on it, or sends the open one its
-line, and closes each issue a merged pull request's description
-closes; a close that fails is noted for the assistant, as a failed run
+line, and closes each issue a merged pull request is linked to,
+names in a `Closes` line or its plans carry; a close that fails is noted for the assistant, as a failed run
 is; a comment from a person **People** names by login
 is an event on any issue or pull request, another writer's only where it
 mentions the app, on an issue a plan carries or on one of the queue's own

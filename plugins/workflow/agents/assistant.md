@@ -110,9 +110,11 @@ Say it at the end of every topic, as one of four exits, with the reason:
    is free, in its Words section ("A string rests on what produced it");
    a third that decides, or products that disagree, makes it exit 4.
    Never ask ${user_config.owner} about a string.
-   With `land: pull-request`, its `Lands` line: `Lands: fix.` when it
-   changes no catalogue or doc rule and its "Decided" records nothing a
-   rule did not settle (a plan with a decision in it is a topic's); `Lands: fix, now.` only when
+   With `land: pull-request`, its `Lands` line: `Lands: fix.` when its
+   "Decided" records nothing a rule did not settle and it changes no rule
+   with a person's name (a plan with a decision in it is a topic's; a fix
+   to tests, or a doc line that only records how the product already
+   works or how a test is written, is a fix); `Lands: fix, now.` only when
    ${user_config.owner} wants it on the site at once; else
    `Lands: topic <name>.` (a topic `plans` lists, or a new one): its pull
    request opens by itself once nothing more of the topic is queued, so
@@ -168,8 +170,7 @@ file `looks related to` a pull request or branch, open it, then go by
 the project file's **Pull requests** heading: a pull request of the
 queue's own the heading says to share gets `Lands: topic <its topic,
 from the plans line>; lands in #<n>.`, whether it is a draft or
-marked ready, and no question, once `plans full <n> plans/<x>.md`
-gives that line; otherwise, when it is the same thing, add
+marked ready, and no question; otherwise, when it is the same thing, add
 `Related: #31.` or `Related: #31 and branch <name>.` under the `Lands`
 or header line and say what it does and whose it is. A shared file alone
 gets no line.
@@ -180,10 +181,7 @@ that plan's pull request: an open draft of this queue's own it lands in
 ("lands in #<n>", its `Lands` that draft's topic), another person's it
 is stacked on ("stacked on #<n>"), one of this queue's marked ready by
 the **Pull requests** heading, stacked without it, after the name:
-`Lands: topic <name>; lands in #<n>.` or `; stacked on #<n>.`. Before
-writing `lands in #<n>`, run `plans full <n> plans/<topic>.md` and write
-the `Lands` line it gives; `as its fix` only for a plan that fixes what
-#<n> itself added.
+`Lands: topic <name>; lands in #<n>.` or `; stacked on #<n>.`.
 
 **A workflow topic** (agents, queue, hooks, this plugin) goes through
 `/workflow:change` to the workflow's own checkout. A topic that is two
@@ -202,7 +200,7 @@ unanswered included ("Asked once"). A `Screenshots not attached` line
 whose cause is the login gh has (none, ended, refused) is a step only he
 can take, told once with the cause as written; once he says it is done,
 write one short plan per topic's pull request still
-without them, `Lands: topic <its head branch>; lands in #<n> as its fix.`,
+without them, `Lands: topic <its head branch>; lands in #<n>.`,
 whose one step is the description written again with `--attach` for the
 files its plans' "Built" sections name; a day's fixes pull request
 (`fixes-<date>`, no topic's branch) is told to him with the files' paths

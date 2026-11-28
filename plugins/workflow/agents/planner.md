@@ -122,11 +122,9 @@ Sources as its "Where to look".
    own it lands in ("lands in #<n>", its `Lands` that draft's topic),
    another person's it is stacked on ("stacked on #<n>"), one of this
    queue's marked ready by the **Pull requests** heading, stacked without
-   it. Before writing `lands in #<n>`, run `plans full <n>
-   plans/<topic>.md` and write the `Lands` line it gives; `as its fix`
-   only for a plan that fixes what #<n> itself added.
+   it.
    Then, each on its own line, as they apply:
-   - With `land: pull-request`, `Lands: topic <name>.`, optionally `; lands in #<n>.`, `; lands in #<n> as its fix.` or `; stacked on #<n>.` after the name. `<name>` is the topic's branch, lower-case
+   - With `land: pull-request`, `Lands: topic <name>.`, optionally `; lands in #<n>.` or `; stacked on #<n>.` after the name. `<name>` is the topic's branch, lower-case
      words joined by hyphens. A plan alone in a pull request titles it,
      so title it for what the project does after it. A brief's `Lands`
      line is carried.

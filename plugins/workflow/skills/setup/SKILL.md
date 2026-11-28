@@ -218,8 +218,7 @@ a new change touches the same thing as a pull request already open here.
 Each pull request is one more review for you, and one more run of the
 checks on GitHub. How should plans group into pull requests here?", with
 the options `Related plans share one (Recommended)`
-(A plan related to an open pull request of the queue's own lands in it,
-five plans to each;
+(A plan related to an open pull request of the queue's own lands in it;
 a new one opens only when none fits; fewer pull requests
 to review) and `A pull request per topic`
 (Each pull request is merged or held on its own; a plan is stacked only
@@ -232,9 +231,8 @@ when the file has no such heading (decisions.md#pull-requests-heading):
 ## Pull requests
 
 Related plans share one: a plan related to an open pull request of the
-queue's own lands in it (`Lands: topic <name>; lands in #<n>.`) while
-it has room, five plans, and a new pull request opens only when none
-fits or it is full.
+queue's own lands in it (`Lands: topic <name>; lands in #<n>.`), and a
+new pull request opens only when none fits.
 ```
 
 or

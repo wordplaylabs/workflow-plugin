@@ -14,7 +14,8 @@ stays on `GH_TOKEN`.
 its name when the author names the pull request, kept when the line is
 rewritten. A plan with none is `topic <the plan's file name without
 .md>`. A line written before 26 November 2026 may say `, waiting` or `,
-ready` after the name: it means nothing now. Follow the line; its author
+ready` after the name, and one before 28 November `as its fix` after
+`lands in #<n>`: they mean nothing now. Follow the line; its author
 judges whether a change is a fix.
 
 **A topic's pull request opens as a draft, and stays ready once the
@@ -141,19 +142,11 @@ refresh it is left and named, `left: #<k>, executor-<n> is building on it`.
   without .md>` (with `-2` when that is the head branch) when its
   `Lands` line names that pull request's topic. A plan sent to another topic has its `Lands` line
   rewritten to it. A stacked plan's line ends `; stacked on #<n>.`,
-  written when it lacks it, as `plans full` gives it; so does the line
+  written when it lacks it; so does the line
   of a plan built on a topic already stacked on one not from a fork,
   when it names no pull request. A plan that shares files with an open pull request
   goes where its `Lands` line says; its author read the project's
   **Pull requests** heading.
-- **A pull request takes five plans** (decisions.md#pull-request-full).
-  Before a plan lands in an open pull request of the queue's own, by
-  its `Lands` line, its topic or a draft it rests on, run `plans full
-  <n> plans/<this plan>.md` and follow its line: it lands in it, or on
-  the topic the line names, stacked on #<n>, its `Lands` line
-  rewritten as the line gives it and that topic's branch taken as
-  below. "Built" and the `Built:` message say `#<n> was full: built on
-  topic <name>, stacked on it.`
 - **No branch yet** (no `origin/<name>`, no local `<name>`): `git switch
   -c <name> origin/<base>`, the topic's base above, that branch the pull
   request's `--base`; when it is the head branch it is stacked on, the
@@ -301,19 +294,22 @@ retried as for a merge. Then, by the topic:
     <sha>; draft.`, and each earlier plan of the topic gets, after its
     "Built" section's first line, `Pull request #<n> (<url>) opened
     <date> with plans/<x>.md.`
-  - **Five plans** (`Topic <name> holds … plans with …: its pull request
-    opens with it, …`): opened as "Nothing else queued" says, whatever
-    is queued (decisions.md#pull-request-full). "Built" gets, after its
-    first line, `Opened at 5 plans: <the paths the line names> land on a
-    topic stacked on it.` Each of those is sent on at its own start, by
-    `plans full`.
 
-**Each issue it closes is linked** (decisions.md#closes-its-issues).
-GitHub reads a closing keyword only on a pull request into the default
-branch. After the create or the edit, read what it shows, `gh pr view <n>
---json closingIssuesReferences --jq '.closingIssuesReferences[].number'`,
-and for each `Closes` line's issue not listed, link it, by the gh the
-pull request was written with:
+**Each issue it closes is linked** (decisions.md#closes-its-issues),
+since GitHub shows a linked issue beside the pull request and the
+description need not. After the create or the edit, read the links made
+by hand, by the gh the pull request was written with:
+
+```
+plans gh api graphql \
+  -f query='query($pull: ID!) { node(id: $pull) { ... on PullRequest { closingIssuesReferences(first: 100, userLinkedOnly: true) { nodes { number } } } } }' \
+  -f pull="$(gh pr view <n> --json id --jq .id)" \
+  --jq '.data.node.closingIssuesReferences.nodes[].number'
+```
+
+Only those, since a link GitHub made from an old `Closes` line goes
+with the line. Link each issue the topic's plans name that is not
+among them:
 
 ```
 plans gh api graphql \
@@ -322,9 +318,11 @@ plans gh api graphql \
   -f pull="$(gh pr view <n> --json id --jq .id)"
 ```
 
-One that is refused is not tried again: "Built" and the `Built:` message
-say `Not linked: #<i>, <gh's line>.`, and the `Closes` line and the
-queue's close at the merge stand.
+One that is refused is not tried again in this landing: the
+description is written once more as a join writes it, with `Closes
+#<i>.` for that issue, "Built" and the `Built:` message say `Not
+linked: #<i>, <gh's line>.`, and the queue's close at the merge reads
+the line.
 
 **A fix**, `Lands: fix.`, is built on the day's branch,
 `fixes-<yyyy-mm-dd>`, the day of its push (decisions.md#days-fixes),
@@ -359,10 +357,14 @@ its commit, which the final message says. "Built" opens with
 `Pushed straight to <branch> as a fix, commit <sha>; <run> green.`
 (with no `run`, `no run to read.` in place of `<run> green.`).
 
-**A fix that is not one**, a commit that adds, changes or strikes a
-catalogue rule or a rule in the project's docs, lands as `topic <the
-plan's file name without .md>`, its `Lands` line rewritten to it, its
-"Built" and the final message saying why (decisions.md#fix-landing).
+**A fix that is not one**, a commit that decides something, lands as
+`topic <the plan's file name without .md>`, its `Lands` line rewritten
+to it, its "Built" and the final message saying why
+(decisions.md#fix-landing): it changes what a person sees or does in a
+way no rule the project holds settles, or adds, changes or strikes a
+rule with the owner's or another person's name. A change to tests, and
+a line in the catalogue or a doc that only records how the product
+already works or how a test is written or run, leave it a fix.
 
 **The screenshots, when `--attach` fails** (decisions.md#screenshots-attach):
 through `plans gh`, a picture that did not go up means nothing was
@@ -404,8 +406,7 @@ origin/<branch>`; keep the local branches, the hook's match for pull
 requests.
 
 **The `Built:` message to the assistant leads with** each pull request opened or joined, its
-link and what it was marked related to, for one opened at five plans the plans sent
-on from it, for a topic stacked on a pull request closed without
+link and what it was marked related to, for a topic stacked on a pull request closed without
 merging, that line of its "Built", or with that branch gone `Topic
 <name> has no pull request: #<n>, which it is stacked on, was closed
 without merging and its branch is gone, so its pull request would bring
@@ -433,7 +434,7 @@ an earlier plan of it added changes that line's sentence and adds none.
 ```
 <The owner's paragraphs, word for word, when the body has some>
 
-Closes #<n>.                                  <- one per issue its plans' Issue lines name
+Closes #<n>.                                  <- only for an issue that could not be linked
 Builds on #<n>; merge that first.             <- while its base is the head it is stacked on
 <!-- workflow: stacked on #<n> -->            <- in its place once its base is <branch>
 
@@ -475,20 +476,23 @@ to a Claude session left out>
   `Related:` line, is the owner's
   and opens the new body unchanged; a `Closes #` line for an issue no
   plan of the topic names is the owner's too, and is kept. With nothing
-  there, the body opens with the three lines that apply, so a pull
-  request written again loses an older `For #<n>.` line and gains
-  `Closes #<n>.`. So is every `## ` section whose heading the
+  there, the body opens with the lines that apply, so a pull request
+  written again loses an older `For #<n>.` line and the queue's own
+  `Closes #<n>.` lines, each issue linked instead. So is every `## `
+  section whose heading the
   template does not name: it follows To try it, word for word, in the
   order the body has it. Write no opening paragraph of your
   own: the title is the summary.
-- **Closes** and **Related**: `Closes #<n>.` for each issue a plan of
-  the topic names in its `Issue` line, one line each, no issue twice:
-  GitHub's keyword, so a merge into the default branch closes it and the
-  queue closes it elsewhere (decisions.md#closes-its-issues). Then one
+- **Closes** and **Related**: no line for an issue that is linked. Each
+  issue a plan of the topic names in its `Issue` line is linked to the
+  pull request and shown in its Development sidebar ("Each issue it
+  closes is linked"); `Closes #<n>.` is written only for one whose link
+  was refused, one line each (decisions.md#closes-its-issues). Then one
   `Related:` line, then a list of everything the topic's plans'
   `Related` lines name, each once, one item a line with nothing else on
-  it, numbers in order and then branches by name, less a number a
-  `Closes` or `Builds on` line names and the pull request itself; none
+  it, numbers in order and then branches by name, less an issue a plan
+  of the topic names in its `Issue` line, a number a `Closes` or `Builds
+  on` line names and the pull request itself; none
   left, no `Related:` line. Look for no related work yourself, and
   comment on no other person's pull request.
 - **Builds on**: a topic stacked on #<n>, not a fork's, says so in its

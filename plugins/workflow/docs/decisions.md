@@ -242,7 +242,7 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
 - `land-by-pull-request` **With `land: pull-request`, a plan lands by its
   `Lands` line: a topic's pull request, the day's fixes or straight to
   the branch.** (Javi, 30 October) A pull request per topic, opened once
-  nothing more of the topic is queued or it holds five plans; the fixes, with no decision, one
+  nothing more of the topic is queued; the fixes, with no decision, one
   pull request a day; one wanted at once straight to the branch.
   plans/land-by-pull-request.md, plans/pull-requests-by-topic.md,
   plans/topic-opens-when-nothing-waits.md,
@@ -251,8 +251,7 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
     day)
 - `topic-landing` **A topic's plans are built on one branch, pushed after
   each, and its pull request opens by itself once a plan of it is built
-  and no other plan of it is queued, or once it holds five plans.**
-  (Javi, 27 November) In the project
+  and no other plan of it is queued.** (Javi, 28 November) In the project
   that asked, four plans of one topic were built over a day and no pull
   request opened, each marked waiting, until the assistant asked him; two
   more topics had sat built for eleven and twelve days. Nobody marks a
@@ -260,10 +259,7 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   after the name is still read and means nothing. Queued is ready, handed
   over or being built; a plan held for his word, a brief and a dropped
   plan hold nothing back, since held work would hide built work.
-  `plans topic <path>` says which it is. At five the pull request is full
-  (`pull-request-full`), so nothing still queued would land in it and it
-  has nothing to wait for: six plans queued on a new topic had all landed
-  on its branch before a pull request existed to count them. Google's
+  `plans topic <path>` says which it is. Google's
   "Small CLs" has a change sent for review once it is whole and the next
   written on top of it, and Graphite opens a stack's pull requests as
   drafts while work goes on above them. A topic left with no pull request
@@ -305,10 +301,12 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/topic-first-pull-request-five.md,
   plans/stacked-topic-recovery-compares-parent.md,
   plans/stacked-branch-merge-base-fallback.md,
-  plans/stacked-base-edge-cases.md, plans/stacked-merged-parent-gaps.md.
+  plans/stacked-base-edge-cases.md, plans/stacked-merged-parent-gaps.md,
+  plans/fewer-pull-requests-no-closes-lines.md.
   - ~~A topic's plans are built on one branch, pushed after each, and its
     pull request opens by itself once a plan of it is built and no other
-    plan of it is queued.~~ (Javi, 26 November)
+    plan of it is queued, or once it holds five plans.~~ (Javi, 27
+    November; retired 28 November, the limit it rested on being gone)
   - ~~A topic's plans are built on one branch, pushed after each, and its
     pull request opens with the first plan marked ready.~~ (Javi, 30
     October)
@@ -320,12 +318,22 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   - ~~A later plan joins an open pull request: the description is
     written again and one comment says what was added, since GitHub tells
     the people of a comment and not of a push.~~ (Javi, 28 October)
-- `fix-landing` **A fix, a short plan with no decision that changes no
-  catalogue or doc rule, goes into the day's fixes pull request.** (Javi,
-  30 October) A fix has nothing to decide, so it asks nobody's reading;
-  one whose commit changes a rule lands as a topic of its own, whose pull
-  request opens at once, since review beats silence.
-  plans/pull-requests-by-topic.md, plans/topic-opens-when-nothing-waits.md.
+- `fix-landing` **A fix, a short plan with no decision, goes into the
+  day's fixes pull request; only a commit that decides something lands
+  as a topic of its own.** (Javi, 28 November) A fix has nothing to
+  decide, so it asks nobody's reading. To decide is to change what a
+  person sees or does in a way no rule settles, or a rule with a
+  person's name; a fix to tests, and a doc line that only records how
+  the product already works or how a test is written, decide nothing.
+  In the project that asked, a fix to browser tests opened a pull
+  request of its own for one line saying how a test waits, and he could
+  not tell what in it needed his review. One that decides lands as a
+  topic, whose pull request opens at once, since review beats silence.
+  plans/pull-requests-by-topic.md, plans/topic-opens-when-nothing-waits.md,
+  plans/fewer-pull-requests-no-closes-lines.md.
+  - ~~A fix, a short plan with no decision that changes no catalogue or
+    doc rule, goes into the day's fixes pull request.~~ (Javi, 30
+    October)
 - `fix-now-landing` **A fix wanted now, on the owner's word only, is
   pushed straight to the branch and listed in the day's fixes.** (Javi,
   30 October) A fix the site needs today cannot wait for a merge.
@@ -349,8 +357,7 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   pull request itself added: Google's CL descriptions guide has the
   description read again before submitting so that it still reflects
   what the change does, so it is written for the pull request as it
-  stands. Five is what a pull request takes in plans
-  (`pull-request-full`). The decisions are in the catalogue, whose diff
+  stands. Five bullets fit one screen with the fold closed. The decisions are in the catalogue, whose diff
   the pull request shows. A bullet that replaces another person's call
   names them, is always shown and goes first, past five if need be; a
   pull request of housekeeping alone lists it; the commits no plan here
@@ -358,7 +365,8 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   changes`. A section the owner adds anywhere in the body, a topic's or
   the day's fixes, is kept on every rewrite (Javi). GitHub shows a
   reference alone in a list item with its title and state ("Autolinked
-  references and URLs"), and asks the closing keyword for each issue.
+  references and URLs"), and an issue linked to it under Development
+  (`closes-its-issues`).
   plans/short-pull-request-descriptions.md,
   plans/short-pull-request-descriptions-follow-up.md,
   plans/pull-requests-small-and-plain.md,
@@ -380,8 +388,8 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
     October; replaced 8 November, nobody reading the diff of decisions
     in a description)
 - `stack-only-on-use` **A plan that rests on an open draft pull request
-  of the queue's own lands in it while it has room (`pull-request-full`),
-  and one that rests on another person's is stacked on it.** (Javi, 27
+  of the queue's own lands in it, however many plans it holds, and one
+  that rests on another person's is stacked on it.** (Javi, 28
   November) A draft is not done yet, so
   work that belongs to it goes into it, as he had to ask three times in
   a day for a stacked pull request to be joined into the draft it built
@@ -391,11 +399,25 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   GitHub Actions passes a fork's pull request no secrets; the plan is
   built on the branch and its "Built" says so. How the rest
   group is the project's, since grouping is a cost the project carries,
-  not the plugin. plans/stack-only-when-it-depends.md,
+  not the plugin. For a day a pull request was held to five, after
+  twenty-six plans had landed in one that nobody could read; the limit then
+  stacked a page's removal and a rename on that pull request, and he
+  could not tell why they were not simply in it. What could not be read
+  was the description, which now shows five main changes and folds the
+  rest (`short-description`), so the size of a pull request is no longer
+  a reason to open another. Known limit: no size is read, so one pull
+  request may grow large. plans/stack-only-when-it-depends.md,
   plans/draft-takes-its-follow-ups.md,
   plans/related-plans-share-a-pull-request.md,
   plans/pull-requests-small-and-plain.md,
-  plans/stacked-base-edge-cases.md.
+  plans/stacked-base-edge-cases.md,
+  plans/fewer-pull-requests-no-closes-lines.md.
+  - ~~A plan that rests on an open draft pull request of the queue's own
+    lands in it while it has room, and one that rests on another
+    person's is stacked on it.~~ (Javi, 27 November)
+  - ~~A pull request takes five plans; the next related plan lands on a
+    topic stacked on it, and only a fix to what it added still lands in
+    it.~~ (Javi, 27 November; retired 28 November)
   - ~~A plan that rests on an open draft pull request of the queue's own
     lands in it, and one that rests on another person's is stacked on
     it.~~ (Javi, 7 November)
@@ -408,43 +430,17 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
     30 October)
 - `pull-requests-heading` **How plans group into pull requests is the
   project's rule, under `## Pull requests` in its file; the plugin
-  suggests one at setup and holds only how many plans one takes
-  (`pull-request-full`).** (Javi, 27 November) Grouping is
+  suggests one at setup and holds none.** (Javi, 28 November) Grouping is
   a cost the project carries, each pull request one more review and one
   more run of its suites, so the project says it; Gerrit's
   submit-whole-topic is a server setting for the same reason. The first
   project to say it chose that related plans share one pull request.
   plans/related-plans-share-a-pull-request.md,
-  plans/pull-requests-small-and-plain.md.
+  plans/pull-requests-small-and-plain.md,
+  plans/fewer-pull-requests-no-closes-lines.md.
   - ~~How plans group into pull requests is the project's rule, under
     `## Pull requests` in its file; the plugin suggests one at setup and
-    holds none.~~ (Javi, 7 November)
-- `pull-request-full` **A pull request takes five plans; the next
-  related plan lands on a topic stacked on it, and only a fix to what it
-  added still lands in it.** (Javi, 27 November) In the project that
-  asked, the rule that a related plan joins an open pull request had no
-  end: twenty-six plans landed in one in three days, 264 files and 42
-  bullets under the first plan's title. Google's "Small CLs" asks for
-  one self-contained change, calls 100 lines reasonable and 1000 usually
-  too large, lets a reviewer refuse a change for its size alone and has
-  the next change written on top of the first; GitHub's "Helping others
-  review your changes" splits a change that grows large into pull
-  requests that each serve one purpose. The plan is the unit the queue
-  can cut at, and five is observed there: pull requests of up to five
-  commits merged in a median of six hours, those of six to eleven in
-  twenty-nine. Counted from the plans, never gh: an author asking for a
-  waiting plan counts the plans waiting with it, so plans written together
-  are spread before any is built; an executor counts what is built or in
-  hand, since a waiting plan may still be dropped or sent elsewhere, and
-  its answer is the one followed, so the two differ only toward a pull
-  request under five. A topic with no pull request yet counts the plans
-  built on its branch and opens at five (`topic-landing`); the stacked topics sit side by side on the full
-  one, and a plan that uses what one adds names that one. A fix lands
-  where the fault is, since a pull request is merged working. Known
-  limits: no size of a plan is read, so one plan may still be large, and
-  a stacked topic's merged plans still count, and a branch that already
-  holds more than five plans opens with them all.
-  plans/pull-requests-small-and-plain.md, plans/topic-first-pull-request-five.md.
+    holds only how many plans one takes.~~ (Javi, 27 November)
 - `pull-request-title` **A pull request's title is one sentence saying
   what the whole pull request does now, written again when a plan adds
   what it does not cover; a person's title stays.** (Javi, 27 November)
@@ -733,11 +729,7 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   behind one another; Claude Code's agent teams give each teammate
   its own files, hand out no blocked task and claim under a file
   lock; git refuses one branch in two worktrees. Where a plan lands is
-  its `Lands` topic, or, for a plan a full pull request sends on, the
-  topic stacked on it that `plans full` names while a plan is being built
-  there, or while one in hand that it will send there is, since a line
-  names the full one's topic until its executor rewrites it; judged as
-  that executor counts, its plan in hand. Waiting too often
+  its `Lands` topic. Waiting too often
   costs time, never a conflict. Between two plans in hand, each handed
   over or claimed and neither building by a live session, one goes first
   and only the other waits on it: never one that itself waits on a plan it
@@ -1095,9 +1087,26 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   no plan line until a brief carries its number.** (Javi, 4 November) An
   idea made an issue to discuss would otherwise read on GitHub as being
   planned, with a plan that does not exist. plans/ask-before-briefing.md.
-- `closes-its-issues` **A pull request names each issue it fixes with
-  `Closes #<n>.`, is linked to it, and its merge closes it, whatever
-  branch it merges into.** (Javi, 26 November) He could not tell which
+- `closes-its-issues` **A pull request is linked to each issue it
+  fixes, which its Development sidebar shows and its description does
+  not, and its merge closes them, whatever branch it merges into.**
+  (Javi, 28 November) A `Closes` line per issue stood at the top of
+  every description, six on one, and he asked why it is shown at all
+  when the pull request can be linked. GitHub lists a linked issue under
+  Development on both pages and closes it on a merge into the default
+  branch, as for a keyword. The executor reads the links made by hand
+  alone (`userLinkedOnly`), since one GitHub made from a keyword goes
+  with its line. GitHub's page gives ten issues linked by hand to a pull
+  request, so one whose link is refused keeps its `Closes` line. The
+  queue closes what is linked, what a line names and the issues of the
+  plans built in the pull request, which are the ones the executor
+  linked, so a merge does not hang on a link or a fallback line having
+  taken: a plan that does only part of an issue names it in its
+  `Related` line and carries no `Issue` line for it, so that issue stays
+  open. Known limit: an issue unlinked by hand from the sidebar is still
+  closed while a plan built in it carries it. A link to
+  another repository's issue closes nothing here, its number being
+  another issue's. Before, he could not tell which
   pull request fixed which issue: `For #<n>` is no keyword, so GitHub
   listed no pull request under an issue's Development. GitHub's keyword
   links and closes only on a pull request into the default branch
@@ -1139,8 +1148,12 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   text, so a `<!--` first on such a line hides what follows.
   plans/prs-close-their-issues.md, plans/merge-close-retried.md,
   plans/merge-closes-no-pull-request.md,
-  plans/closes-skips-comments-and-crlf.md and
-  plans/closes-reads-comments-as-github.md.
+  plans/closes-skips-comments-and-crlf.md,
+  plans/closes-reads-comments-as-github.md and
+  plans/fewer-pull-requests-no-closes-lines.md.
+  - ~~A pull request names each issue it fixes with `Closes #<n>.`, is
+    linked to it, and its merge closes it, whatever branch it merges
+    into.~~ (Javi, 26 November)
   - ~~The executor writes `For #<n>` on the pull request, with no
     closing keyword.~~ (Javi, 3 November)
 - `project-app` **The queue writes issues, comments, labels and pull

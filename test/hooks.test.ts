@@ -12118,6 +12118,13 @@ describe("github webhook", () => {
       const dir = mkdtempSync(join(tmpdir(), "notes-unclosed-"));
       writeFileSync(join(dir, "41.md"), noteFor(unclosed, { first: true }));
       expect(notesWaiting(dir)).toEqual(["plans/github/41.md"]);
+      // plans/lost-issue-link-at-merge.md, part 1: links not read, in the issue's place.
+      const unread = { ...event, kind: "unclosed", why: "HTTP 502: Bad Gateway" };
+      expect(noteFor(unread)).toMatch(
+        /^unclosed, 15 November 2026 \d\d:26, linked issues not read: https:\/\/github\.com\/o\/r\/pull\/41\n {4}HTTP 502: Bad Gateway\n\n$/,
+      );
+      writeFileSync(join(dir, "42.md"), noteFor(unread, { first: true }));
+      expect(notesWaiting(dir)).toContain("plans/github/42.md");
       rmSync(dir, { recursive: true, force: true });
     });
 
@@ -12486,6 +12493,9 @@ else say([]);
           );
           expect(asked).toContain("issue close 12 --reason completed --comment Merged as #41.");
           expect(asked).toContain("issue close 13 --reason completed --comment Merged as #41.");
+          // Read, the links leave no note (plans/lost-issue-link-at-merge.md).
+          const file = join(dir, "plans", "github", "41.md");
+          expect(existsSync(file) ? readFileSync(file, "utf8") : "").not.toContain("unclosed, ");
           // With issues off, nothing is read.
           const off = project(false);
           try {
@@ -12503,7 +12513,8 @@ else say([]);
       });
 
       // plans/fewer-pull-requests-no-closes-lines.md, part 3: with the links unread, the
-      // issues of the plans built in the pull request are closed, the read said first.
+      // issues of the plans built in the pull request are closed, the note said first
+      // (plans/lost-issue-link-at-merge.md).
       it("a merge whose links are not read closes what its plans name", { timeout: 30_000 }, () => {
         const dir = project(true);
         try {
@@ -12522,8 +12533,10 @@ else say([]);
             STUB_LINKED: "fail",
           });
           const lines = said.split("\n");
-          const unread = lines.indexOf(
-            "GitHub: #41's linked issues were not read (HTTP 502: Bad Gateway): closing what its plans name.",
+          const unread = lines.findIndex((line) =>
+            line.startsWith(
+              "GitHub: #41's linked issues were not read, noted: HTTP 502: Bad Gateway",
+            ),
           );
           expect(unread).toBeGreaterThanOrEqual(0);
           expect(lines.indexOf("GitHub: #12 closed, merged as #41.")).toBeGreaterThan(unread);
@@ -12584,6 +12597,46 @@ else say([]);
           }
         },
       );
+
+      // plans/lost-issue-link-at-merge.md, part 1: when a pull request with an issue linked
+      // by hand merges and the read of its links fails, the read is noted for the assistant.
+      it("a merge whose links are not read is noted for the assistant", { timeout: 60_000 }, () => {
+        const dir = project(true);
+        try {
+          appToken(dir);
+          const app = { WORKFLOW_APP_ID: "12", WORKFLOW_APP_KEY: "key", STUB_LINKED: "fail" };
+          const body = {
+            ...merged,
+            pull_request: { ...merged.pull_request, body: "## Changes\n" },
+          };
+          deliver(dir, "m1", body);
+          // Its own starts log, so the start is not held back by an earlier case's, and
+          // the start is said on this note's line, not the refresh note's (Codex C3).
+          const said = run(dir, ["github", "--inbox"], {
+            ...app,
+            WORKFLOW_STARTS_LOG: join(dir, "starts.log"),
+          });
+          expect(said).toMatch(
+            /^GitHub: #41's linked issues were not read, noted: HTTP 502: Bad Gateway; assistant started\. /m,
+          );
+          const file = join(dir, "plans", "github", "41.md");
+          expect(readFileSync(file, "utf8")).toMatch(
+            /^# GitHub #41: .*\n\nunclosed, 15 November 2026 \d\d:26, linked issues not read: https:\/\/github\.com\/o\/r\/pull\/41\n {4}HTTP 502: Bad Gateway\n\nmerged, /,
+          );
+          writeFileSync(join(stub, "rows.json"), "[]");
+          expect(run(dir, ["list"], { WORKFLOW_LIVE: "[]" })).toContain(
+            "From GitHub, not handled\n  plans/github/41.md",
+          );
+          // A redelivery of the merge, still failing: read once, noted once.
+          deliver(dir, "m2", body);
+          run(dir, ["github", "--inbox"], app);
+          expect(readFileSync(file, "utf8").match(/^unclosed, /gm)).toHaveLength(1);
+          const asked = readFileSync(join(dir, "asked.log"), "utf8");
+          expect(asked.match(/^pr view 41 --json url,closingIssuesReferences/gm)).toHaveLength(1);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
 
       // plans/merge-closes-no-pull-request.md: a Closes line naming a pull request closes nothing.
       it(

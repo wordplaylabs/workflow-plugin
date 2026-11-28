@@ -9514,8 +9514,8 @@ export function githubPrompt(path) {
  * order, a line printed per thing: `merged` closes each issue it is linked
  * to, its description closes or its plans carry (`linkedIssues`) as the app
  * with `Merged as #<m>.` and writes `Issue #<n> closed <date>.` in its plan's
- * "Built", and a close that fails is an
- * `unclosed` note for the assistant (decisions.md#closes-its-issues), tried
+ * "Built", and a close that fails, and links it could not read, are
+ * `unclosed` notes for the assistant (decisions.md#closes-its-issues), tried
  * once since a merge is an event once; every other kind but `issue` is appended to
  * `plans/github/<n>.md` and the assistant started on the oldest note not
  * handled, under the queue's bounds; `issue` is kept for `plans` to list.
@@ -9542,10 +9542,13 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
   };
   for (const event of events) {
     if (event.kind === "merged") {
-      // Each issue in turn, whatever the last one's close did; a failed one is
-      // noted first, so the line said is that note's.
+      // Links not read, then each issue in turn, whatever the last one's close
+      // did; a failure is noted first, so the line said is that note's.
       const linked = linkedIssues(event, plans, dry);
-      if (linked.said) said.push(linked.said);
+      if (linked.why) {
+        note({ ...event, kind: "unclosed", why: linked.why });
+        said.push(`GitHub: #${event.number}'s linked issues were not read, noted: ${linked.why}.`);
+      }
       for (const issue of linked.issues) {
         const done = await closeIssue(event, issue, plans, dry);
         if (done.why) note({ ...event, kind: "unclosed", issue, why: done.why });
@@ -9653,13 +9656,14 @@ export async function handleEvents(events, seen, { dry = false } = {}) {
  * of another repository linked to it is not the one of its number here (Codex
  * C1), then the issue of each built plan whose pull request it is, the ones its
  * executor linked, so one whose link and fallback line were both lost is closed
- * all the same (Codex C2). With the links unread, the line is said first. With
- * issues off nothing is, as `eventsFrom` gives no issues then; a dry run reads
- * no links and lists the rest (/code-review). `{ issues, said }`.
+ * all the same (Codex C2). With the links unread, `why` is the cause, which
+ * `handleEvents` notes for the assistant; "" when they were read, with issues
+ * off, where nothing is read as `eventsFrom` gives no issues then, and in a dry
+ * run, which reads no links and lists the rest (/code-review). `{ issues, why }`.
  */
 function linkedIssues(event, plans, dry) {
   const named = event.issues || [];
-  if (!hasIssues()) return { issues: named, said: "" };
+  if (!hasIssues()) return { issues: named, why: "" };
   const { out, why } = dry
     ? { out: "", why: "" }
     : ghAsk(
@@ -9681,13 +9685,7 @@ function linkedIssues(event, plans, dry) {
   const issues = [
     ...new Set([...named, ...linked, ...built].filter((n) => Number.isInteger(n) && n > 0)),
   ];
-  return {
-    issues,
-    said:
-      out === null
-        ? `GitHub: #${event.number}'s linked issues were not read (${why}): closing what its plans name.`
-        : "",
-  };
+  return { issues, why: out === null ? why || "no answer" : "" };
 }
 
 /**
@@ -9824,8 +9822,9 @@ export function notesWaiting(dir = join(root, "plans", "github")) {
 
 /**
  * A note's event line, as `noteFor` writes it: what `noteState` reads for
- * `notesWaiting` and `writtenAt`. `unclosed`, an issue a merge did not close,
- * waits as any event (decisions.md#closes-its-issues).
+ * `notesWaiting` and `writtenAt`. `unclosed`, an issue a merge did not close
+ * or the links it could not read, waits as any event
+ * (decisions.md#closes-its-issues).
  */
 const NOTE_EVENT = /^(?:plan|mention|comment|review|ready|failed|merged|unclosed), /;
 

@@ -1126,7 +1126,13 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   him of one still open: nothing tried it again, and its one line was
   printed where nobody reads. The queue itself tries once, since gh posts
   the `Merged as` comment before it closes and a blind second try would
-  post it twice. A number that is a pull request is left open, since gh
+  post it twice. Links the queue could not read at the merge are noted
+  the same way, `linked issues not read` in the issue's place, since an
+  issue linked by hand that no plan carries and no line names would
+  stay open with nobody told; the assistant reads them and closes what
+  is open. The queue reads once, as it closes once: a merge is an event
+  once, whichever read brings it, and the queue keeps no record of a
+  merge half done. A number that is a pull request is left open, since gh
   closes a pull request given its number and a typo or a person's own
   line would close somebody's. A `Closes` line in an HTML comment or a
   fence is not read, since the description does not show it, and lines
@@ -1149,8 +1155,9 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/prs-close-their-issues.md, plans/merge-close-retried.md,
   plans/merge-closes-no-pull-request.md,
   plans/closes-skips-comments-and-crlf.md,
-  plans/closes-reads-comments-as-github.md and
-  plans/fewer-pull-requests-no-closes-lines.md.
+  plans/closes-reads-comments-as-github.md,
+  plans/fewer-pull-requests-no-closes-lines.md and
+  plans/lost-issue-link-at-merge.md.
   - ~~A pull request names each issue it fixes with `Closes #<n>.`, is
     linked to it, and its merge closes it, whatever branch it merges
     into.~~ (Javi, 26 November)

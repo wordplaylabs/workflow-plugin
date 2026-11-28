@@ -663,10 +663,11 @@ export function noteFor(event, { first = false } = {}) {
   // A failed run's line names its workflow, run and commit; nobody wrote it.
   if (event.kind === "failed")
     return `${head}failed, ${noteTime(event.at)}, ${event.by} run ${event.run} on ${event.sha}: ${event.url}\n\n`;
-  // An issue a merge did not close: the issue, the pull request's address, and
-  // under it why (decisions.md#closes-its-issues).
+  // An issue a merge did not close, or `linked issues not read` in its place
+  // when the event has none: the pull request's address, and under it why
+  // (decisions.md#closes-its-issues).
   if (event.kind === "unclosed")
-    return `${head}unclosed, ${noteTime(event.at)}, issue #${event.issue}: ${event.url}\n    ${event.why}\n\n`;
+    return `${head}unclosed, ${noteTime(event.at)}, ${event.issue ? `issue #${event.issue}` : "linked issues not read"}: ${event.url}\n    ${event.why}\n\n`;
   // A merge's line names the base and who merged; under it, what it left behind
   // (decisions.md#merge-refreshes-the-rest).
   if (event.kind === "merged") {

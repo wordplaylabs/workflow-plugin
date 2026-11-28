@@ -820,7 +820,8 @@ app's webhook**: `plans webhook` listens on the container behind the
 host's reverse proxy, checks each delivery's signature, notes each event in
 `plans/github/`, starts the assistant on it, or sends the open one its
 line, and closes each issue a merged pull request is linked to,
-names in a `Closes` line or its plans carry; a close that fails is noted for the assistant, as a failed run
+names in a `Closes` line or its plans carry; a close that fails, and
+links it could not read, are noted for the assistant, as a failed run
 is; a comment from a person **People** names by login
 is an event on any issue or pull request, another writer's only where it
 mentions the app, on an issue a plan carries or on one of the queue's own

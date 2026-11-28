@@ -143,6 +143,16 @@ once:
   request's, or a cause that is his step (no app here, a permission the
   app lacks) is a failure you tell him: `#<i> was not closed when #<m>
   merged: <the cause>.`;
+- `unclosed` whose line says `linked issues not read` where the issue
+  would be: the queue could not read which issues #<m> is linked to
+  when it merged, the line under it the cause, so one linked by hand
+  that no plan carries and no `Closes` line names may still be open. A
+  hiccup too. Read them, `gh pr view <m> --json closingIssuesReferences
+  --jq '.closingIssuesReferences[].url'`, twice at most: each address
+  that is this repository's is an issue read and closed as above,
+  another repository's is left. Still unread, it is a failure you tell
+  him: `#<m>'s linked issues were not read when it merged, so one may
+  still be open: <the cause>.`;
 - `failed`, a run that failed on the queue's own pull request: `gh run
   view <id> --json attempt,headSha` and `gh pr view <n> --json
   state,headRefOid,headRefName,baseRefName`; a pull request closed or past

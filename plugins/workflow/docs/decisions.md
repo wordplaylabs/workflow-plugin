@@ -250,14 +250,20 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   which its pull request opens against, so its parent's commits open no
   empty pull request; once its parent has merged, or that head is gone
   from origin, it is compared with the branch, the base a refresh
-  retargets it to. Unfinished is said by the draft, as
-  GitHub's draft pull requests, GitLab's `merge_request.create` push
-  option and Gerrit's work in progress open the request at the push. A
+  retargets it to. The same base is the one a new topic's branch starts
+  from, the one a plan's start merges into a topic's branch that has no
+  pull request yet and the one its pull request opens against, its
+  `Builds on #<n>` line only while it is the parent's head, so a topic
+  has one base at every step and never takes a merged parent's stale
+  head. Unfinished is
+  said by the draft, as GitHub's draft pull requests, GitLab's
+  `merge_request.create` push option and Gerrit's work in progress open the request at the push. A
   plan with no `Lands` line is a topic of its own, so
   nothing lands unread by omission. plans/pull-requests-by-topic.md,
   plans/topic-opens-when-nothing-waits.md,
   plans/topic-first-pull-request-five.md,
-  plans/stacked-topic-recovery-compares-parent.md.
+  plans/stacked-topic-recovery-compares-parent.md,
+  plans/stacked-branch-merge-base-fallback.md.
   - ~~A topic's plans are built on one branch, pushed after each, and its
     pull request opens by itself once a plan of it is built and no other
     plan of it is queued.~~ (Javi, 26 November)

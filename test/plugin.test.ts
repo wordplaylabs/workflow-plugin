@@ -2323,7 +2323,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
       "**A branch with no pull request yet**",
       "**An open pull request's branch**",
     );
-    expect(waiting).toContain("then its base merged in");
+    expect(waiting).toContain("then `origin/<base>` merged in");
     expect(waiting).not.toContain("rebase");
     const topic = part("**A topic's plan**", "**A pull request already open**");
     expect(topic).toContain("`git push -u origin <name>`, retried as for a merge");
@@ -2495,7 +2495,8 @@ describe("a pull request stacked only on one it cannot be built without", () => 
       mode.indexOf("**No branch yet**"),
       mode.indexOf("**A branch with no pull request yet**"),
     );
-    expect(fresh).toContain("Stacked: `git switch -c <name> <that head branch>`");
+    expect(fresh).toContain("`git switch -c <name> origin/<base>`, the topic's base above");
+    expect(fresh).not.toContain("<that head branch>");
     expect(fresh).not.toContain("that plan's pull request is open: then");
     for (const agent of ["planner", "assistant"]) {
       const text = read(`agents/${agent}.md`).replace(/\s+/g, " ");
@@ -2557,9 +2558,12 @@ describe("a pull request per topic", () => {
     expect(mode).toContain(
       "- **A pull request takes five plans** (decisions.md#pull-request-full). Before a plan lands in an open pull request of the queue's own, by its `Lands` line, its topic or a draft it rests on, run `plans full <n> plans/<this plan>.md` and follow its line: it lands in it, or on the topic the line names, stacked on #<n>, its `Lands` line rewritten as the line gives it and that topic's branch taken as below. \"Built\" and the `Built:` message say `#<n> was full: built on topic <name>, stacked on it.`",
     );
+    // plans/stacked-branch-merge-base-fallback.md: the start's merge takes the topic's base,
+    // said once, so a stacked topic whose parent merged merges in the branch, not its head.
     expect(mode).toContain(
-      "then its base merged in, origin/<branch> or the head branch it is stacked on,",
+      "then `origin/<base>` merged in, the topic's base above: the head branch it is stacked on, or `origin/<branch>` once that pull request is MERGED or its head is gone from origin; the plan's push carrying the merge;",
     );
+    expect(mode).not.toContain("origin/<branch> or the head branch it is stacked on");
     // plans/topic-first-pull-request-five.md, part 4: a topic's pull request
     // opens at five plans, and the plans still queued go on.
     expect(mode).toContain(
@@ -2618,9 +2622,24 @@ describe("a pull request per topic", () => {
     // plans/stacked-topic-recovery-compares-parent.md: a stacked topic is compared with the
     // head it is stacked on, and with the branch once that head is gone or, Codex C2, its
     // pull request merged; Codex C3: then its description builds on nothing.
+    // plans/stacked-branch-merge-base-fallback.md: the rule is said once, and both steps take it.
     expect(mode).toContain(
-      "Its base is the head branch it is stacked on when its plans' `Lands` line says `stacked on #<n>` (`gh pr view <n> --json headRefName,state`), since its pull request opens against that head and the parent's commits are not its own; it is `<branch>` for any other topic, and for a stacked one whose parent merged or whose head is gone from origin, as \"A pull request is refreshed\" retargets a stack whose parent merged, its description then without the `Builds on #<n>` line.",
+      "**A topic's base** is the head branch it is stacked on when its plans' `Lands` line says `stacked on #<n>` (`gh pr view <n> --json headRefName,state`), since its pull request opens against that head and the parent's commits are not its own. It is `<branch>` for any other topic, and for a stacked one whose parent is MERGED or whose head is gone from origin (no `origin/<headRefName>` after `git fetch --prune`), as \"A pull request is refreshed\" retargets a stack whose parent merged. Every step below that names `<base>` takes it so: the new branch, the start's merge, the create's `--base` and the recovery.",
     );
+    // Codex C1, C2, C4 and /code-review 1, 2: the new branch, the create and the description
+    // take the same base, so a merged parent's head is never branched from or opened against.
+    expect(mode).toContain(
+      "`git switch -c <name> origin/<base>`, the topic's base above, that branch the pull request's `--base`; when it is the head branch it is stacked on, the first line of its body is `Builds on #<n>; merge that first.`",
+    );
+    expect(mode).toContain("gh pr create --draft --base <base> \\");
+    expect(mode).not.toContain("--base <branch, or the head branch it is stacked on>");
+    expect(mode).toContain(
+      "Builds on #<n>; merge that first. <- while its base is the head it is stacked on",
+    );
+    expect(mode).toContain(
+      "Its base is the topic's base (above); a stacked topic whose base is `<branch>` gets its description without the `Builds on #<n>` line.",
+    );
+    expect(mode.split("`gh pr view <n> --json headRefName,state`").length).toBe(2);
     expect(mode).toContain(
       '(`git merge-tree --write-tree origin/<base> origin/<name>` giving a first line other than `git rev-parse origin/<base>^{tree}`, so work a squash merge took is nothing), is opened as "Nothing else queued" says with `--head <name>` added and `--base <base>`,',
     );

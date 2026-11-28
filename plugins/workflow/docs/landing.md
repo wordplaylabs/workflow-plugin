@@ -39,6 +39,16 @@ name that is the branch, `main` or `fixes-` followed by anything is no
 topic's: build the plan as `topic <the plan's file name without .md>`,
 its `Lands` line rewritten to it, its "Built" saying why.
 
+**A topic's base** is the head branch it is stacked on when its plans'
+`Lands` line says `stacked on #<n>` (`gh pr view <n> --json
+headRefName,state`), since its pull request opens against that head and
+the parent's commits are not its own. It is `<branch>` for any other
+topic, and for a stacked one whose parent is MERGED or whose head is
+gone from origin (no `origin/<headRefName>` after `git fetch --prune`), as "A pull request is refreshed" retargets a stack
+whose parent merged. Every step below that names `<base>` takes it so:
+the new branch, the start's merge, the create's `--base` and the
+recovery.
+
 **A branch another worktree has checked out is that executor's** (git
 refuses the switch and names the worktree): at a plan's start and in a
 refresh it is left and named, `left: #<k>, executor-<n> is building on it`.
@@ -67,13 +77,15 @@ refresh it is left and named, `left: #<k>, executor-<n> is building on it`.
   below. "Built" and the `Built:` message say `#<n> was full: built on
   topic <name>, stacked on it.`
 - **No branch yet** (no `origin/<name>`, no local `<name>`): `git switch
-  -c <name> origin/<branch>`. Stacked: `git switch -c <name> <that head
-  branch>`, that branch the pull request's `--base` and the first line
-  of its body `Builds on #<n>; merge that first.`
+  -c <name> origin/<base>`, the topic's base above, that branch the pull
+  request's `--base`; when it is the head branch it is stacked on, the
+  first line of its body is `Builds on #<n>; merge that first.`
 - **A branch with no pull request yet** (`origin/<name>`, no open pull request): `git
-  switch -C <name> origin/<name>`, then its base merged in, origin/<branch>
-  or the head branch it is stacked on, the plan's
-  push carrying the merge; an unsettled conflict leaves it as it is.
+  switch -C <name> origin/<name>`, then `origin/<base>` merged in, the
+  topic's base above: the head branch it is stacked on, or
+  `origin/<branch>` once that pull request is MERGED or its head is gone
+  from origin; the plan's push carrying the merge; an unsettled conflict
+  leaves it as it is.
 - **An open pull request's branch**: `git switch -C <name>
   origin/<name>`, no merge. In both, a local branch with commits the
   remote lacks is taken instead, and pushed first.
@@ -98,14 +110,9 @@ number,url,state,headRefOid,isCrossRepository`, a pull request from a
 fork being another person's and not this topic's: one found open, or
 merged or closed at `origin/<name>`'s commit, is written into each of its
 plans' "Built" after the first line, `Pull request #<n> (<url>) found
-<open | merged | closed> <date>.`. Its base is the head branch it is
-stacked on when its plans' `Lands` line says `stacked on #<n>` (`gh pr
-view <n> --json headRefName,state`), since its pull request opens against
-that head and the parent's commits are not its own; it is `<branch>` for
-any other topic, and for a stacked one whose parent merged or whose head
-is gone from origin, as "A pull request is refreshed" retargets a stack
-whose parent merged, its description then without the `Builds on #<n>`
-line. One with none found, and `origin/<name>` adding something to its
+<open | merged | closed> <date>.`. Its base is the topic's base (above);
+a stacked topic whose base is `<branch>` gets its description without
+the `Builds on #<n>` line. One with none found, and `origin/<name>` adding something to its
 base (`git merge-tree --write-tree origin/<base> origin/<name>` giving a
 first line other than `git rev-parse origin/<base>^{tree}`, so work a
 squash merge took is nothing), is opened as "Nothing else queued" says
@@ -188,7 +195,7 @@ retried as for a merge. Then, by the topic:
     back as the reviewer will, then:
 
     ```
-    gh pr create --draft --base <branch, or the head branch it is stacked on> \
+    gh pr create --draft --base <base> \
       --title "<this plan's title, or the sentence for all of the topic's plans when it opens with several>" \
       --body-file plans/<this plan>/pull-request.md \
       --attach plans/<topic>/<file>.png#<the line> ...
@@ -322,7 +329,7 @@ catalogue, a commit's title as written; on one screen, pictures aside.
 <The owner's paragraphs, word for word, when the body has some>
 
 Closes #<n>.                                  <- one per issue its plans' Issue lines name
-Builds on #<n>; merge that first.             <- stacked plans only
+Builds on #<n>; merge that first.             <- while its base is the head it is stacked on
 
 Related:                                      <- when a plan has a Related line
 

@@ -369,23 +369,26 @@ describe("the plugin's queue in any project", () => {
     const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
     const text = (path: string) => readFileSync(join(plugin, path), "utf8").replace(/\s+/g, " ");
     const executor = text("docs/landing.md");
+    // plans/landing-doc-length.md: the description's rules are description.md's.
+    const description = text("docs/description.md");
+    const both = `${executor} ${description}`;
     expect(executor).toContain(
       "squashed back to the plan's tip, so a commit another person pushed stays theirs",
     );
     // plans/pull-requests-small-and-plain.md, part 4: one Related list, each named once.
-    expect(executor).toContain(
+    expect(description).toContain(
       "Related: <- when a plan has a Related line - #<n> - branch `<name>` ## Changes",
     );
-    expect(executor).toContain(
+    expect(description).toContain(
       "Then one `Related:` line, then a list of everything the topic's plans' `Related` lines name, each once, one item a line with nothing else on it, numbers in order and then branches by name, less an issue a plan of the topic names in its `Issue` line, a number a `Closes` or `Builds on` line names and the pull request itself; none left, no `Related:` line.",
     );
-    expect(executor).toContain(
+    expect(description).toContain(
       // plans/stacked-parent-recorded.md, part 2: the comment is not the owner's.
       "`Closes #`, `For #`, `Builds on #`, `<!-- workflow: stacked on #` and `Related:` lines and the list under a `Related:` line, is the owner's",
     );
     // plans/pull-request-description-standard-follow-up.md: the description lists it under Also.
-    expect(executor).toContain("- <The commit's title.> (<author>)");
-    expect(executor).not.toContain("credited by GitHub's commits list");
+    expect(description).toContain("- <The commit's title.> (<author>)");
+    expect(both).not.toContain("credited by GitHub's commits list");
     expect(executor).toContain("its link and what it was marked related to");
     for (const agent of ["planner", "assistant"])
       expect(text(`agents/${agent}.md`), agent).toContain("`Related: #31.`");
@@ -393,48 +396,46 @@ describe("the plugin's queue in any project", () => {
     expect(doc).toContain("**A decision has a name; a part has none.**");
     expect(doc).toContain("**A change one person started is anyone's to go on with.**");
     // plans/also-lists-the-right-commits.md: Also holds other people's commits and no others.
-    expect(executor).not.toContain("titled `Merge origin/<…> into <…>`");
+    expect(both).not.toContain("titled `Merge origin/<…> into <…>`");
     // plans/also-knows-whose-commit.md: the plans account for the queue's commits, by hash.
-    expect(executor).toContain("that this checkout's plans do not account for");
-    expect(executor).toContain("`git log --first-parent <tip>..HEAD --format=%H`");
-    expect(executor).toContain("a merge this plan made before its tip");
-    expect(executor).toContain("Nothing is left out by author or by title.");
+    expect(description).toContain("that this checkout's plans do not account for");
+    expect(description).toContain("`git log --first-parent <tip>..HEAD --format=%H`");
+    expect(description).toContain("a merge this plan made before its tip");
+    expect(description).toContain("Nothing is left out by author or by title.");
     expect(executor).toContain("`Merged <base> <date>, commit <sha>: <files or none>`");
     expect(executor).toContain("`Refreshed <date>: merged <base>, commit <sha>,");
-    expect(executor).not.toContain("^<its headRefOid>");
+    expect(both).not.toContain("^<its headRefOid>");
     // The description's accounting reads the merged pull request's commits from gh; only
     // "A merged parent's work comes in once" fetches its head, to merge it.
-    expect(executor.slice(executor.indexOf("**The description**"))).not.toContain(
-      "git fetch origin pull/<n>/head",
-    );
-    expect(executor).not.toContain("`git config user.name`");
+    expect(description).not.toContain("git fetch origin pull/<n>/head");
+    expect(both).not.toContain("`git config user.name`");
     expect(doc).toContain("**The plans account for the queue's commits.**");
     // plans/stacked-parent-recorded.md, part 4: the catalogue says why the comment.
     expect(text("docs/decisions.md")).toContain(
       "once its base is the branch, the comment `<!-- workflow: stacked on #<n> -->` in that line's place",
     );
     // plans/also-knows-whose-commit-follow-up.md: every merged base down the stack, read in pages.
-    expect(executor).toContain("each merged pull request down the stack");
+    expect(description).toContain("each merged pull request down the stack");
     // plans/also-list-reads-lands-first.md: the Lands lines first, then the body's line, which
     // since plans/stacked-parent-recorded.md is the comment once the base is the branch.
     // Scoped to the description's Other changes, where the accounting is written (Codex C3).
-    const otherChanges = executor.slice(
-      executor.indexOf("- **Other changes**"),
-      executor.indexOf("- **Left out**"),
+    const otherChanges = description.slice(
+      description.indexOf("- **Other changes**"),
+      description.indexOf("- **Left out**"),
     );
     expect(otherChanges).toContain(
       "the commits of each merged pull request down the stack: the topic's parent is the `stacked on #<n>` \"A topic's base\" reads from the topic's plans' `Lands` lines, a parent's own parent the `stacked on #<n>` of that pull request's plans' `Lands` lines in this checkout, and either, with no such line, the line of the body above it, `Builds on #<n>` or, once the base is `<branch>`, `<!-- workflow: stacked on #<n> -->` (`gh api --paginate repos/{owner}/{repo}/pulls/<n>/commits --jq '.[].sha'`)",
     );
-    expect(executor).toContain(
+    expect(description).toContain(
       "`gh api --paginate repos/{owner}/{repo}/pulls/<n>/commits --jq '.[].sha'`",
     );
-    expect(executor).not.toContain("--json commits");
+    expect(both).not.toContain("--json commits");
     // plans/short-pull-request-descriptions.md: listed among the changes, no Also heading.
     expect(doc).toContain("with their author, among the changes");
     expect(doc).not.toContain("under `Also`");
     expect(doc).not.toContain("another person's commits with their author");
     // plans/also-docs-match-the-rule.md: the docs and the opening sentence name the rule as built.
-    expect(executor).toContain("a commit's title as written");
+    expect(description).toContain("a commit's title as written");
     // plans/docs-as-a-prompt.md: the reason is the catalogue's entry, not the handbook's.
     expect(text("docs/decisions.md")).toContain(
       "the commits no plan here accounts for stay, as bullets with their author",
@@ -445,7 +446,11 @@ describe("the plugin's queue in any project", () => {
   // plans/try-it-is-one-line.md.
   it("keeps a pull request's To try it to the one line of how to try it", () => {
     const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
-    const executor = readFileSync(join(plugin, "docs/landing.md"), "utf8").replace(/\s+/g, " ");
+    // plans/landing-doc-length.md: the templates are description.md's.
+    const executor = readFileSync(join(plugin, "docs/description.md"), "utf8").replace(/\s+/g, " ");
+    const landing = readFileSync(join(plugin, "docs/landing.md"), "utf8").replace(/\s+/g, " ");
+    expect(landing).not.toContain("(plans/ is not tracked)");
+    expect(landing).not.toContain("Checks: <the checks workflow's name>");
     expect(executor).not.toContain("(plans/ is not tracked)");
     expect(executor).not.toContain("Checks: <the checks workflow's name>");
     // The owner's own sections are the only thing between the one line and the attribution.
@@ -459,8 +464,9 @@ describe("the plugin's queue in any project", () => {
   // plans/short-pull-request-descriptions.md, replacing plans/pull-request-description-standard.md.
   it("a pull request's description is a short list of what changed", () => {
     const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
-    const executor = readFileSync(join(plugin, "docs/landing.md"), "utf8");
-    const mode = executor.slice(executor.indexOf("# Landing by pull request"));
+    // plans/landing-doc-length.md: the description's rules are description.md's, read whole.
+    const executor = readFileSync(join(plugin, "docs/description.md"), "utf8");
+    const mode = executor.slice(executor.indexOf("# A pull request's description"));
     const [topic, fixes] = [...mode.matchAll(/^```\n([\s\S]*?)^```$/gm)]
       .map((m) => m[1])
       .filter((block) => block.includes("## To try it"));
@@ -516,8 +522,9 @@ describe("the plugin's queue in any project", () => {
   // housekeeping in neither.
   it("a pull request's description shows five main changes and folds the rest", () => {
     const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
-    const executor = readFileSync(join(plugin, "docs/landing.md"), "utf8");
-    const mode = executor.slice(executor.indexOf("# Landing by pull request"));
+    // plans/landing-doc-length.md: the description's rules are description.md's, read whole.
+    const executor = readFileSync(join(plugin, "docs/description.md"), "utf8");
+    const mode = executor.slice(executor.indexOf("# A pull request's description"));
     const blocks = [...mode.matchAll(/^```\n([\s\S]*?)^```$/gm)].map((m) => m[1]);
     const topic = blocks.find((block) => block.includes("## Changes")) ?? "";
     const fixes = blocks.find((block) => block.includes("## Fixes")) ?? "";
@@ -566,7 +573,10 @@ describe("the plugin's queue in any project", () => {
   // plans/no-session-link-in-pull-requests.md.
   it("leaves the link to a Claude session out of a pull request's description", () => {
     const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
-    const executor = readFileSync(join(plugin, "docs/landing.md"), "utf8").replace(/\s+/g, " ");
+    // plans/landing-doc-length.md: the templates are description.md's.
+    const executor = readFileSync(join(plugin, "docs/description.md"), "utf8").replace(/\s+/g, " ");
+    const landing = readFileSync(join(plugin, "docs/landing.md"), "utf8").replace(/\s+/g, " ");
+    expect(landing).not.toContain("<the attribution lines the session gives for a pull request>");
     const ending =
       "<the attribution lines the session gives for a pull request, with any link to a Claude session left out>";
     expect(executor.split(ending)).toHaveLength(3);
@@ -2363,10 +2373,13 @@ describe("a pull request stacked only on one it cannot be built without", () => 
   it("has the executor merge a branch up to date and never force-push", () => {
     const text = read("docs/landing.md");
     const flat = read("agents/executor.md").replace(/\s+/g, " ");
-    expect(text).not.toContain("--force-with-lease");
-    expect(text).not.toContain("git rebase --onto");
+    // plans/landing-doc-length.md, Codex C1: the description's file is read at a push too.
+    for (const doc of [text, read("docs/description.md")]) {
+      expect(doc).not.toContain("--force-with-lease");
+      expect(doc).not.toContain("git rebase --onto");
+    }
     expect(flat).toContain("nothing is force-pushed, ever");
-    const mode = /# Landing by pull request[\s\S]*?\n\*\*The description\*\*/
+    const mode = /# Landing by pull request[\s\S]*?\n\*\*The description and the title\*\*/
       .exec(text)![0]
       .replace(/\s+/g, " ");
     const part = (from: string, to: string) => {
@@ -2780,19 +2793,21 @@ describe("a pull request stacked only on one it cannot be built without", () => 
   it("has the executor link each issue with no Closes line, and the assistant hand on with nothing owed", () => {
     const flat = (path: string) => read(path).replace(/\s+/g, " ");
     const landing = flat("docs/landing.md");
-    expect(read("docs/landing.md")).toMatch(
+    // plans/landing-doc-length.md: the description's rules are description.md's.
+    const description = flat("docs/description.md");
+    expect(read("docs/description.md")).toMatch(
       /\nCloses #<n>\. +<- only for an issue that could not be linked\n/,
     );
-    expect(landing).toContain(
+    expect(description).toContain(
       '- **Closes** and **Related**: no line for an issue that is linked. Each issue a plan of the topic names in its `Issue` line is linked to the pull request and shown in its Development sidebar ("Each issue it closes is linked"); `Closes #<n>.` is written only for one whose link was refused, one line each (decisions.md#closes-its-issues).',
     );
-    expect(landing).toContain(
+    expect(description).toContain(
       "less an issue a plan of the topic names in its `Issue` line, a number a `Closes` or `Builds on` line names and the pull request itself;",
     );
-    expect(landing).toContain(
+    expect(description).toContain(
       "so a pull request written again loses an older `For #<n>.` line and the queue's own `Closes #<n>.` lines, each issue linked instead.",
     );
-    expect(landing).toContain(
+    expect(description).toContain(
       "less its `Closes #`, `For #`, `Builds on #`, `<!-- workflow: stacked on #` and `Related:` lines and the list under a `Related:` line, is the owner's and opens the new body unchanged; a `Closes #` line for an issue no plan of the topic names is the owner's too, and is kept.",
     );
     expect(landing).toContain(
@@ -2810,7 +2825,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     expect(landing).toContain(
       "One that is refused is not tried again in this landing: the description is written once more as a join writes it, with `Closes #<i>.` for that issue, \"Built\" and the `Built:` message say `Not linked: #<i>, <gh's line>.`, and the queue's close at the merge reads the line.",
     );
-    expect(landing).not.toContain("<- one per issue its plans' Issue lines name");
+    expect(description).not.toContain("<- one per issue its plans' Issue lines name");
     expect(flat("docs/github.md")).toContain(
       "- **In part**: a brief or plan that does only part of an issue names it `Related: #<n>.`; the one that finishes it carries `Issue: #<n>.`, since the pull request closes what its plans' `Issue` lines name.",
     );
@@ -2845,6 +2860,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     // `For #<n>.` is no longer what the executor writes: only an older line read or taken out.
     for (const path of [
       "docs/landing.md",
+      "docs/description.md",
       "docs/workflow.md",
       "docs/github.md",
       "agents/executor.md",
@@ -2912,6 +2928,9 @@ describe("a pull request per topic", () => {
   it("has the executor land a fix in the day's pull request or straight, and a topic when nothing more of it is queued", () => {
     const text = read("docs/landing.md");
     const mode = /# Landing by pull request[\s\S]*/.exec(text)![0];
+    // plans/landing-doc-length.md: the description's rules are description.md's.
+    const description = read("docs/description.md");
+    const both = `${mode} ${description}`;
     // A fix: the day's branch and title.
     expect(mode).toContain("**A fix**, `Lands: fix.`");
     expect(mode).toContain("`fixes-<yyyy-mm-dd>`");
@@ -2939,7 +2958,7 @@ describe("a pull request per topic", () => {
       '**More is queued** (`… still queued for topic <name>: its pull request waits for …`): nothing opens. "Built" opens with `On topic <name>, commit <sha>, branch pushed; its pull request waits for <the paths the line names>.`',
     );
     expect(mode).toContain(
-      "**Nothing else queued** (`Nothing else is queued for topic <name>: …`): the description (below), written from every plan of the topic so far, oldest first, to `plans/<this plan>/pull-request.md`",
+      "**Nothing else queued** (`Nothing else is queued for topic <name>: …`): the description (description.md), written from every plan of the topic so far, oldest first, to `plans/<this plan>/pull-request.md`",
     );
     // plans/pull-requests-small-and-plain.md, part 4: a title for the whole
     // pull request, written again on a join that it no longer covers;
@@ -2947,7 +2966,7 @@ describe("a pull request per topic", () => {
     expect(mode).toContain(
       "--title \"<this plan's title, or the sentence for all of the topic's plans when it opens with several>\"",
     );
-    expect(mode).toContain(
+    expect(description).toContain(
       "- **The title** is one sentence saying what the whole pull request does now (decisions.md#pull-request-title), in the words of the leads under Changes, with no number and no plan's name. A plan alone in it gives its own title. On a join or a rewrite, read the one it has (`gh pr view <n> --json title`). One that is not the queue's last, the `Title:` line of the topic's latest \"Built\" that has one, else its first plan's title, is a person's: it stays, and \"Built\" says `Title kept: a person's.` The queue's own stays while it covers every main change, and is written again when this plan adds one it does not cover: the first plan's thing, then what was added, or the area they share when that is more than three things. \"Built\" gets `Title: <the sentence>` after its first line whenever the executor sets one.",
     );
     // plans/stacked-branch-merge-base-fallback.md: the start's merge takes the topic's base,
@@ -2955,7 +2974,7 @@ describe("a pull request per topic", () => {
     expect(mode).toContain(
       "then `origin/<base>` merged in, the topic's base above: the head branch it is stacked on, or `origin/<branch>` once that pull request is MERGED, is a fork's or its head is gone from origin; the plan's push carrying the merge,",
     );
-    expect(mode).not.toContain("origin/<branch> or the head branch it is stacked on");
+    expect(both).not.toContain("origin/<branch> or the head branch it is stacked on");
     // plans/fewer-pull-requests-no-closes-lines.md, part 1: no limit, so no
     // pull request opens for a count and no plan is sent on from one.
     for (const gone of [
@@ -2965,7 +2984,7 @@ describe("a pull request per topic", () => {
       "was full",
       "plans full",
     ])
-      expect(mode).not.toContain(gone);
+      expect(both).not.toContain(gone);
     expect(mode).toContain(
       'link and what it was marked related to, for a topic stacked on a pull request closed without merging, that line of its "Built", or with that branch gone `Topic <name> has no pull request: #<n>, which it is stacked on, was closed without merging and its branch is gone, so its pull request would bring that work back. To open it with #<n>\'s work in it: <address>/compare/<branch>...<name>?expand=1` (`<address>` from `gh repo view --json url --jq .url`), once a topic, by the plan whose landing or recovery first writes that line, and, for a draft',
     );
@@ -3048,16 +3067,16 @@ describe("a pull request per topic", () => {
       "`git switch -c <name> origin/<base>`, the topic's base above, that branch the pull request's `--base`; when it is the head branch it is stacked on, the first line of its body is `Builds on #<n>; merge that first.`",
     );
     expect(mode).toContain("gh pr create --draft --base <base> \\");
-    expect(mode).not.toContain("--base <branch, or the head branch it is stacked on>");
-    expect(mode).toContain(
+    expect(both).not.toContain("--base <branch, or the head branch it is stacked on>");
+    expect(description).toContain(
       "Builds on #<n>; merge that first. <- while its base is the head it is stacked on",
     );
     // plans/stacked-parent-recorded.md, part 1: the body keeps the parent's number, in a
     // comment GitHub shows nobody, once its base is the branch.
-    expect(mode).toContain(
+    expect(description).toContain(
       "<!-- workflow: stacked on #<n> --> <- in its place once its base is <branch>",
     );
-    expect(mode).toContain(
+    expect(description).toContain(
       "- **Builds on**: a topic stacked on #<n>, not a fork's, says so in its body on every write, `<n>` as \"A topic's base\" reads it from the topic's plans' `Lands` lines, else as the old body's own line gives it: `Builds on #<n>; merge that first.` while its base is that head, and once its base is `<branch>` the comment `<!-- workflow: stacked on #<n> -->` in its place, which GitHub shows nobody and no rewrite drops",
     );
     expect(mode).toContain(
@@ -3074,22 +3093,22 @@ describe("a pull request per topic", () => {
     expect(mode.split("`gh pr view <n> --json headRefName,state,isCrossRepository`").length).toBe(
       2,
     );
-    expect(mode).not.toContain("--json headRefName,state`");
+    expect(both).not.toContain("--json headRefName,state`");
     expect(mode).toContain(
       '(`git merge-tree --write-tree origin/<base> origin/<name>` giving a first line other than `git rev-parse origin/<base>^{tree}`, so work a squash merge took is nothing), is opened as "Nothing else queued" says with `--head <name>` added and `--base <base>`,',
     );
-    expect(mode).not.toContain("adding something to the branch");
+    expect(both).not.toContain("adding something to the branch");
     expect(mode).toContain(
       "then each topic whose pull request waits, with the plans it waits for, and each one opened or found at this plan's start",
     );
-    expect(mode).not.toContain("marks the topic ready");
-    expect(mode).not.toContain("**Waiting, no pull request**");
+    expect(both).not.toContain("marks the topic ready");
+    expect(both).not.toContain("**Waiting, no pull request**");
     expect(mode).toContain("written from every plan of the topic so far, oldest first");
     // plans/ready-stays-ready.md: a pull request the owner marked ready stays ready when joined.
     expect(mode).toContain("a plan that joins one he has marked ready pushes to it as it is");
-    expect(mode).not.toContain("ready --undo");
-    expect(mode).not.toContain("a draft again");
-    expect(mode).not.toContain("joined, commit <sha>; draft.");
+    expect(both).not.toContain("ready --undo");
+    expect(both).not.toContain("a draft again");
+    expect(both).not.toContain("joined, commit <sha>; draft.");
     expect(mode).toContain("for one he marked ready, that it stays ready");
     expect(read("docs/workflow.md")).not.toContain("a draft again");
     expect(read("skills/setup/SKILL.md")).not.toContain("a draft again");
@@ -3100,16 +3119,16 @@ describe("a pull request per topic", () => {
       "~~A plan that joins a pull request its owner marked ready runs `gh pr ready --undo` before its push.~~ (Javi, 30 October)",
     );
     // plans/joined-pull-request-no-comment.md: a plan joining an open pull request posts nothing.
-    expect(mode).not.toContain("one comment");
+    expect(both).not.toContain("one comment");
     // plans/owner-reviews-before-anyone-else.md: a topic's pull request opens as a draft.
     expect(mode).toContain("gh pr create --draft --base");
     expect(mode).toContain("no `gh pr merge` and no `gh pr ready`;");
     // plans/draft-says-nothing-about-itself.md: GitHub already shows a draft as one.
-    expect(mode).not.toContain("Opened as a draft");
+    expect(both).not.toContain("Opened as a draft");
     expect(read("docs/workflow.md")).not.toContain("The draft's first line says so");
     // plans/joined-pull-request-no-comment.md: the screenshots go in by `gh pr edit --attach`.
-    expect(mode).not.toContain("gh pr comment");
-    expect(mode).not.toContain("in the comment below");
+    expect(both).not.toContain("gh pr comment");
+    expect(both).not.toContain("in the comment below");
     expect(mode).toContain(
       'gh pr edit <n> --title "<the sentence>" --body-file plans/<this plan>/pull-request.md \\ --attach plans/<topic>/<file>.png#<the line>',
     );
@@ -3119,10 +3138,10 @@ describe("a pull request per topic", () => {
     // The Codex review of it: a partly refused edit is set again from the body gh left.
     expect(mode).toContain("is read back (`gh pr view <n> --json body`) and set again");
     // Javi, 30 October: the comment says nothing of the draft either.
-    expect(mode).not.toContain("a draft again until");
-    expect(mode).not.toContain("its comment says so");
+    expect(both).not.toContain("a draft again until");
+    expect(both).not.toContain("its comment says so");
     // The shorter description: plans/pull-request-description-standard.md.
-    expect(mode).not.toContain("None: no rule changed");
+    expect(both).not.toContain("None: no rule changed");
   });
 
   it("has the docs, the assistant and the planner say where a plan lands", () => {
@@ -4664,6 +4683,73 @@ describe("one assistant chat is open, compacted where it is", () => {
     // plans/assistant-chat-counts-live-rows.md.
     expect(decisions).toContain(
       "A stopped row beside the live chat made its name shared, so a note waited; only rows with a process share it.",
+    );
+  });
+});
+
+// plans/landing-doc-length.md: a step file is read whole, so it is held to a plan's length.
+describe("a file an agent reads whole at a step is thirty thousand characters at most", () => {
+  const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
+  const read = (path: string) => readFileSync(join(plugin, path), "utf8");
+  const flat = (path: string) => read(path).replace(/\s+/g, " ");
+
+  it("holds landing.md, description.md and github.md to thirty thousand characters", () => {
+    for (const name of ["landing.md", "description.md", "github.md"]) {
+      // Counted as `wc -m` counts, by character and not by UTF-16 unit.
+      const length = [...read(`docs/${name}`)].length;
+      expect(
+        length,
+        `docs/${name} is ${length} characters, over the 30,000 of decisions.md#step-file-length: split it by the step each part is read at, or trim it; a bigger cap is the owner's call`,
+      ).toBeLessThanOrEqual(30000);
+    }
+  });
+
+  it("every file in docs/ is the handbook, the catalogue or a step file", () => {
+    expect(readdirSync(join(plugin, "docs")).sort()).toEqual([
+      "decisions.md",
+      "description.md",
+      "github.md",
+      "landing.md",
+      "workflow.md",
+    ]);
+  });
+
+  it("the description is found from landing.md and from the executor's file", () => {
+    const landing = flat("docs/landing.md");
+    expect(landing).toContain(
+      "**The description and the title** of a pull request, a topic's or the day's fixes', are written as `description.md` says, the file beside this one: read it whole, when it is not already in front of you, before one is written or written again (decisions.md#step-file-length).",
+    );
+    expect(landing).toContain(
+      '`--title` when the title is written again (description.md, "The title"), one `--attach` per local screenshot the body names.',
+    );
+    expect(landing).toContain(
+      "**Nothing else queued** (`Nothing else is queued for topic <name>: …`): the description (description.md), written from every plan of the topic so far",
+    );
+    expect(landing).not.toContain("(below)");
+    expect(flat("agents/executor.md")).toContain(
+      'With `land: pull-request`, "push" means the landing `${CLAUDE_PLUGIN_ROOT}/docs/landing.md` says, and a pull request\'s description and title are written as `${CLAUDE_PLUGIN_ROOT}/docs/description.md` says, read whole before one is written.',
+    );
+    const description = read("docs/description.md");
+    expect(description.replace(/\s+/g, " ")).toMatch(
+      /^# A pull request's description The executor reads this whole before it writes a pull request's description or title, or writes one again, where `land: pull-request` \(decisions\.md#step-file-length\)\. `landing\.md`, beside it, has the commands that send them, and a rule named here in quotation marks that is no lead-in of this file \("A topic's base", "Each issue it closes is linked"\) is that file's\. \*\*The description\*\* is a short list of what changed/,
+    );
+    const raw = read("docs/landing.md");
+    for (const moved of ["## Changes", "- **Changes**:", "**The day's fixes pull request**"]) {
+      expect(raw, moved).not.toContain(moved);
+      expect(description.split(moved), moved).toHaveLength(2);
+    }
+  });
+
+  it("the handbook and the catalogue hold the rule", () => {
+    const handbook = flat("docs/workflow.md");
+    expect(handbook).toContain(
+      "a procedure the agent runs in one phase of one mode is a file the agent reads at that step, named in the agent file, thirty thousand characters at most, which a test holds, and split by step once it is over (decisions.md#step-file-length);",
+    );
+    expect(handbook).toContain(
+      "`docs/landing.md` holds the executor's steps, and `docs/description.md` how a pull request's description and title are written.",
+    );
+    expect(flat("docs/decisions.md")).toContain(
+      "- `step-file-length` **A file an agent reads whole at a step is thirty thousand characters at most, held by a test; one over it is split by the step each part is read at, and a bigger cap is the owner's call.** (Javi, 28 November)",
     );
   });
 });

@@ -22,6 +22,7 @@ export const FILES = [
   "agents/reviewer.md",
   "bin/plans",
   "docs/decisions.md",
+  "docs/description.md",
   "docs/github.md",
   "docs/landing.md",
   "docs/workflow.md",

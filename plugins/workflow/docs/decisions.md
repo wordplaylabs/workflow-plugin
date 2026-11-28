@@ -47,6 +47,22 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   to 57 thousand characters, each rule in two or three of them. The
   start prompt said again what the agent file says, and was partly
   wrong. plans/simpler-agents.md, plans/simpler-agent-files.md.
+- `step-file-length` **A file an agent reads whole at a step is thirty
+  thousand characters at most, held by a test; one over it is split by
+  the step each part is read at, and a bigger cap is the
+  owner's call.** (Javi, 28 November) The cap is there so an agent
+  reads the file whole and follows it: Claude Code's docs say longer
+  instruction files reduce adherence, and Anthropic's skill authoring
+  guide splits a file that nears its limit into files read only when
+  the task needs them, each named from the file the agent starts from,
+  since one reached through another may be read in part. landing.md
+  went from 16 to 35 thousand characters in three weeks under caps
+  written in plans and checked by nothing, and a trim of repeats took
+  out 595, the rest being sentences the tests pin; so the description
+  moved to description.md, read when one is written. The number is a
+  plan's, the other file an agent reads whole. The handbook and this
+  file are looked up by a rule's name or id and have none.
+  plans/landing-doc-length.md.
 - `report-is-short` **An agent's report is short: what changed, what
   waits on the owner, the evidence by command and count, nothing the
   plan says.** (Javi, 6 November) He reads the final messages on his

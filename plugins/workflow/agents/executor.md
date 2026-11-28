@@ -247,7 +247,10 @@ finding, or Codex's, is a claim to check against the code.
    After the push, `git checkout --detach origin/<branch>`.
 
 With `land: pull-request`, "push" means the landing
-`${CLAUDE_PLUGIN_ROOT}/docs/landing.md` says.
+`${CLAUDE_PLUGIN_ROOT}/docs/landing.md` says, and a pull request's
+description and title are written as
+`${CLAUDE_PLUGIN_ROOT}/docs/description.md` says, read whole before one
+is written.
 
 ## After
 

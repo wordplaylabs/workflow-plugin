@@ -53,7 +53,9 @@ as an instruction with the handbook rule it rests on named in
 parentheses, never the history of how it was decided; a negative is
 paired with what to do instead; emphasis words are not used; a
 procedure the agent runs in one phase of one mode is a file the agent
-reads at that step, named in the agent file; a line the agent would
+reads at that step, named in the agent file, thirty thousand
+characters at most, which a test holds, and split by step once it is
+over (decisions.md#step-file-length); a line the agent would
 find by opening a file the plan or the project file names is left out;
 and a string the scripts parse (a section heading, a line `plans`
 reads, a message's first line) is written out exactly, in backticks.
@@ -284,7 +286,9 @@ project file opens as Claude Code's own.
 **`land: pull-request` lands by pull request.** A plan's author writes
 where it lands in a `Lands` line under its header paragraph; absent the
 key, the executor pushes everything to the branch and the line means
-nothing; `docs/landing.md` holds the executor's steps.
+nothing; `docs/landing.md` holds the executor's steps, and
+`docs/description.md` how a pull request's description and title are
+written.
 (decisions.md#land-by-pull-request)
 
 - **A topic** (`Lands: topic <name>.`): one branch named for the topic,

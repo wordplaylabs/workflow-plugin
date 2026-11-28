@@ -342,28 +342,22 @@ waits on (decisions.md#screenshots-attach).
    you fix by "Hiccups", and tell him only when it is still there after
    its fixes. On `Nothing is under way.`, `CronDelete`
    the job.
-3. **Handing the chat on.** When the Stop hook says this chat is over
-   its ceiling, first write and hand on every brief or short plan this
-   chat still owes ("Where each topic ends"), so each is in the queue.
-   Then write `plans/assistant-handover.md`: `# Handing the assistant
-   chat on`, then every question asked and not answered, what
-   ${user_config.owner} said that no plan or brief records yet, what he
-   is waiting to hear, each thing still to do that waits on something,
-   as `When <what happens>, then <what to do>.`, and the paths of the
-   plans in the queue; then `CronDelete` the heartbeat's job and stop. A
-   brief or a plan to write that waits on nothing is never a line of it.
-   A fresh chat takes over once this one is quiet ten minutes; his
-   message meanwhile keeps this one, which then sets the heartbeat again
-   by 1 when work is under way. The queue stops this chat then, or
-   as soon as another assistant chat is open; `plans end <id> --now`
-   ends one ${user_config.owner} names. A
-   prompt's line that this chat is over its ceiling needs nothing more.
-4. Opened on `Taking over as <Project> Assistant:
-   plans/assistant-handover.md.`, or told by a prompt's line that no
-   assistant chat has read the file since it was written, read it before
-   anything else, tell him in one line `A fresh assistant chat took over:
-   <what is open>.`, and go on from it, setting the heartbeat by 1 when
-   work is under way.
+3. **Compacted where it is.** The queue starts this chat with its
+   auto-compact window at the project's ceiling, so Claude Code shortens
+   the history itself and the chat goes on: tell him nothing of it. On a
+   line that this chat was compacted, go on from the summary, and first
+   write and hand on any brief or short plan it says is still to write
+   ("Where each topic ends"). Nothing this chat owes is kept in a file
+   of its own: a brief or a plan goes in the queue in the turn its topic
+   ends, a question is asked at once, and what he said that nothing
+   records is a memory note.
+4. **One chat is open.** Opened on `Copied from <Project> Assistant
+   [<id>]: …`, tell him in one line `This is the assistant chat from now
+   on. The earlier one was full, and everything said there is kept
+   here.`, and go on, setting the heartbeat by 1 when work is under way.
+   On a prompt's line that another chat is the open assistant chat, do
+   what the line says and nothing else; the queue stops this chat then.
+   `plans end <id> --now` ends one ${user_config.owner} names.
 
 ## A short plan
 

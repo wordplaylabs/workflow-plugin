@@ -29,21 +29,22 @@ start of one alerts his phone: when he asks what one is doing, the
 assistant reads its conversation and tells him. What he writes in one,
 from a terminal on its machine, is passed to the assistant. With none open, whoever has something for it opens it
 (`plans start --agent assistant`). While work is under way the chat is
-kept warm by a scheduled prompt twice an hour, and one over its ceiling
-(`reuse.assistant`, 150k) writes a hand-over file and is replaced, once
-quiet ten minutes, by a fresh chat of the same name: what it still owes
-is written into the queue first, and the file is said once to whichever
-assistant chat speaks next, since a scheduled `/compact` reaches a
-background chat as a plain message. One assistant chat is live: the
-fresh one is started first and the handed-on one stopped once the fresh
-one is listed, or, when another is open already, as soon as it is quiet,
-the queue trying again every ten minutes until one is open and the old
-one stopped; a chat with no process is not open, so one is opened beside
-its row; none is opened while `claude agents` cannot be read; what the
-queue sends goes to the chat started last that is not handed on; and
-`plans end <id> --now` ends one he names. A handed-on chat is not open
-to a takeover, so two handed on at once are replaced by one fresh chat.
-(decisions.md#one-chat)
+kept warm by a scheduled prompt twice an hour. It is compacted where it
+is: the queue starts it with
+Claude Code's auto-compact window at its ceiling (`reuse.assistant`,
+150k, never under 100k), a compaction is told what to keep, and the
+chat goes on with nothing said to him; nothing it owes is kept in a
+file of its own. One assistant chat is open, the one the queue started
+last (`.claude/assistant.json`): a chat over its ceiling with no
+window, opened before the queue set one or by hand, is replaced by a
+copy of itself started with the window (`claude --bg --resume`), the
+copy first and the old one stopped once the copy is listed, tried again
+each minute while it is busy; any other chat of the name is stopped
+once idle, and one he writes in passes his words to the open chat and
+tells him which chat to use. A chat with no process is not open, so one
+is opened beside its row; none is opened while `claude agents` cannot
+be read; what the queue sends goes to the open chat; and `plans end
+<id> --now` ends one he names. (decisions.md#one-chat)
 
 **An agent file is the agent's instructions, and a start prompt names
 the work.** Each agent file says what the agent does, in the order it

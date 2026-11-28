@@ -363,8 +363,14 @@ export function stopRetiredPlanners(
 export function plannerPrompt(path: string): string;
 /** What the assistant chat is told of a built plan: `Built: <path>.` */
 export function assistantPrompt(path: string): string;
-/** The fresh assistant chat's prompt, on the hand-over file. */
-export function takeOverPrompt(name: string): string;
+/** The copy's first prompt: `Copied from <name> [<id>], which was over its ceiling: …` */
+export function copiedPrompt(name: string, sessionId: string): string;
+/** The assistant chat's auto-compact window, 0 on a Claude Code older than the flag. */
+export function assistantWindow(ceiling?: number, installed?: string): number;
+/** What a compaction of the assistant chat is told to keep in its summary. */
+export function compactWords(): string;
+/** What the assistant chat is told once it was compacted. */
+export function compactedWords(): string;
 /** An executor's start prompt: `Build <path>.`, or the resume of a handed plan. */
 export function startPrompt(path: string, plans: { state: string; path: string }[]): string;
 /** A plan's wait (plans/parallel-executors.md, part 3). */

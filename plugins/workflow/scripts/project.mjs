@@ -550,8 +550,8 @@ export const REUSE_DEFAULT = Object.freeze({
  * The `reuse` key as `{ executor, planner, assistant }`: one number sets the
  * executor's and the planner's; a map sets each it names, each missing one
  * the default. A value that is no number above zero is the default. The
- * assistant's is the context above which its chat is handed on to a fresh one
- * (decisions.md#one-chat).
+ * assistant's is its chat's auto-compact window, above which a chat started
+ * without one is replaced by a copy with it (decisions.md#one-chat).
  */
 function reuseOf(value) {
   const number = (one) => {
@@ -591,7 +591,7 @@ branch: ${defaultBranch(root, { checkedOut: true })}
 # executors: 2  # how many executors build at once, each in its own worktree; omit for one
 # resources:                # heavy steps only so many executors run at once; a step takes a slot with plans hold
 #   browser: 1
-# reuse: 200000 # the context above which a finished session retires while this project has under five sessions of the agent: one number, or a map of executor and planner; with history the queue works the ceiling out from this project's transcripts; a map's assistant (150000) is where the assistant chat is handed on
+# reuse: 200000 # the context above which a finished session retires while this project has under five sessions of the agent: one number, or a map of executor and planner; with history the queue works the ceiling out from this project's transcripts; a map's assistant (150000) is where the assistant chat is compacted
 # reviews:               the reviews before a push: plan, code-review, codex, or a plugin skill; omit for all three
 #   - code-review
 ---
@@ -654,7 +654,8 @@ export const QUEUE_IGNORES = [
   // The refresh plans the owner was told of
   // (decisions.md#merge-refreshes-the-rest).
   ".claude/refreshes.*",
-  // The hand-over file's writer and the chat told of it (decisions.md#one-chat).
+  // The old hand-over file's record, which nothing writes since 28 November
+  // and a project may still hold (decisions.md#one-chat).
   ".claude/handover.*",
   // The agent a plain chat opens as (`sessionAgent`): Claude Code keeps the
   // file out of git only when it creates it itself.

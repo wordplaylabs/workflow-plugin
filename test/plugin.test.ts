@@ -2588,21 +2588,14 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     );
     expect(docs).toContain("a `Closes` line per issue, `Builds on`, and one `Related` list");
     expect(docs).toContain("closes each issue a merged pull request's description closes;");
-    expect(docs).toContain(
-      "what it still owes is written into the queue first, and the file is said once to whichever assistant chat speaks next",
-    );
+    // plans/assistant-handover-that-happens.md: nothing owed waits in a file.
+    expect(docs).toContain("nothing it owes is kept in a file of its own.");
     const assistant = flat("agents/assistant.md");
     expect(assistant).toContain(
-      'first write and hand on every brief or short plan this chat still owes ("Where each topic ends"), so each is in the queue.',
+      'first write and hand on any brief or short plan it says is still to write ("Where each topic ends").',
     );
     expect(assistant).toContain(
-      "each thing still to do that waits on something, as `When <what happens>, then <what to do>.`",
-    );
-    expect(assistant).toContain(
-      "A brief or a plan to write that waits on nothing is never a line of it.",
-    );
-    expect(assistant).toContain(
-      "or told by a prompt's line that no assistant chat has read the file since it was written, read it before anything else",
+      "a brief or a plan goes in the queue in the turn its topic ends, a question is asked at once, and what he said that nothing records is a memory note.",
     );
     expect(flat("docs/decisions.md")).toContain(
       "- `closes-its-issues` **A pull request names each issue it fixes with `Closes #<n>.`, is linked to it, and its merge closes it, whatever branch it merges into.** (Javi, 26 November)",
@@ -2971,7 +2964,7 @@ describe("the reuse ceiling and the reviewer", () => {
       writeFileSync(join(root, ".claude", "workflow.md"), `---\nname: R\n${front}---\n`);
       return project(root).reuse;
     };
-    // plans/one-assistant-chat.md, part 2: the assistant's, 150k, where its chat is handed on.
+    // plans/one-assistant-chat.md, part 2: the assistant's, 150k, where its chat is compacted.
     const defaults = { executor: 200_000, planner: 160_000, assistant: 150_000 };
     expect(at("")).toEqual(defaults);
     expect(at("reuse: nothing\n")).toEqual(defaults);
@@ -2994,7 +2987,7 @@ describe("the reuse ceiling and the reviewer", () => {
     init(fresh);
     const text = readFileSync(join(fresh, ".claude", "workflow.md"), "utf8");
     expect(text).toContain(
-      "# reuse: 200000 # the context above which a finished session retires while this project has under five sessions of the agent: one number, or a map of executor and planner; with history the queue works the ceiling out from this project's transcripts; a map's assistant (150000) is where the assistant chat is handed on",
+      "# reuse: 200000 # the context above which a finished session retires while this project has under five sessions of the agent: one number, or a map of executor and planner; with history the queue works the ceiling out from this project's transcripts; a map's assistant (150000) is where the assistant chat is compacted",
     );
     expect(text).not.toContain("planner-related");
   });
@@ -3210,6 +3203,15 @@ describe("the hooks manifest", () => {
     ]);
     expect(commands("PostToolUse", "Edit|Write|MultiEdit|Bash")).toEqual([
       'node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-queue.mjs" wrote',
+    ]);
+  });
+  // plans/assistant-handover-that-happens.md, part 2.
+  it("tells a compaction what to keep, and the chat that it was compacted", () => {
+    expect(commands("PreCompact")).toEqual([
+      'node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-queue.mjs" compact',
+    ]);
+    expect(commands("SessionStart", "compact")).toEqual([
+      'node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-queue.mjs" compacted',
     ]);
   });
   // plans/plans-on-the-terminal-path.md: every session's start writes the terminal's plans.
@@ -4320,58 +4322,57 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
   });
 });
 
-// plans/one-assistant-after-handover.md, part 5.
-describe("one assistant chat is live after a hand-over", () => {
+// plans/one-assistant-after-handover.md, part 5; plans/assistant-handover-that-happens.md, parts 6 and 7.
+describe("one assistant chat is open, compacted where it is", () => {
   const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
   const read = (path: string) => readFileSync(join(plugin, path), "utf8").replace(/\s+/g, " ");
 
   it("the handbook, the assistant's file and the catalogue say so", () => {
     const handbook = read("docs/workflow.md");
     expect(handbook).toContain(
-      "One assistant chat is live: the fresh one is started first and the handed-on one stopped once the fresh one is listed, or, when another is open already, as soon as it is quiet, the queue trying again every ten minutes until one is open and the old one stopped; a chat with no process is not open, so one is opened beside its row; none is opened while `claude agents` cannot be read; what the queue sends goes to the chat started last that is not handed on; and `plans end <id> --now` ends one he names.",
+      "It is compacted where it is: the queue starts it with Claude Code's auto-compact window at its ceiling (`reuse.assistant`, 150k, never under 100k), a compaction is told what to keep, and the chat goes on with nothing said to him; nothing it owes is kept in a file of its own.",
+    );
+    expect(handbook).toContain(
+      "One assistant chat is open, the one the queue started last (`.claude/assistant.json`): a chat over its ceiling with no window, opened before the queue set one or by hand, is replaced by a copy of itself started with the window (`claude --bg --resume`), the copy first and the old one stopped once the copy is listed, tried again each minute while it is busy; any other chat of the name is stopped once idle, and one he writes in passes his words to the open chat and tells him which chat to use.",
     );
     expect(handbook).toContain(
       "starts a fresh session on it; an assistant chat named is stopped with nothing started in its place;",
     );
+    expect(handbook).not.toContain("hand-over file");
     const assistant = read("agents/assistant.md");
+    expect(assistant).not.toContain("assistant-handover");
     expect(assistant).toContain(
-      "and the paths of the plans in the queue; then `CronDelete` the heartbeat's job and stop.",
+      "3. **Compacted where it is.** The queue starts this chat with its auto-compact window at the project's ceiling, so Claude Code shortens the history itself and the chat goes on: tell him nothing of it.",
     );
     expect(assistant).toContain(
-      "which then sets the heartbeat again by 1 when work is under way. The queue stops this chat then, or as soon as another assistant chat is open; `plans end <id> --now` ends one ${user_config.owner} names.",
+      "Opened on `Copied from <Project> Assistant [<id>]: …`, tell him in one line `This is the assistant chat from now on. The earlier one was full, and everything said there is kept here.`, and go on, setting the heartbeat by 1 when work is under way.",
     );
     expect(assistant).toContain(
-      "and go on from it, setting the heartbeat by 1 when work is under way.",
-    );
-    expect(assistant).toContain(
-      "his message meanwhile keeps this one, which then sets the heartbeat again by 1 when work is under way.",
+      "On a prompt's line that another chat is the open assistant chat, do what the line says and nothing else; the queue stops this chat then. `plans end <id> --now` ends one ${user_config.owner} names.",
     );
     const decisions = read("docs/decisions.md");
     expect(decisions).toContain(
-      "Three chats of the name were once live for hours: the takeover's timer tried once and gave up while a question stood, a second chat was opened while `claude agents` could not be read, and the old one, never stopped, kept the webhook's notes.",
+      "Claude Code's `--autocompact` sets the window at launch (tried 28 November: a background chat compacted mid-turn and at the start of a turn another chat's message began, and its PreCompact hook's lines were kept), so the chat is compacted where it is and no file holds what it owes.",
     );
     expect(decisions).toContain(
-      "So the takeover is tried every ten minutes until the handed-on chat is stopped, with no fresh start when another is open, quiet read from the process's own status; none is opened on a list that cannot be read; and what the queue sends goes to the chat started last that is not handed on.",
+      "the queue records the chat it started last, and any other of the name takes no new work, as a terminating endpoint takes no new traffic, and is stopped once idle.",
+    );
+    expect(decisions).toContain(
+      "~~A chat past its ceiling writes a hand-over file and a fresh chat of the same name takes over once it is quiet.~~ (Javi, 24 November, as the fallback)",
+    );
+    expect(decisions).toContain(
+      "Three chats of the name were once live for hours: the takeover's timer tried once and gave up while a question stood, a second chat was opened while `claude agents` could not be read, and the old one, never stopped, kept the webhook's notes.",
     );
     // plans/assistant-takeover-never-leaves-none.md, part 5.
     expect(decisions).toContain(
-      "A takeover that stopped the old chat first left him with none when the fresh one's launch failed, and the launch was confirmed by the stopped chat's own row, which stays listed under the name for weeks.",
-    );
-    expect(decisions).toContain(
-      "So the fresh chat is started first, confirmed by a session not listed before, and the old one is stopped once it is, as a rolling update brings the new copy up before it takes the old one down; and a chat with no process is not open, since it takes no message: one is opened beside its row.",
+      "So the copy is started first, confirmed by a session not listed before, and the old one is stopped once it is, as a rolling update brings the new copy up before it takes the old one down; and a chat with no process is not open, since it takes no message: one is opened beside its row.",
     );
     expect(decisions).toContain(
       "An assistant chat he names is ended the same way, with nothing started in its place: archiving it stopped nothing.",
     );
     // plans/assistant-chat-counts-live-rows.md.
-    expect(handbook).toContain(
-      "A handed-on chat is not open to a takeover, so two handed on at once are replaced by one fresh chat.",
-    );
     expect(decisions).toContain(
-      "a handed-on chat is on its way out, so it is not open to a takeover, and one fresh chat replaces both. A stopped row beside the live chat made its name shared, so a note waited; only rows with a process share it.",
-    );
-    expect(decisions).toContain(
-      "addressed by the chat's process, the one started last that is not handed on:",
+      "A stopped row beside the live chat made its name shared, so a note waited; only rows with a process share it.",
     );
   });
 });

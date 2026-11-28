@@ -112,14 +112,24 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   the assistant, which reads its conversation for him. The assistant
   speaks up for a question, a failure, a
   decision taken and each plan built. One chat that takes everything
-  fills within a day, and he chose to keep it where it is; a scheduled
-  `/compact` reaches a background chat as a plain message (tried 24
-  November), so one past its ceiling writes a hand-over file and a fresh
-  chat of the same name takes over once it is quiet. A chat opened on a
-  built plan, not on the hand-over, never read the file, and a brief the
-  old chat still owed sat a day: what a chat owes is written into the
-  queue before it hands on, and the file is said once to whichever
-  assistant chat speaks next after it was written. While work runs it
+  fills within a day, and he chose to keep it where it is, compacted. A
+  scheduled `/compact` reached a background chat as a plain message, so
+  until 28 November a chat past its ceiling wrote a hand-over file and a
+  fresh chat took over once it was quiet ten minutes. In one project that
+  never happened: the chat wrote the file before the hook asked, so no
+  timer was armed; each stop moved the timer ten minutes on while other
+  chats wrote every few; his own message cancelled it; and the chat, at
+  343k a day later, kept what it owed as lines of the file. Claude Code's
+  `--autocompact` sets the window at launch (tried 28 November: a
+  background chat compacted mid-turn and at the start of a turn another
+  chat's message began, and its PreCompact hook's lines were kept), so
+  the chat is compacted where it is and no file holds what it owes. A
+  chat with no window is replaced once by a copy of itself, which
+  `claude --bg --resume <id>` with flags starts with the conversation
+  kept. Which chat was the one was read from the rows' order, which a
+  restarted chat changes: the queue records the chat it started last,
+  and any other of the name takes no new work, as a terminating endpoint
+  takes no new traffic, and is stopped once idle. While work runs it
   is kept warm: a turn that reads the cache renews its hour for about a
   fortieth of what the first turn of a cold chat costs (`context-cost`).
   The workers keep nothing that was for him (a task list, files sent, a
@@ -128,28 +138,31 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   name were once live for hours: the takeover's timer tried once and
   gave up while a question stood, a second chat was opened while `claude
   agents` could not be read, and the old one, never stopped, kept the
-  webhook's notes. So the takeover is tried every ten minutes until the
-  handed-on chat is stopped, with no fresh start when another is open,
-  quiet read from the process's own status; none is opened on a list
-  that cannot be read; and what the queue sends goes to the chat started
-  last that is not handed on. A takeover that stopped the old chat first
-  left him with none when the fresh one's launch failed, and the launch
-  was confirmed by the stopped chat's own row, which stays listed under
-  the name for weeks. So the fresh chat is started first, confirmed by a
-  session not listed before, and the old one is stopped once it is, as a
-  rolling update brings the new copy up before it takes the old one
-  down; and a chat with no process is not open, since it takes no
-  message: one is opened beside its row. Two chats handed on at once
-  each counted the other as open, so neither takeover ever started; a
-  handed-on chat is on its way out, so it is not open to a takeover, and
-  one fresh chat replaces both. A stopped row beside the live chat made
-  its name shared, so a note waited; only rows with a process share it.
+  webhook's notes. So the replacement is tried until the old chat is
+  stopped, with nothing started beside another open chat, quiet read
+  from the process's own status, and none is opened on a list that
+  cannot be read. A takeover that stopped the old chat first left him
+  with none when the fresh one's launch failed, and the launch was
+  confirmed by the stopped chat's own row, which stays listed under the
+  name for weeks. So the copy is started first, confirmed by a session
+  not listed before, and the old one is stopped once it is, as a rolling
+  update brings the new copy up before it takes the old one down; and a
+  chat with no process is not open, since it takes no message: one is
+  opened beside its row. Two chats to be replaced at once each counted
+  the other as open, so neither was; one on its way out is not open to
+  a copy's start, and one copy replaces both. A stopped row beside the
+  live chat made its name shared, so a note waited; only rows with a
+  process share it.
   plans/one-assistant-chat.md, plans/quiet-worker-starts.md,
   plans/prs-close-their-issues.md, plans/one-assistant-after-handover.md,
   plans/assistant-takeover-never-leaves-none.md,
-  plans/assistant-chat-counts-live-rows.md.
+  plans/assistant-chat-counts-live-rows.md,
+  plans/assistant-handover-that-happens.md.
   - ~~Planners and executors stay openable, in his chat list.~~
     (Javi, 24 November)
+  - ~~A chat past its ceiling writes a hand-over file and a fresh chat of
+    the same name takes over once it is quiet.~~ (Javi, 24 November, as
+    the fallback)
 - `new-topic-to-assistant` **Every new topic starts in the assistant's
   chat, and what he writes in a worker's chat is passed there.** (Javi, 24 November, `one-chat`) A planner's chat holds the plans
   it wrote until an executor takes them; a new topic there would mix two

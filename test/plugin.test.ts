@@ -2332,7 +2332,9 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     const mode = /# Landing by pull request[\s\S]*?\n\*\*A topic's plan\*\*/
       .exec(read("docs/landing.md"))![0]
       .replace(/\s+/g, " ");
-    expect(mode).not.toContain("--name-only");
+    // A shared file is no reason to stack (`gh pr diff <n> --name-only` was struck); the
+    // merge with a base of plans/stacked-merged-parent-gaps.md names files of its own.
+    expect(mode).not.toContain("pr diff <n> --name-only");
     expect(mode).toContain("it uses what an earlier plan adds");
     // plans/related-plans-share-a-pull-request.md: a shared file goes where its `Lands` line says.
     expect(mode).toContain(
@@ -2409,11 +2411,20 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     expect(once).toContain(
       "The second and third only when the squash is the parent's work alone: `git merge-tree --write-tree <mergeCommit>^ <headRefOid>` gives `git rev-parse <mergeCommit>^{tree}`, so `-s ours` passes over nothing else on the branch, and `git diff -U0 <mergeCommit>^ <mergeCommit> | git patch-id --stable` gives the id that `git diff -U0 $(git merge-base <mergeCommit>^ <headRefOid>) <headRefOid> | git patch-id --stable` gives, without context so a line the branch changed nearby is not read as the parent's, so `<mergeCommit>^` holds none of the parent's work.",
     );
+    // plans/stacked-merged-parent-gaps.md, part 1: any other landing is merged with the
+    // parent's head as base, and a conflict left so is backed out of that merge first.
     expect(once).toContain(
-      "Otherwise (a rebase merge) merge the first, then `origin/<branch>`: a conflict whose `<branch>` side reads as the parent's head has it (`git show <headRefOid>:<file>`) takes the topic's side, which holds the parent's work and its own; any other is settled from the plans.",
+      "Otherwise (a rebase merge, or a squash the two checks do not pass) merge the first, then `origin/<branch>` with the parent's head as the merge's base: git's own base is older than the parent's files, so a file the parent added and the topic renamed or deleted would come back with no conflict.",
     );
     expect(once).toContain(
-      "A conflict left unsettled takes the topic back to the tip it had before the first (`git reset --keep <that tip>`), so no part of them is pushed.",
+      "`git merge-tree --write-tree --name-only --merge-base=<headRefOid> HEAD origin/<branch>` gives the merged tree on its first line and, exiting 1, the files in conflict after it (any other exit, an older git's refusal of `--merge-base` included, is git's error, and the topic goes back as for a conflict left unsettled, below).",
+    );
+    expect(once).toContain(
+      'Then `git merge -s ours --no-commit -m "Merge origin/<branch> into <name>, with #<n>\'s head as base" -m "<the session\'s attribution lines>" origin/<branch>`, `git restore --source=<tree> --staged --worktree -- :/`, each file it named settled from the plans, `git add -u`, no `leftover conflict marker` in `git diff --cached --check`, and `git commit --no-edit`.',
+    );
+    expect(once).not.toContain("a conflict whose `<branch>` side reads as the parent's head");
+    expect(once).toContain(
+      "A conflict left unsettled takes the topic back to the tip it had before the first (`git reset --keep <that tip>`, after `git add -u` and `git merge --abort` in a merge with a base), so no part of them is pushed.",
     );
     expect(once).toContain(
       '"Built" gets one line for the four, `Merged <branch> <date> past #<n>\'s squash, commits <sha>, <sha>: <files or none>`, a merge that was already up to date naming no commit, and the two of the fallback a line each, as a merge above.',
@@ -2429,74 +2440,76 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     );
   });
 
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "Test",
+    GIT_AUTHOR_EMAIL: "test@example.com",
+    GIT_COMMITTER_NAME: "Test",
+    GIT_COMMITTER_EMAIL: "test@example.com",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+  };
+  // plans/stacked-merged-parent-gaps.md: the repository the three tests below build on, its
+  // parent `p` (P1, P2 at `head`) not yet landed on `b`, its topic `t` from P1.
+  const repo = (cwd: string) => {
+    const git = (...args: string[]) =>
+      spawnSync("git", args, { cwd, env, encoding: "utf8", input: "" });
+    const ok = (...args: string[]) => {
+      const run = git(...args);
+      expect(run.status, `git ${args.join(" ")}: ${run.stderr}`).toBe(0);
+      return run.stdout.trim();
+    };
+    const edit = (from: string, to: string) => {
+      const file = join(cwd, "f");
+      const lines = readFileSync(file, "utf8").split("\n");
+      lines[lines.indexOf(from)] = to;
+      writeFileSync(file, lines.join("\n"));
+    };
+    const commit = (message: string) => {
+      ok("add", "-A");
+      ok("commit", "-q", "-m", message);
+      return ok("rev-parse", "HEAD");
+    };
+    // The paragraph's two checks: the squash's tree is the parent merged into the branch
+    // before it, and its change is the parent's whole change.
+    const sameTree = (merge: string, head: string) =>
+      ok("merge-tree", "--write-tree", `${merge}^`, head).split("\n")[0] ===
+      ok("rev-parse", `${merge}^{tree}`);
+    const patchId = (from: string, to: string, context: string) =>
+      spawnSync("git", ["patch-id", "--stable"], {
+        cwd,
+        env,
+        encoding: "utf8",
+        input: ok("diff", context, from, to) + "\n",
+      }).stdout.split(" ")[0];
+    const squashAlone = (merge: string, head: string, context = "-U0") =>
+      patchId(`${merge}^`, merge, context) ===
+      patchId(ok("merge-base", `${merge}^`, head), head, context);
+    ok("init", "-q", "-b", "b");
+    writeFileSync(join(cwd, "f"), "1 2 3 4 5 6 7 8 9 10".split(" ").join("\n") + "\n");
+    commit("B");
+    ok("switch", "-q", "-c", "p");
+    edit("3", "P3");
+    writeFileSync(join(cwd, "g"), "g\n");
+    commit("P1");
+    ok("switch", "-q", "-c", "t");
+    edit("P3", "P3 T");
+    edit("8", "T8");
+    commit("T1");
+    ok("switch", "-q", "p");
+    edit("5", "P5");
+    const head = commit("P2");
+    ok("switch", "-q", "b");
+    // Codex C5: a line the branch changes within the parent's diff context.
+    edit("1", "O1");
+    edit("10", "O10");
+    writeFileSync(join(cwd, "h"), "h\n");
+    commit("O1");
+    return { git, ok, edit, commit, sameTree, squashAlone, head };
+  };
+
   // plans/stacked-base-edge-cases.md, part 2, the test: the four merges, run by git.
   it("a squash-merged parent's work comes in once", () => {
-    const env = {
-      ...process.env,
-      GIT_AUTHOR_NAME: "Test",
-      GIT_AUTHOR_EMAIL: "test@example.com",
-      GIT_COMMITTER_NAME: "Test",
-      GIT_COMMITTER_EMAIL: "test@example.com",
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      GIT_CONFIG_NOSYSTEM: "1",
-    };
-    const repo = (cwd: string) => {
-      const git = (...args: string[]) =>
-        spawnSync("git", args, { cwd, env, encoding: "utf8", input: "" });
-      const ok = (...args: string[]) => {
-        const run = git(...args);
-        expect(run.status, `git ${args.join(" ")}: ${run.stderr}`).toBe(0);
-        return run.stdout.trim();
-      };
-      const edit = (from: string, to: string) => {
-        const file = join(cwd, "f");
-        const lines = readFileSync(file, "utf8").split("\n");
-        lines[lines.indexOf(from)] = to;
-        writeFileSync(file, lines.join("\n"));
-      };
-      const commit = (message: string) => {
-        ok("add", "-A");
-        ok("commit", "-q", "-m", message);
-        return ok("rev-parse", "HEAD");
-      };
-      // The paragraph's two checks: the squash's tree is the parent merged into the branch
-      // before it, and its change is the parent's whole change.
-      const sameTree = (merge: string, head: string) =>
-        ok("merge-tree", "--write-tree", `${merge}^`, head).split("\n")[0] ===
-        ok("rev-parse", `${merge}^{tree}`);
-      const patchId = (from: string, to: string, context: string) =>
-        spawnSync("git", ["patch-id", "--stable"], {
-          cwd,
-          env,
-          encoding: "utf8",
-          input: ok("diff", context, from, to) + "\n",
-        }).stdout.split(" ")[0];
-      const squashAlone = (merge: string, head: string, context = "-U0") =>
-        patchId(`${merge}^`, merge, context) ===
-        patchId(ok("merge-base", `${merge}^`, head), head, context);
-      ok("init", "-q", "-b", "b");
-      writeFileSync(join(cwd, "f"), "1 2 3 4 5 6 7 8 9 10".split(" ").join("\n") + "\n");
-      commit("B");
-      ok("switch", "-q", "-c", "p");
-      edit("3", "P3");
-      writeFileSync(join(cwd, "g"), "g\n");
-      commit("P1");
-      ok("switch", "-q", "-c", "t");
-      edit("P3", "P3 T");
-      edit("8", "T8");
-      commit("T1");
-      ok("switch", "-q", "p");
-      edit("5", "P5");
-      const head = commit("P2");
-      ok("switch", "-q", "b");
-      // Codex C5: a line the branch changes within the parent's diff context.
-      edit("1", "O1");
-      edit("10", "O10");
-      writeFileSync(join(cwd, "h"), "h\n");
-      commit("O1");
-      return { git, ok, edit, commit, sameTree, squashAlone, head };
-    };
-
     const { git, ok, edit, commit, sameTree, squashAlone, head } = repo(dir("squash-"));
     ok("merge", "-q", "--squash", "p");
     const squash = commit("S");
@@ -2541,6 +2554,148 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     const last = two.ok("rev-parse", "HEAD");
     expect(two.sameTree(last, two.head)).toBe(true);
     expect(two.squashAlone(last, two.head)).toBe(false);
+  });
+
+  // plans/stacked-merged-parent-gaps.md, part 1, the test: a parent that landed otherwise is
+  // merged with its head as the base, by merge-tree, an `ours` merge, a restore and a commit.
+  it("a rebase-merged parent's work comes in once", () => {
+    const message = "Merge origin/b into t, with #1's head as base";
+    const withBase = (at: ReturnType<typeof repo>) => {
+      const run = at.git(
+        "merge-tree",
+        "--write-tree",
+        "--name-only",
+        `--merge-base=${at.head}`,
+        "HEAD",
+        "b",
+      );
+      at.ok("merge", "-s", "ours", "--no-commit", "-m", message, "-m", "Co-Authored-By: T", "b");
+      at.ok(
+        "restore",
+        `--source=${run.stdout.split("\n")[0]}`,
+        "--staged",
+        "--worktree",
+        "--",
+        ":/",
+      );
+      return run;
+    };
+    const one = dir("rebase-");
+    const first = repo(one);
+    const { git, ok, edit, commit, squashAlone, head } = first;
+    ok("switch", "-q", "t");
+    ok("mv", "g", "g2");
+    commit("T2");
+    ok("switch", "-q", "b");
+    ok("cherry-pick", `${head}^`, head);
+    const last = ok("rev-parse", "HEAD");
+    edit("O1", "O1x");
+    commit("O2");
+    expect(squashAlone(last, head)).toBe(false);
+    // The fault: merged plainly, git's base has no g, so the branch's g comes back beside g2,
+    // and the branch's side of f is not the parent's head.
+    ok("switch", "-q", "-c", "plain", "t");
+    ok("merge", "--no-edit", head);
+    expect(git("merge", "--no-edit", "b").status).not.toBe(0);
+    expect(ok("diff", "--name-only", "--diff-filter=U")).toBe("f");
+    expect(ok("ls-files", "g", "g2")).toBe("g\ng2");
+    expect(ok("show", "b:f")).not.toBe(ok("show", `${head}:f`));
+    ok("merge", "--abort");
+    // With the parent's head as base: the rename is a rename, and the topic is its own work.
+    ok("switch", "-q", "t");
+    ok("merge", "--no-edit", "-m", "Merge #1's head into t", head);
+    expect(withBase(first).status).toBe(0);
+    ok("add", "-u");
+    expect(git("diff", "--cached", "--check").stdout).not.toContain("leftover conflict marker");
+    ok("commit", "--no-edit");
+    expect(readFileSync(join(one, "f"), "utf8").trim().split("\n").join(" ")).toBe(
+      "O1x 2 P3 T 4 P5 6 7 T8 9 O10",
+    );
+    expect(ok("ls-tree", "-r", "--name-only", "t")).toBe("f\ng2\nh");
+    expect(ok("diff", "--name-status", "-M", "b", "t")).toBe("M\tf\nR100\tg\tg2");
+    expect(ok("log", "-1", "--format=%s")).toBe(message);
+    expect(ok("log", "-1", "--format=%P").split(" ")[1]).toBe(ok("rev-parse", "b"));
+    // The next merge of the branch is a plain one.
+    ok("switch", "-q", "b");
+    writeFileSync(join(one, "k"), "k\n");
+    commit("O3");
+    ok("switch", "-q", "t");
+    ok("merge", "--no-edit", "b");
+
+    // The branch and the topic changed line 8: the merge names f, leaves its markers to settle,
+    // and is backed out whole when left unsettled.
+    const other = dir("rebase-conflict-");
+    const two = repo(other);
+    two.ok("cherry-pick", `${two.head}^`, two.head);
+    two.edit("8", "O8");
+    two.commit("O2");
+    two.ok("switch", "-q", "t");
+    const before = two.ok("rev-parse", "HEAD");
+    // /code-review: an untracked file of the worktree is neither removed nor committed.
+    writeFileSync(join(other, "local.env"), "x\n");
+    two.ok("merge", "--no-edit", "-m", "Merge #1's head into t", two.head);
+    const mid = two.ok("rev-parse", "HEAD");
+    const run = withBase(two);
+    expect(run.status).toBe(1);
+    expect(run.stdout.split("\n")[1]).toBe("f");
+    expect(two.git("diff", "--cached", "--check").stdout).toContain("leftover conflict marker");
+    writeFileSync(join(other, "f"), readFileSync(join(other, "f"), "utf8") + "more\n");
+    expect(two.git("merge", "--abort").status).not.toBe(0);
+    two.ok("add", "-u");
+    two.ok("merge", "--abort");
+    expect(two.ok("rev-parse", "HEAD")).toBe(mid);
+    expect(two.ok("status", "--short")).toBe("?? local.env");
+    two.ok("reset", "--keep", before);
+    expect(two.ok("rev-parse", "HEAD")).toBe(before);
+    // Done again and settled from the plans, the topic's T8 kept.
+    two.ok("merge", "--no-edit", "-m", "Merge #1's head into t", two.head);
+    withBase(two);
+    writeFileSync(join(other, "f"), "O1 2 P3 T 4 P5 6 7 T8 9 O10".split(" ").join("\n") + "\n");
+    two.ok("add", "-u");
+    expect(two.git("diff", "--cached", "--check").stdout).not.toContain("conflict marker");
+    two.ok("commit", "--no-edit");
+    expect(two.ok("log", "-1", "--format=%P").split(" ")).toHaveLength(2);
+    expect(two.ok("ls-tree", "-r", "--name-only", "HEAD")).toBe("f\ng\nh");
+    expect(readFileSync(join(other, "local.env"), "utf8")).toBe("x\n");
+  });
+
+  // plans/stacked-merged-parent-gaps.md, part 2, the test: the recovery brings a squash-merged
+  // parent's work in by the four merges before it compares the topic with the branch.
+  it("a stacked topic left with no pull request is compared with its merged parent's work in", () => {
+    const { git, ok, commit, sameTree, squashAlone, head } = repo(dir("recovery-"));
+    ok("merge", "-q", "--squash", "p");
+    const squash = commit("S");
+    expect(sameTree(squash, head)).toBe(true);
+    expect(squashAlone(squash, head)).toBe(true);
+    const tree = ok("rev-parse", "b^{tree}");
+    const compare = (topic: string) => git("merge-tree", "--write-tree", "b", topic);
+    const fourMerges = (topic: string) => {
+      ok("switch", "-q", topic);
+      ok("merge", "--no-edit", "-m", `Merge #1's head into ${topic}`, head);
+      ok("merge", "--no-edit", "-m", `Merge b before #1 into ${topic}`, `${squash}^`);
+      ok("merge", "--no-edit", "-s", "ours", "-m", `Merge #1's squash into ${topic}`, squash);
+      ok("merge", "--no-edit", "-m", `Merge origin/b into ${topic}`, "b");
+    };
+    // A topic that only deletes what the parent added reads as nothing as it stands.
+    ok("switch", "-q", "-c", "d", head);
+    ok("rm", "-q", "g");
+    commit("D1");
+    expect(compare("d").stdout.split("\n")[0]).toBe(tree);
+    fourMerges("d");
+    const deleted = compare("d");
+    expect(deleted.status).toBe(0);
+    expect(deleted.stdout.split("\n")[0]).not.toBe(tree);
+    expect(ok("diff", "--name-status", "b", "d")).toBe("D\tg");
+    // One that changed the parent's line 3 conflicts as it stands, and not once merged.
+    expect(compare("t").status).toBe(1);
+    fourMerges("t");
+    const changed = compare("t");
+    expect(changed.status).toBe(0);
+    expect(changed.stdout.split("\n")[0]).not.toBe(tree);
+    // One with nothing of its own still reads as nothing.
+    ok("switch", "-q", "-c", "n", head);
+    fourMerges("n");
+    expect(compare("n").stdout.split("\n")[0]).toBe(tree);
   });
 
   // plans/refresh-only-your-own.md: only this person's pull requests, with the checks alone.
@@ -2741,6 +2896,11 @@ describe("a pull request per topic", () => {
     expect(mode).toContain(
       "- **No pull request**: run `plans topic plans/<this plan>.md` and follow its line (decisions.md#topic-landing).",
     );
+    // plans/stacked-merged-parent-gaps.md, part 3: a topic stacked on a closed parent whose
+    // branch is gone opens nothing, and he is told once, with the address that opens it.
+    expect(mode).toContain(
+      '(decisions.md#topic-landing). A topic that gets none ("A topic\'s base") opens nothing, whatever the line says.',
+    );
     expect(mode).toContain(
       '**More is queued** (`… still queued for topic <name>: its pull request waits for …`): nothing opens. "Built" opens with `On topic <name>, commit <sha>, branch pushed; its pull request waits for <the paths the line names>.`',
     );
@@ -2771,7 +2931,7 @@ describe("a pull request per topic", () => {
       '- **Five plans** (`Topic <name> holds … plans with …: its pull request opens with it, …`): opened as "Nothing else queued" says, whatever is queued (decisions.md#pull-request-full). "Built" gets, after its first line, `Opened at 5 plans: <the paths the line names> land on a topic stacked on it.` Each of those is sent on at its own start, by `plans full`.',
     );
     expect(mode).toContain(
-      'link and what it was marked related to, for one opened at five plans the plans sent on from it, for a topic stacked on a pull request closed without merging, that line of its "Built", and, for a draft',
+      'link and what it was marked related to, for one opened at five plans the plans sent on from it, for a topic stacked on a pull request closed without merging, that line of its "Built", or with that branch gone `Topic <name> has no pull request: #<n>, which it is stacked on, was closed without merging and its branch is gone, so its pull request would bring that work back. To open it with #<n>\'s work in it: <address>/compare/<branch>...<name>?expand=1` (`<address>` from `gh repo view --json url --jq .url`), once a topic, by the plan whose landing or recovery first writes that line, and, for a draft',
     );
     const handbook = read("docs/workflow.md");
     // Part 5: the rules say it.
@@ -2828,7 +2988,7 @@ describe("a pull request per topic", () => {
     // parent closed without merging stays it while its head is on origin, and any plan's line
     // stacks the topic, the first built plan's counting.
     expect(mode).toContain(
-      "**A topic's base** is the head branch it is stacked on when a `Lands` line of its plans says `stacked on #<n>` (`gh pr view <n> --json headRefName,state,isCrossRepository`), since its pull request opens against that head and the parent's commits are not its own. A line without it takes nothing away; of lines that name different pull requests, the one of the plan whose commit is first on the topic's branch counts, the branch having started from that head, and with none built the plan in hand's. It is `<branch>` for any other topic, and for a stacked one whose parent is MERGED, is from a fork (`isCrossRepository`: GitHub stacks no pull request across forks, and an `origin/<headRefName>` of that name is another branch) or whose head is gone from origin (no `origin/<headRefName>` after `git fetch --prune`), as \"A pull request is refreshed\" retargets a stack whose parent merged. A fork's commits are not merged in, and \"Built\" gets, after its first line, `#<n> is from a fork: built on <branch>, not stacked on it.` A parent CLOSED without merging stays the base while its head is on origin, as GitHub keeps a stack whose pull request was closed: \"Built\" gets, after its first line, `Stacked on #<n>, closed without merging: its base stays <head> while that branch is on origin.` Every step below that names `<base>` takes it so: the new branch, the start's merge, the create's `--base` and the recovery.",
+      "**A topic's base** is the head branch it is stacked on when a `Lands` line of its plans says `stacked on #<n>` (`gh pr view <n> --json headRefName,state,isCrossRepository`), since its pull request opens against that head and the parent's commits are not its own. A line without it takes nothing away; of lines that name different pull requests, the one of the plan whose commit is first on the topic's branch counts, the branch having started from that head, and with none built the plan in hand's. It is `<branch>` for any other topic, and for a stacked one whose parent is MERGED, is from a fork (`isCrossRepository`: GitHub stacks no pull request across forks, and an `origin/<headRefName>` of that name is another branch) or whose head is gone from origin (no `origin/<headRefName>` after `git fetch --prune`), as \"A pull request is refreshed\" retargets a stack whose parent merged. A fork's commits are not merged in, and \"Built\" gets, after its first line, `#<n> is from a fork: built on <branch>, not stacked on it.` A parent CLOSED without merging stays the base while its head is on origin, as GitHub keeps a stack whose pull request was closed: \"Built\" gets, after its first line, `Stacked on #<n>, closed without merging: its base stays <head> while that branch is on origin.` With that head gone, the topic is built on `<branch>` and gets no pull request, from a plan's landing or from the recovery: opened against `<branch>` it would bring the owner the work he closed. \"Built\" then opens `On topic <name>, commit <sha>, branch pushed; no pull request.` and gets, after its first line, `No pull request: #<n>, which topic <name> is stacked on, was closed without merging and its branch is gone.` Every step below that names `<base>` takes it so: the new branch, the start's merge, the create's `--base` and the recovery.",
     );
     expect(mode).toContain("`#<n> is from a fork: built on <branch>, not stacked on it.`");
     expect(mode).toContain(
@@ -2846,6 +3006,14 @@ describe("a pull request per topic", () => {
     );
     expect(mode).toContain(
       "Its base is the topic's base (above); a stacked topic whose base is `<branch>` gets its description without the `Builds on #<n>` line.",
+    );
+    // plans/stacked-merged-parent-gaps.md, parts 3 and 2: the recovery opens nothing for a
+    // topic that gets no pull request, and brings a merged parent's work in before it compares.
+    expect(mode).toContain(
+      'the `Builds on #<n>` line. A topic that gets no pull request ("A topic\'s base") is not opened: with none found, each of its plans\' "Built" gets the `No pull request:` line that paragraph gives.',
+    );
+    expect(mode).toContain(
+      "One with none found that is stacked on a parent MERGED and not from a fork is brought up to date first, as \"A pull request is refreshed\" does it: `git switch -C <name> origin/<name>` (a local branch holding commits that head lacks left and named), `origin/<branch>` merged in, a merged parent's work coming in once (above), the project's checks, and `git push origin <name>`; so the comparison reads the topic's own work, a deletion of what the parent added included, and its pull request opens with no conflict. Left unsettled, its checks failing or its push refused, the branch goes back to `origin/<name>` (`git reset --keep origin/<name>`) and the topic is opened as it stands, without the comparison, and named. One with none found, and `origin/<name>` adding something to its base",
     );
     expect(mode.split("`gh pr view <n> --json headRefName,state,isCrossRepository`").length).toBe(
       2,

@@ -274,7 +274,11 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   which its pull request opens against, so its parent's commits open no
   empty pull request; once its parent has merged, or that head is gone
   from origin, it is compared with the branch, the base a refresh
-  retargets it to. The same base is the one a new topic's branch starts
+  retargets it to. A stacked topic left with no pull request whose parent merged is brought
+  up to date before it is compared, the parent's work coming in once: as
+  it stood, a topic that only deleted what the parent added read as
+  nothing, and one that changed the parent's lines opened a pull request
+  that conflicted at once. The same base is the one a new topic's branch starts
   from, the one a plan's start merges into a topic's branch that has no
   pull request yet and the one its pull request opens against, its
   `Builds on #<n>` line only while it is the parent's head, so a topic
@@ -289,6 +293,9 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   keeps a stack whose pull request was closed and blocks what is above
   it: opened against the branch, the topic would bring the owner the
   work he closed inside another pull request, so he is told instead.
+  With that head gone, no base is left that is not the work he closed, so
+  the topic gets no pull request and he is told once, with the address
+  that opens it: the queue does not bring back by itself what he closed.
   Unfinished is
   said by the draft, as GitHub's draft pull requests, GitLab's
   `merge_request.create` push option and Gerrit's work in progress open the request at the push. A
@@ -298,7 +305,7 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plans/topic-first-pull-request-five.md,
   plans/stacked-topic-recovery-compares-parent.md,
   plans/stacked-branch-merge-base-fallback.md,
-  plans/stacked-base-edge-cases.md.
+  plans/stacked-base-edge-cases.md, plans/stacked-merged-parent-gaps.md.
   - ~~A topic's plans are built on one branch, pushed after each, and its
     pull request opens by itself once a plan of it is built and no other
     plan of it is queued.~~ (Javi, 26 November)
@@ -463,8 +470,13 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   branch, the squash taken so only when its tree is the parent merged
   into the branch before it, so nothing else on the branch is passed
   over, and its change is the parent's whole change, so the branch
-  before it holds none of the parent's work.
-  plans/refresh-by-merge.md, plans/stacked-base-edge-cases.md.
+  before it holds none of the parent's work. A parent that landed any
+  other way, a rebase merge, is merged with its head as the base, the
+  base a rebase of the stack takes, by `git merge-tree --merge-base`:
+  git's own base is older than the parent's files, and a file the parent
+  added and the topic renamed came back beside its new name with no
+  conflict. plans/refresh-by-merge.md, plans/stacked-base-edge-cases.md,
+  plans/stacked-merged-parent-gaps.md.
 - `refresh-only-your-own` **The executor refreshes only the queue's own
   pull requests, those its plans name as their own, with the checks
   alone.** (Javi, 3

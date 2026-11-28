@@ -57,7 +57,13 @@ fork: built on <branch>, not stacked on it.` A parent CLOSED without
 merging stays the base while its head is on origin, as GitHub keeps a
 stack whose pull request was closed: "Built" gets, after its first line,
 `Stacked on #<n>, closed without merging: its base stays <head> while
-that branch is on origin.` Every step below that names `<base>` takes it
+that branch is on origin.` With that head gone, the topic is built on
+`<branch>` and gets no pull request, from a plan's landing or from the
+recovery: opened against `<branch>` it would bring the owner the work he
+closed. "Built" then opens `On topic <name>, commit <sha>, branch
+pushed; no pull request.` and gets, after its first line, `No pull
+request: #<n>, which topic <name> is stacked on, was closed without
+merging and its branch is gone.` Every step below that names `<base>` takes it
 so: the new branch, the start's merge, the create's `--base` and the
 recovery.
 
@@ -94,12 +100,23 @@ patch-id --stable` gives the id that `git diff -U0 $(git merge-base
 gives, without context so a line the branch changed nearby is not
 read as the parent's, so
 `<mergeCommit>^` holds none of the parent's work. Otherwise (a rebase
-merge) merge the first, then `origin/<branch>`: a conflict whose
-`<branch>` side reads as the parent's head has it (`git show
-<headRefOid>:<file>`) takes the topic's side, which holds the parent's
-work and its own; any other is settled from the plans. A conflict left
+merge, or a squash the two checks do not pass) merge the first, then
+`origin/<branch>` with the parent's head as the merge's base: git's own
+base is older than the parent's files, so a file the parent added and
+the topic renamed or deleted would come back with no conflict. `git
+merge-tree --write-tree --name-only --merge-base=<headRefOid> HEAD
+origin/<branch>` gives the merged tree on its first line and, exiting 1,
+the files in conflict after it (any other exit, an older git's refusal
+of `--merge-base` included, is git's error, and the topic goes back as
+for a conflict left unsettled, below). Then `git merge -s ours --no-commit -m "Merge
+origin/<branch> into <name>, with #<n>'s head as base" -m "<the
+session's attribution lines>" origin/<branch>`, `git restore
+--source=<tree> --staged --worktree -- :/`, each file it named settled
+from the plans, `git add -u`, no `leftover conflict marker` in `git diff
+--cached --check`, and `git commit --no-edit`. A conflict left
 unsettled takes the topic back to the tip it had before the first (`git
-reset --keep <that tip>`), so no part of them is pushed. "Built" gets
+reset --keep <that tip>`, after `git add -u` and `git merge --abort` in
+a merge with a base), so no part of them is pushed. "Built" gets
 one line for the four, `Merged <branch> <date> past #<n>'s squash,
 commits <sha>, <sha>: <files or none>`, a merge that was already up to
 date naming no commit, and the two of the fallback a line each, as a
@@ -173,7 +190,20 @@ merged or closed at `origin/<name>`'s commit, is written into each of its
 plans' "Built" after the first line, `Pull request #<n> (<url>) found
 <open | merged | closed> <date>.`. Its base is the topic's base (above);
 a stacked topic whose base is `<branch>` gets its description without
-the `Builds on #<n>` line. One with none found, and `origin/<name>` adding something to its
+the `Builds on #<n>` line. A topic that gets no pull request ("A topic's
+base") is not opened: with none found, each of its plans' "Built" gets
+the `No pull request:` line that paragraph gives. One with none found
+that is stacked on a parent MERGED and not from a fork is brought up to
+date first, as "A pull request is refreshed" does it: `git switch -C
+<name> origin/<name>` (a local branch holding commits that head lacks
+left and named), `origin/<branch>` merged in, a merged parent's
+work coming in once (above), the project's checks, and `git push origin
+<name>`; so the comparison reads the topic's own work, a deletion of
+what the parent added included, and its pull request opens with no
+conflict. Left unsettled, its checks failing or its push refused, the
+branch goes back to `origin/<name>` (`git reset --keep origin/<name>`)
+and the topic is opened as it stands, without the comparison, and
+named. One with none found, and `origin/<name>` adding something to its
 base (`git merge-tree --write-tree origin/<base> origin/<name>` giving a
 first line other than `git rev-parse origin/<base>^{tree}`, so work a
 squash merge took is nothing), is opened as "Nothing else queued" says
@@ -246,7 +276,8 @@ retried as for a merge. Then, by the topic:
   `Pull request #<n> (<url>) joined, commit <sha>; <draft | ready>.`,
   its state as `gh pr view <n> --json isDraft` gives it.
 - **No pull request**: run `plans topic plans/<this plan>.md` and follow
-  its line (decisions.md#topic-landing).
+  its line (decisions.md#topic-landing). A topic that gets none ("A
+  topic's base") opens nothing, whatever the line says.
   - **More is queued** (`… still queued for topic <name>: its pull
     request waits for …`): nothing opens. "Built" opens with `On topic
     <name>, commit <sha>, branch pushed; its pull request waits for <the
@@ -373,7 +404,13 @@ requests.
 **The `Built:` message to the assistant leads with** each pull request opened or joined, its
 link and what it was marked related to, for one opened at five plans the plans sent
 on from it, for a topic stacked on a pull request closed without
-merging, that line of its "Built", and, for a draft: `Pull request
+merging, that line of its "Built", or with that branch gone `Topic
+<name> has no pull request: #<n>, which it is stacked on, was closed
+without merging and its branch is gone, so its pull request would bring
+that work back. To open it with #<n>'s work in it:
+<address>/compare/<branch>...<name>?expand=1` (`<address>` from `gh repo
+view --json url --jq .url`), once a topic, by the plan whose landing or
+recovery first writes that line, and, for a draft: `Pull request
 #<n> (<link>) is a draft and waits on you: read its description and
 screenshots, then mark it ready for review on GitHub (the Ready for
 review button at the bottom of the pull request). Until then it asks

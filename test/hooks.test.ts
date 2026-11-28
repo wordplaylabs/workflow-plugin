@@ -5833,6 +5833,16 @@ describe("the queue's faults, closed", () => {
     const none = runIn(dir, ["list"], { PATH: empty });
     expect(none).toMatch(/plans\/x\.md\s+topic pictures, no pull request\n/);
     expect(none).not.toContain("  pictures: plans/x.md");
+    // plans/stacked-merged-parent-gaps.md, part 3: stacked on a parent closed without merging,
+    // its branch gone, the two lines take the topic off the waiting list.
+    built(
+      "closed.md",
+      "K",
+      "On topic after-closed, commit 9234abcd, branch pushed; no pull request.\nNo pull request: #31, which topic after-closed is stacked on, was closed without merging and its branch is gone.",
+    );
+    const closed = runIn(dir, ["list"], { PATH: empty });
+    expect(closed).toMatch(/plans\/closed\.md\s+topic after-closed, no pull request\n/);
+    expect(closed).not.toContain("  after-closed: plans/closed.md");
     // Outside the pull request mode the line means nothing, so it is not said (Codex).
     const pushMode = fixture("TopicsPush");
     writeFileSync(

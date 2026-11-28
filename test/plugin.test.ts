@@ -3080,12 +3080,14 @@ describe("a pull request per topic", () => {
       "- **Builds on**: a topic stacked on #<n>, not a fork's, says so in its body on every write, `<n>` as \"A topic's base\" reads it from the topic's plans' `Lands` lines, else as the old body's own line gives it: `Builds on #<n>; merge that first.` while its base is that head, and once its base is `<branch>` the comment `<!-- workflow: stacked on #<n> -->` in its place, which GitHub shows nobody and no rewrite drops",
     );
     expect(mode).toContain(
-      "Its base is the topic's base (above); a stacked topic whose base is `<branch>` gets its description without the `Builds on #<n>` line.",
+      // plans/step-file-cap-follow-up.md: said as description.md's "Builds on" says it.
+      "Its base is the topic's base (above); a stacked topic whose base is `<branch>`, its parent not a fork's, gets its description with `<!-- workflow: stacked on #<n> -->` in place of the `Builds on #<n>` line (description.md, \"Builds on\").",
     );
+    expect(mode).not.toContain("without the `Builds on #<n>` line");
     // plans/stacked-merged-parent-gaps.md, parts 3 and 2: the recovery opens nothing for a
     // topic that gets no pull request, and brings a merged parent's work in before it compares.
     expect(mode).toContain(
-      'the `Builds on #<n>` line. A topic that gets no pull request ("A topic\'s base") is not opened: with none found, each of its plans\' "Built" gets the `No pull request:` line that paragraph gives.',
+      'the `Builds on #<n>` line (description.md, "Builds on"). A topic that gets no pull request ("A topic\'s base") is not opened: with none found, each of its plans\' "Built" gets the `No pull request:` line that paragraph gives.',
     );
     expect(mode).toContain(
       "One with none found that is stacked on a parent MERGED and not from a fork is brought up to date first, as \"A pull request is refreshed\" does it: `git switch -C <name> origin/<name>` (a local branch holding commits that head lacks left and named), `origin/<branch>` merged in, a merged parent's work coming in once (above), the project's checks, and `git push origin <name>`; so the comparison reads the topic's own work, a deletion of what the parent added included, and its pull request opens with no conflict. Left unsettled, its checks failing or its push refused, the branch goes back to `origin/<name>` (`git reset --keep origin/<name>`) and the topic is opened as it stands, without the comparison, and named. One with none found, and `origin/<name>` adding something to its base",
@@ -4693,13 +4695,21 @@ describe("a file an agent reads whole at a step is thirty thousand characters at
   const read = (path: string) => readFileSync(join(plugin, path), "utf8");
   const flat = (path: string) => read(path).replace(/\s+/g, " ");
 
-  it("holds landing.md, description.md and github.md to thirty thousand characters", () => {
-    for (const name of ["landing.md", "description.md", "github.md"]) {
+  it("holds landing.md, description.md, github.md and the skills' files to thirty thousand characters", () => {
+    // plans/step-file-cap-follow-up.md: a skill's files are read whole when it runs.
+    const skills = readdirSync(join(plugin, "skills"), { recursive: true, encoding: "utf8" })
+      .filter((name) => name.endsWith(".md"))
+      .map((name) => `skills/${name}`);
+    expect(skills).toContain("skills/setup/SKILL.md");
+    for (const path of [
+      ...["landing.md", "description.md", "github.md"].map((name) => `docs/${name}`),
+      ...skills,
+    ]) {
       // Counted as `wc -m` counts, by character and not by UTF-16 unit.
-      const length = [...read(`docs/${name}`)].length;
+      const length = [...read(path)].length;
       expect(
         length,
-        `docs/${name} is ${length} characters, over the 30,000 of decisions.md#step-file-length: split it by the step each part is read at, or trim it; a bigger cap is the owner's call`,
+        `${path} is ${length} characters, over the 30,000 of decisions.md#step-file-length: split it by the step each part is read at, or trim it; a bigger cap is the owner's call`,
       ).toBeLessThanOrEqual(30000);
     }
   });

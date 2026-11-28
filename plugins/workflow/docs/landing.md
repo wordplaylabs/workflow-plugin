@@ -183,8 +183,9 @@ fork being another person's and not this topic's: one found open, or
 merged or closed at `origin/<name>`'s commit, is written into each of
 its plans' "Built" after the first line, `Pull request #<n> (<url>)
 found <open | merged | closed> <date>.`. Its base is the topic's base
-(above); a stacked topic whose base is `<branch>` gets its description
-without the `Builds on #<n>` line. A topic that gets no pull request ("A
+(above); a stacked topic whose base is `<branch>`, its parent not a
+fork's, gets its description with `<!-- workflow: stacked on #<n> -->` in
+place of the `Builds on #<n>` line (description.md, "Builds on"). A topic that gets no pull request ("A
 topic's base") is not opened: with none found, each of its plans'
 "Built" gets the `No pull request:` line that paragraph gives. One with
 none found that is stacked on a parent MERGED and not from a fork is

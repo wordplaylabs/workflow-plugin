@@ -12629,7 +12629,10 @@ else say([]);
           );
           // A redelivery of the merge, still failing: read once, noted once.
           deliver(dir, "m2", body);
-          run(dir, ["github", "--inbox"], app);
+          run(dir, ["github", "--inbox"], { ...app, WORKFLOW_STARTS_LOG: join(dir, "starts.log") });
+          // The redelivery was read, not passed over (Codex C3).
+          const seen = JSON.parse(readFileSync(join(dir, ".claude", "github-seen.json"), "utf8"));
+          expect(seen.deliveries).toContain("m2");
           expect(readFileSync(file, "utf8").match(/^unclosed, /gm)).toHaveLength(1);
           const asked = readFileSync(join(dir, "asked.log"), "utf8");
           expect(asked.match(/^pr view 41 --json url,closingIssuesReferences/gm)).toHaveLength(1);

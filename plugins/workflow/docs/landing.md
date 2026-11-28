@@ -481,8 +481,12 @@ to a Claude session left out>
   --format=%H`, and a merge this plan made before its tip); a commit a
   plan of the topic names by hash in its "Built", the shorter a prefix
   of the longer; on a branch stacked on a pull request since merged, the
-  commits of each merged pull request down the stack, found by the
-  `Builds on #<n>` line of its body (`gh api --paginate
+  commits of each merged pull request down the stack: the topic's parent
+  is the `stacked on #<n>` "A topic's base" reads from the topic's plans'
+  `Lands` lines, a parent's own parent the `stacked on #<n>` of that pull
+  request's plans' `Lands` lines in this checkout, and either, with no
+  such line, the `Builds on #<n>` line of the body above it, which a
+  rewrite drops once the base is `<branch>` (`gh api --paginate
   repos/{owner}/{repo}/pulls/<n>/commits --jq '.[].sha'`). Nothing is
   left out by author or by title. With no line, no section. An old fold
   is not the owner's, and ends his section.

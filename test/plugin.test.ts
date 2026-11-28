@@ -410,7 +410,15 @@ describe("the plugin's queue in any project", () => {
     expect(doc).toContain("**The plans account for the queue's commits.**");
     // plans/also-knows-whose-commit-follow-up.md: every merged base down the stack, read in pages.
     expect(executor).toContain("each merged pull request down the stack");
-    expect(executor).toContain("found by the `Builds on #<n>` line of its body");
+    // plans/also-list-reads-lands-first.md: the Lands lines first, as a rewrite drops Builds on.
+    // Scoped to the description's Other changes, where the accounting is written (Codex C3).
+    const otherChanges = executor.slice(
+      executor.indexOf("- **Other changes**"),
+      executor.indexOf("- **Left out**"),
+    );
+    expect(otherChanges).toContain(
+      "the commits of each merged pull request down the stack: the topic's parent is the `stacked on #<n>` \"A topic's base\" reads from the topic's plans' `Lands` lines, a parent's own parent the `stacked on #<n>` of that pull request's plans' `Lands` lines in this checkout, and either, with no such line, the `Builds on #<n>` line of the body above it, which a rewrite drops once the base is `<branch>` (`gh api --paginate repos/{owner}/{repo}/pulls/<n>/commits --jq '.[].sha'`)",
+    );
     expect(executor).toContain(
       "`gh api --paginate repos/{owner}/{repo}/pulls/<n>/commits --jq '.[].sha'`",
     );

@@ -529,7 +529,13 @@ describe("the plugin's queue in any project", () => {
     for (const pin of [
       "- **Changes**: the main changes, five bullets at most, oldest first.",
       "- **Other changes**: everything else a person can now do or see, in a closed section under the bullets, `<details><summary>Other changes</summary>`, a blank line before and after its list",
-      "- **Left out**: housekeeping, which changes nothing for a person once the pull request is merged: a merge of the base and a refresh, a test's timeout or flake, and a fix to what this pull request itself added, a later plan's as much as a review's. This is about what the plans did; a commit no plan accounts for is listed whatever its title. A pull request that holds nothing else lists these as its bullets.",
+      "- **Left out**: housekeeping, which changes nothing for a person once the pull request is merged: a merge of the base and a refresh, a test's timeout or flake, and a fix to what this pull request itself added, a later plan's as much as a review's. This is about what the plans did; a commit no plan accounts for is listed whatever its title. A pull request whose plans did nothing else lists these as its bullets, so Changes is never empty.",
+      // plans/pr-description-review-findings.md: the five before the title, the day's own order.
+      'Over five, keep this plan\'s, then what the title it has names, then what a person meets before what is behind it, then the older; the title is judged after the five are picked ("The title").',
+      "- **Fixes**: five fixes at most, oldest first; over five, this plan's, then what a person meets before what is behind it, then the older. Each is the commit's title, its screenshot by the topic's rule: one at most, none under Other fixes, light mode, desktop width, only where it shows the fix.",
+      // The review of the build: the day's fixes keep a replaced call first and never an empty Fixes.
+      "A fix that replaces another person's call goes first, past five if need be, as a topic's bullet does.",
+      "Housekeeping is left out as in a topic's, and listed when the day's fixes did nothing else, so Fixes is never empty.",
       "one under a main bullet at most, none under Other changes",
       "a picture whose bullet is no longer a main one leaves the body",
       "With no line, no section.",

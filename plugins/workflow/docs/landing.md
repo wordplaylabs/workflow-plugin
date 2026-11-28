@@ -492,14 +492,15 @@ to a Claude session left out>
   project now does; plans that did one thing share a bullet. Under five,
   a "Done when" scenario a person sees joins them when it is a thing of
   its own, not a state of a bullet already there. Over five, keep this
-  plan's, what the title names, then what a person meets before what is
-  behind it, then the older. The lead in bold is the thing, two to five
-  words, in the words of the plans and the catalogue; the sentence is
-  plain, one line of what it does, with no tier, date, struck rule or
-  catalogue id. A bullet whose change replaces a rule with another
-  person's name says so in its sentence, `replacing <name>'s call`, is a
-  main change whatever its size and goes first, past five if more than
-  five do (decisions.md#decision-has-a-name). A decision taken after
+  plan's, then what the title it has names, then what a person meets
+  before what is behind it, then the older; the title is judged after
+  the five are picked ("The title"). The lead in bold is the thing, two
+  to five words, in the words of the plans and the catalogue; the
+  sentence is plain, one line of what it does, with no tier, date,
+  struck rule or catalogue id. A bullet whose change replaces a rule
+  with another person's name says so in its sentence, `replacing
+  <name>'s call`, is a main change whatever its size and goes first,
+  past five if more than five do (decisions.md#decision-has-a-name). A decision taken after
   thirty minutes unanswered says `taken for <the owner>, unanswered` in
   its line, here or under Other changes, and one taken in place of a
   question (a `Taken on` line of "Built") says `taken for <the owner>`.
@@ -532,7 +533,8 @@ to a Claude session left out>
   test's timeout or flake, and a fix to what this pull request itself
   added, a later plan's as much as a review's. This is about what the
   plans did; a commit no plan accounts for is listed whatever its title.
-  A pull request that holds nothing else lists these as its bullets.
+  A pull request whose plans did nothing else lists these as its
+  bullets, so Changes is never empty.
 - **Screenshots**: one under a main bullet at most, none under Other
   changes, only where it shows exactly what the bullet added or changed,
   in light mode at desktop width; dark mode or a phone width only for a
@@ -596,13 +598,16 @@ sections are kept as in a topic's.
 to a Claude session left out>
 ```
 
-- **Fixes**: five fixes at most, chosen as a topic's main changes are,
-  oldest first, each the commit's title, its screenshot by the topic's
-  rule: one at most, light mode, desktop width, only where it shows the
-  fix. The other fixes follow in a closed `<details><summary>Other
-  fixes</summary>`, a title a line, oldest first; with none, no section.
-  Housekeeping is left out as in a topic's, and listed when the day
-  holds nothing else.
+- **Fixes**: five fixes at most, oldest first; over five, this plan's,
+  then what a person meets before what is behind it, then the older.
+  Each is the commit's title, its screenshot by the topic's rule: one at
+  most, none under Other fixes, light mode, desktop width, only where it
+  shows the fix. A fix that replaces another person's call goes first,
+  past five if need be, as a topic's bullet does. The other fixes follow
+  in a closed `<details><summary>Other fixes</summary>`, a title a line,
+  oldest first; with none, no section. Housekeeping is left out as in a
+  topic's, and listed when the day's fixes did nothing else, so Fixes is
+  never empty.
 - **Already on <branch>**: the day's fixes pushed straight, from `git log
   origin/<branch> --first-parent --since=<the day's start> --format='%h
   %s'`, without merge commits and commits whose title ends in ` (#<n>)`;

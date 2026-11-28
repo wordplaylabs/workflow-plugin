@@ -2942,12 +2942,13 @@ describe("a pull request per topic", () => {
       "**Nothing else queued** (`Nothing else is queued for topic <name>: …`): the description (below), written from every plan of the topic so far, oldest first, to `plans/<this plan>/pull-request.md`",
     );
     // plans/pull-requests-small-and-plain.md, part 4: a title for the whole
-    // pull request, written again on a join that it no longer covers.
+    // pull request, written again on a join that it no longer covers;
+    // plans/pr-title-read-on-rewrite.md: read on a rewrite as on a join.
     expect(mode).toContain(
       "--title \"<this plan's title, or the sentence for all of the topic's plans when it opens with several>\"",
     );
     expect(mode).toContain(
-      "- **The title** is one sentence saying what the whole pull request does now (decisions.md#pull-request-title), in the words of the leads under Changes, with no number and no plan's name. A plan alone in it gives its own title. On a join, read the one it has (`gh pr view <n> --json title`). One that is not the queue's last, the `Title:` line of the topic's latest \"Built\" that has one, else its first plan's title, is a person's: it stays, and \"Built\" says `Title kept: a person's.` The queue's own stays while it covers every main change, and is written again when this plan adds one it does not cover: the first plan's thing, then what was added, or the area they share when that is more than three things. \"Built\" gets `Title: <the sentence>` after its first line whenever the executor sets one.",
+      "- **The title** is one sentence saying what the whole pull request does now (decisions.md#pull-request-title), in the words of the leads under Changes, with no number and no plan's name. A plan alone in it gives its own title. On a join or a rewrite, read the one it has (`gh pr view <n> --json title`). One that is not the queue's last, the `Title:` line of the topic's latest \"Built\" that has one, else its first plan's title, is a person's: it stays, and \"Built\" says `Title kept: a person's.` The queue's own stays while it covers every main change, and is written again when this plan adds one it does not cover: the first plan's thing, then what was added, or the area they share when that is more than three things. \"Built\" gets `Title: <the sentence>` after its first line whenever the executor sets one.",
     );
     // plans/stacked-branch-merge-base-fallback.md: the start's merge takes the topic's base,
     // said once, so a stacked topic whose parent merged merges in the branch, not its head.

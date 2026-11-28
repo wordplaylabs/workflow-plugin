@@ -1,30 +1,29 @@
 # Landing by pull request
 
-The executor reads this at a plan's start in a project with `land:
-pull-request`, where "push" in its agent file means the landing below (decisions.md#topic-landing). The merge is the people's:
-run no `gh pr merge` and no `gh pr ready`; push the
-branch itself only for a `Lands: fix, now.` plan, as a fast-forward. In a
-project whose file has an **Issues** heading, every write to GitHub but
-the push runs as `plans gh` (`gh pr create`, `gh pr edit`); the push
-stays on `GH_TOKEN`.
+The executor reads this at a plan's start where `land: pull-request`;
+"push" in its agent file means this landing
+(decisions.md#topic-landing). The merge is the people's: run no `gh pr
+merge` and no `gh pr ready`; push the branch itself only for a `Lands:
+fix, now.` plan, as a fast-forward. In a project whose file has an
+**Issues** heading, every write to GitHub but the push runs as `plans
+gh` (`gh pr create`, `gh pr edit`); the push stays on `GH_TOKEN`.
 
 **The `Lands` line**, under the plan's header paragraph, is one of
 `Lands: fix.`, `Lands: fix, now.`, `Lands: refresh.` and `Lands: topic
-<name>.`, a topic's with `; lands in #<n>.` or `; stacked on #<n>.` after
-its name when the author names the pull request, kept when the line is
-rewritten. A plan with none is `topic <the plan's file name without
-.md>`. A line written before 26 November 2026 may say `, waiting` or `,
-ready` after the name, and one before 28 November `as its fix` after
-`lands in #<n>`: they mean nothing now. Follow the line; its author
-judges whether a change is a fix.
+<name>.`, a topic's ending `; lands in #<n>.` or `; stacked on #<n>.`
+when its author names the pull request, kept on a rewrite. A plan with
+none is `topic <the plan's file name without .md>`. A line written
+before 26 November 2026 may say `, waiting` or `, ready` after the name,
+and one before 28 November `as its fix` after `lands in #<n>`: they mean
+nothing now. Follow the line; its author judges whether a change is a
+fix.
 
 **A topic's pull request opens as a draft, and stays ready once the
 owner marks it** (decisions.md#draft-until-reviewed): `gh pr create`
 takes `--draft`; a plan that joins one he has marked ready pushes to it
 as it is, its checks run again, and the merge stays his. The day's fixes
 pull request opens ready; a join, the refresh and the retarget leave the
-state as it is. Asked to mark one ready, give the step: the Ready for
-review button.
+state as it is.
 
 **A branch is brought up to date by a merge**, not a rebase and a forced
 push (decisions.md#merge-never-force): `git merge --no-edit -m "Merge
@@ -176,42 +175,41 @@ Delete a local branch only when `gh pr view <name> --json
 state,headRefOid` says MERGED at its own commit; others stay, named in
 the final message.
 
-**A topic left with no pull request** is opened: each topic `plans` lists
-under `Topics waiting for a pull request` with `so the next plan's start opens it`.
-`gh pr list --state all --head <name> --json
+**A topic left with no pull request** is opened: each topic `plans`
+lists under `Topics waiting for a pull request` with `so the next plan's
+start opens it`. `gh pr list --state all --head <name> --json
 number,url,state,headRefOid,isCrossRepository`, a pull request from a
 fork being another person's and not this topic's: one found open, or
-merged or closed at `origin/<name>`'s commit, is written into each of its
-plans' "Built" after the first line, `Pull request #<n> (<url>) found
-<open | merged | closed> <date>.`. Its base is the topic's base (above);
-a stacked topic whose base is `<branch>` gets its description without
-the `Builds on #<n>` line. A topic that gets no pull request ("A topic's
-base") is not opened: with none found, each of its plans' "Built" gets
-the `No pull request:` line that paragraph gives. One with none found
-that is stacked on a parent MERGED and not from a fork is brought up to
-date first, as "A pull request is refreshed" does it: `git switch -C
-<name> origin/<name>` (a local branch holding commits that head lacks
-left and named), `origin/<branch>` merged in, a merged parent's
-work coming in once (above), the project's checks, and `git push origin
-<name>`; so the comparison reads the topic's own work, a deletion of
-what the parent added included, and its pull request opens with no
-conflict. Left unsettled, its checks failing or its push refused, the
-branch goes back to `origin/<name>` (`git reset --keep origin/<name>`)
-and the topic is opened as it stands, without the comparison, and
-named. One with none found, and `origin/<name>` adding something to its
-base (`git merge-tree --write-tree origin/<base> origin/<name>` giving a
-first line other than `git rev-parse origin/<base>^{tree}`, so work a
-squash merge took is nothing), is opened as "Nothing else queued" says
-with `--head <name>` added and `--base <base>`,
-from the branch the plan in hand is on, the description written to
-`plans/<its last built plan>/pull-request.md`, each of its plans' "Built"
-getting `Pull request #<n> (<url>) opened <date> with plans/<the plan in
-hand>.md.`; none and
-no such branch, or nothing ahead, gets `No pull request: <branch <name>
-is gone from origin | its commits are on <base> already>.` in each. A
-create refused because another executor opened it first is read again
-and written as found. The plan in hand's "Built" and its `Built:`
-message name each.
+merged or closed at `origin/<name>`'s commit, is written into each of
+its plans' "Built" after the first line, `Pull request #<n> (<url>)
+found <open | merged | closed> <date>.`. Its base is the topic's base
+(above); a stacked topic whose base is `<branch>` gets its description
+without the `Builds on #<n>` line. A topic that gets no pull request ("A
+topic's base") is not opened: with none found, each of its plans'
+"Built" gets the `No pull request:` line that paragraph gives. One with
+none found that is stacked on a parent MERGED and not from a fork is
+brought up to date first, as "A pull request is refreshed" does it: `git
+switch -C <name> origin/<name>` (a local branch holding commits that
+head lacks left and named), `origin/<branch>` merged in, a merged
+parent's work coming in once (above), the project's checks, and `git
+push origin <name>`; so the comparison reads the topic's own work, a
+deletion of what the parent added included, and its pull request opens
+with no conflict. Left unsettled, its checks failing or its push
+refused, the branch goes back to `origin/<name>` (`git reset --keep
+origin/<name>`) and the topic is opened as it stands, without the
+comparison, and named. One with none found, and `origin/<name>` adding
+something to its base (`git merge-tree --write-tree origin/<base>
+origin/<name>` giving a first line other than `git rev-parse
+origin/<base>^{tree}`, so work a squash merge took is nothing), is
+opened as "Nothing else queued" says with `--head <name>` added and
+`--base <base>`, from the branch the plan in hand is on, the description
+written to `plans/<its last built plan>/pull-request.md`, each of its
+plans' "Built" getting `Pull request #<n> (<url>) opened <date> with
+plans/<the plan in hand>.md.`; none and no such branch, or nothing
+ahead, gets `No pull request: <branch <name> is gone from origin | its
+commits are on <base> already>.` in each. A create refused because
+another executor opened it first is read again and written as found. The plan in hand's "Built" and its
+`Built:` message name each.
 
 **Then a conflicting pull request is refreshed**: each of the queue's
 own that GitHub reports as conflicting (`gh pr view <n> --json
@@ -222,28 +220,26 @@ on it, by "A pull request is refreshed". Then `git checkout --detach
 origin/<branch>`.
 
 **A pull request is refreshed**: start from its head as GitHub has it,
-`git switch -C <head branch> origin/<head branch>`; a local branch holding commits that head
-lacks is left and named. Merge its base, `origin/<baseRefName>`, in, a merged parent's work as
-"A merged parent's work comes in once" says (one
-stacked on a pull request just refreshed merges that one's new head),
-the conflicts settled from the two plans; run the project's checks, not
-the suites, since its CI runs on the push; push it with `git push origin
-<head branch>`, never to the branch. Its plan's "Built" gets `Refreshed <date>: merged <base>, commit <sha>, <files>`. One that cannot be settled
-is left and named.
+`git switch -C <head branch> origin/<head branch>`; a local branch
+holding commits that head lacks is left and named. Merge its base,
+`origin/<baseRefName>`, in, a merged parent's work as "A merged parent's
+work comes in once" says (one stacked on a pull request just refreshed
+merges that one's new head); run the project's checks, not the suites,
+since its CI runs on the push; push it with `git push origin <head
+branch>`, never to the branch. Its plan's "Built" gets `Refreshed <date>: merged <base>, commit <sha>, <files>`. One that
+cannot be settled is left and named.
 
-**A refresh**, `Lands: refresh.`, is the assistant's plan after a
-merge (decisions.md#merge-refreshes-the-rest): no branch, commit,
-review or pull request of its own. After "At a plan's start", each
-pull request the plan names that is still open and behind its base
-(`git rev-list --count origin/<head>..origin/<base>` over 0), or
-conflicting, is refreshed by "A pull request is refreshed"; one it
-names as stacked on the merged one was retargeted at the plan's
-start. A plan that names none takes every one of the queue's own but
-another person's (`gh pr view <n> --json author`, neither a bot nor the
-token's own login), which is left and named.
-Draft or ready, the state stays. "Built" opens with `Refreshed:
-#<n> at <sha>, #<m> at <sha>; left: #<k>, <why>.`, or `Refreshed:
-nothing was behind.`, and says `Codex review: not run (a refresh).`
+**A refresh**, `Lands: refresh.`, is the assistant's plan after a merge
+(decisions.md#merge-refreshes-the-rest): no branch, commit, review or
+pull request of its own. After "At a plan's start", each pull request
+the plan names that is still open and behind its base (`git rev-list
+--count origin/<head>..origin/<base>` over 0), or conflicting, is
+refreshed by "A pull request is refreshed". A plan that names none takes
+every one of the queue's own but another person's (`gh pr view <n>
+--json author`, neither a bot nor the token's own login), which is left
+and named. "Built" opens with `Refreshed: #<n> at <sha>, #<m> at <sha>;
+left: #<k>, <why>.`, or `Refreshed: nothing was behind.`, and says
+`Codex review: not run (a refresh).`
 
 **A topic's plan**: one commit per plan on the topic's branch, squashed
 back to the plan's tip, so a commit another person pushed stays theirs;
@@ -264,8 +260,7 @@ retried as for a merge. Then, by the topic:
   ```
 
   `--title` when the title is written again ("The title", below), one
-  `--attach` per local screenshot the body names, the uploaded ones
-  kept as they are.
+  `--attach` per local screenshot the body names.
   No comment: the description is the record
   (decisions.md#joined-pull-request). "Built" opens with
   `Pull request #<n> (<url>) joined, commit <sha>; <draft | ready>.`,
@@ -384,22 +379,22 @@ under 2.99.0, or the upload refused): look first whether a refused `gh
 pr create` opened one anyway (`gh pr view <name> --json number,url`),
 and try the upload once more, by `gh pr edit <n>` on the one it opened,
 else by the same command; then take the images that failed out of the
-body, each one's line kept as a line of its own (its alt text), and set
-it without `--attach`, with the same line under `## To try it`. A pull
-request a refused create opened gets its body replaced, never a second;
-a refused `gh pr edit` that set part of the body is read back (`gh pr
-view <n> --json body`) and set again. The cause is `This container's gh
-is older than 2.99.` when gh's own line is `unknown flag: --attach`,
-else gh's own line. "Built" and the `Built:` message say the same.
+body as above and set it without `--attach`, with the same line under
+`## To try it`. A pull request a refused create opened gets its body
+replaced, never a second; a refused `gh pr edit` that set part of the
+body is read back (`gh pr view <n> --json body`) and set again. The
+cause is `This container's gh is older than 2.99.` when gh's own line is
+`unknown flag: --attach`, else gh's own line. "Built" and the `Built:`
+message say the same.
 
-**The checks are not waited on** ("A push is not waited on"): after
-the push and the pull request's create or edit, start the next plan;
-run no `gh pr checks` and no `gh run watch` on a pull request. A run
-that fails there reaches the assistant by the app's webhook and comes
-back as a short plan landing in it; the Stop hook names a failed check
-the webhook does not bring (any with no webhook, another service's
-with one), fixed and pushed before the
-next plan. The project's `run` is read only for a fix pushed straight.
+**The checks are not waited on** ("A push is not waited on"): after the
+push and the pull request's create or edit, start the next plan; run no
+`gh pr checks` and no `gh run watch` on a pull request. A run that fails
+there comes back by the app's webhook as a short plan; the Stop hook
+names a failed check the webhook does not bring (any with no webhook, another service's
+with one), fixed and pushed before
+the next plan. The project's `run` is read only for a fix pushed
+straight.
 
 **After the plan's push**, `git checkout --detach
 origin/<branch>`; keep the local branches, the hook's match for pull
@@ -501,8 +496,7 @@ to a Claude session left out>
   it: `Builds on #<n>; merge that first.` while its base is that head,
   and once its base is `<branch>` the comment
   `<!-- workflow: stacked on #<n> -->` in its place, which GitHub shows
-  nobody and no rewrite drops, so a merged parent stays named where no
-  plan of the topic is (decisions.md#plans-account-for-commits).
+  nobody and no rewrite drops (decisions.md#plans-account-for-commits).
 - **Changes**: the main changes, five bullets at most, oldest first. A
   main change is a plan's central decision, what its title says the
   project now does; plans that did one thing share a bullet. Under five,
@@ -510,13 +504,11 @@ to a Claude session left out>
   its own, not a state of a bullet already there. Over five, keep this
   plan's, then what the title it has names, then what a person meets
   before what is behind it, then the older; the title is judged after
-  the five are picked ("The title"). The lead in bold is the thing, two
-  to five words, in the words of the plans and the catalogue; the
-  sentence is plain, one line of what it does, with no tier, date,
-  struck rule or catalogue id. A bullet whose change replaces a rule
-  with another person's name says so in its sentence, `replacing
-  <name>'s call`, is a main change whatever its size and goes first,
-  past five if more than five do (decisions.md#decision-has-a-name). A decision taken after
+  the five are picked ("The title"). The bold lead is the thing; the sentence, plain and one line of what it does, has no tier, date, struck rule or
+  catalogue id. A bullet whose change replaces a rule with another
+  person's name says so in its sentence, `replacing <name>'s call`, is a
+  main change whatever its size and goes first, past five if more than
+  five do (decisions.md#decision-has-a-name). A decision taken after
   thirty minutes unanswered says `taken for <the owner>, unanswered` in
   its line, here or under Other changes, and one taken in place of a
   question (a `Taken on` line of "Built") says `taken for <the owner>`.
@@ -555,17 +547,16 @@ to a Claude session left out>
   changes, only where it shows exactly what the bullet added or changed,
   in light mode at desktop width; dark mode or a phone width only for a
   bullet about the theme or about that width; its line, what the picture
-  shows, is its alt text and the `#<the line>` of its `--attach`. The
-  screenshots the plan took for its review stay in `plans/<topic>/`;
-  only the ones the body names are attached. On a rewrite, a picture
-  whose bullet is no longer a main one leaves the body.
+  shows, is its alt text and the `#<the line>` of its `--attach`. Only
+  the ones the body names are attached. On a rewrite, a picture whose
+  bullet is no longer a main one leaves the body.
 - **To try it**: a line from the project file's "After the push", else
   "Check out the branch."
 - **The title** is one sentence saying what the whole pull request
   does now (decisions.md#pull-request-title), in the words of the
   leads under Changes, with no number and no plan's name. A plan alone
-  in it gives its own title. On a join, read the one it has (`gh pr
-  view <n> --json title`). One that is not the queue's last, the
+  in it gives its own title. On a join or a rewrite, read the one it has
+  (`gh pr view <n> --json title`). One that is not the queue's last, the
   `Title:` line of the topic's latest "Built" that has one, else its
   first plan's title, is a person's: it stays, and "Built" says `Title
   kept: a person's.` The queue's own stays while it covers every

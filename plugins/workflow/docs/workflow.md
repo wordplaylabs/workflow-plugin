@@ -311,16 +311,22 @@ nothing; `docs/landing.md` holds the executor's steps.
 **The description is a short list of what changed**: the owner's
 paragraphs when he wrote some, a `Closes` line per issue, `Builds on`,
 and one `Related` list naming each related pull request, issue or branch
-once, then `Changes`, a few bullets, each a bold lead and one plain
-sentence of what a person can now do or see, with one screenshot under
-a bullet only where it shows it; a bullet that replaces another
-person's call says so by name; the commits no plan here accounts for
-as bullets with their author; then where to try it; on one screen,
-pictures aside. The decisions stay in the catalogue, whose diff the
-pull request shows. Its title is one sentence saying what the whole
-pull request does now, written again when a plan adds what it does not
-cover; a title a person wrote stays. (decisions.md#pull-request-title)
-The merge is the people's, and no agent merges. (decisions.md#short-description)
+once, then `Changes`, the main changes, five bullets at most, each a
+bold lead and one plain sentence of what a person can now do or see,
+with one screenshot under a bullet only where it shows it; a bullet that
+replaces another person's call says so by name and is always among them,
+past five if need be; under them a closed `Other changes` section, the
+smaller changes a short line each and then the commits no plan here
+accounts for with their author; housekeeping, a merge of the base, a
+refresh, a test's timeout or flake, a fix to the pull request's own
+work, in neither unless it is all there is; then where to try it; on one
+screen with the section closed, pictures aside. The day's fixes are
+listed the same way. The decisions stay in the catalogue, whose diff the
+pull request shows. Its title is one sentence saying what the whole pull
+request does now, written again when a plan adds what it does not cover;
+a title a person wrote stays. (decisions.md#pull-request-title) The
+merge is the people's, and no agent merges.
+(decisions.md#short-description)
 
 **How plans group into pull requests is the project's rule, under
 `## Pull requests` in its file**, read by the author of a `Lands` line;

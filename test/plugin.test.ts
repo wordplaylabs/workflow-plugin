@@ -498,6 +498,51 @@ describe("the plugin's queue in any project", () => {
     );
   });
 
+  // plans/pr-description-main-changes.md: the main changes shown, the rest folded closed,
+  // housekeeping in neither.
+  it("a pull request's description shows five main changes and folds the rest", () => {
+    const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
+    const executor = readFileSync(join(plugin, "docs/landing.md"), "utf8");
+    const mode = executor.slice(executor.indexOf("# Landing by pull request"));
+    const blocks = [...mode.matchAll(/^```\n([\s\S]*?)^```$/gm)].map((m) => m[1]);
+    const topic = blocks.find((block) => block.includes("## Changes")) ?? "";
+    const fixes = blocks.find((block) => block.includes("## Fixes")) ?? "";
+    const fold =
+      "<details><summary>Other changes</summary>\n\n- <A smaller change, one short sentence.>\n- <The commit's title.> (<author>)\n\n</details>";
+    expect(topic.indexOf(fold)).toBeGreaterThan(topic.indexOf("## Changes"));
+    expect(topic.indexOf(fold)).toBeLessThan(topic.indexOf("## To try it"));
+    expect(topic).toContain("- **<A main change, two to five words.>**");
+    expect(executor).not.toContain("<details open");
+    expect(fixes.indexOf("## Fixes")).toBeGreaterThan(-1);
+    const otherFixes = fixes.indexOf("<details><summary>Other fixes</summary>");
+    expect(otherFixes).toBeGreaterThan(fixes.indexOf("## Fixes"));
+    expect(otherFixes).toBeLessThan(fixes.indexOf("## Already on <branch>"));
+    const landing = executor.replace(/\s+/g, " ");
+    for (const pin of [
+      "- **Changes**: the main changes, five bullets at most, oldest first.",
+      "- **Other changes**: everything else a person can now do or see, in a closed section under the bullets, `<details><summary>Other changes</summary>`, a blank line before and after its list",
+      "- **Left out**: housekeeping, which changes nothing for a person once the pull request is merged: a merge of the base and a refresh, a test's timeout or flake, and a fix to what this pull request itself added, a later plan's as much as a review's. This is about what the plans did; a commit no plan accounts for is listed whatever its title. A pull request that holds nothing else lists these as its bullets.",
+      "one under a main bullet at most, none under Other changes",
+      "a picture whose bullet is no longer a main one leaves the body",
+      "With no line, no section.",
+    ])
+      expect(landing).toContain(pin);
+    expect(landing).not.toContain("one bullet per thing a person can now do or see");
+    const doc = readFileSync(join(plugin, "docs/workflow.md"), "utf8").replace(/\s+/g, " ");
+    expect(doc).toContain("the main changes, five bullets at most");
+    expect(doc).toContain("in neither");
+    expect(doc).not.toContain("a few bullets, each a bold lead");
+    const decisions = readFileSync(join(plugin, "docs/decisions.md"), "utf8");
+    expect(decisions.replace(/\s+/g, " ")).toContain(
+      "`short-description` **The description shows a pull request's main changes, five bullets at most, each a bold lead and one plain sentence of what a person can now do or see, one screenshot under a bullet only where it shows it; the smaller changes are a short line each in a closed `Other changes` section under them, and housekeeping is in neither; then To try it; the related pull requests, issues and branches in one list, each once; no tiers, dates, struck rules or ids.** (Javi, 28 November)",
+    );
+    expect(decisions).toMatch(
+      /^\s+- ~~The description is a short list of what changed: a few bullets,[^~]*~~\s+\(Javi, 27 November\)$/m,
+    );
+    const setup = readFileSync(join(plugin, "skills/setup/SKILL.md"), "utf8").replace(/\s+/g, " ");
+    expect(setup).toContain("with its main changes and screenshots on top");
+  });
+
   // plans/no-session-link-in-pull-requests.md.
   it("leaves the link to a Claude session out of a pull request's description", () => {
     const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
@@ -2701,7 +2746,7 @@ describe("a pull request per topic", () => {
       "--title \"<this plan's title, or the sentence for all of the topic's plans when it opens with several>\"",
     );
     expect(mode).toContain(
-      "- **The title** is one sentence saying what the whole pull request does now (decisions.md#pull-request-title), in the words of the leads under Changes, with no number and no plan's name. A plan alone in it gives its own title. On a join, read the one it has (`gh pr view <n> --json title`). One that is not the queue's last, the `Title:` line of the topic's latest \"Built\" that has one, else its first plan's title, is a person's: it stays, and \"Built\" says `Title kept: a person's.` The queue's own stays while it covers every bullet under Changes, and is written again when this plan adds one it does not cover: the first plan's thing, then what was added, or the area they share when that is more than three things. \"Built\" gets `Title: <the sentence>` after its first line whenever the executor sets one.",
+      "- **The title** is one sentence saying what the whole pull request does now (decisions.md#pull-request-title), in the words of the leads under Changes, with no number and no plan's name. A plan alone in it gives its own title. On a join, read the one it has (`gh pr view <n> --json title`). One that is not the queue's last, the `Title:` line of the topic's latest \"Built\" that has one, else its first plan's title, is a person's: it stays, and \"Built\" says `Title kept: a person's.` The queue's own stays while it covers every main change, and is written again when this plan adds one it does not cover: the first plan's thing, then what was added, or the area they share when that is more than three things. \"Built\" gets `Title: <the sentence>` after its first line whenever the executor sets one.",
     );
     expect(mode).toContain(
       "- **A pull request takes five plans** (decisions.md#pull-request-full). Before a plan lands in an open pull request of the queue's own, by its `Lands` line, its topic or a draft it rests on, run `plans full <n> plans/<this plan>.md` and follow its line: it lands in it, or on the topic the line names, stacked on #<n>, its `Lands` line rewritten as the line gives it and that topic's branch taken as below. \"Built\" and the `Built:` message say `#<n> was full: built on topic <name>, stacked on it.`",

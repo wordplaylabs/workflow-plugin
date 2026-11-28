@@ -384,9 +384,12 @@ at this plan's start, the day's fixes pull request, and the fixes pushed
 straight.
 
 **The description** is a short list of what changed
-(decisions.md#short-description): plain words, no dashes, the
-project's spelling, each bullet's words from the plans or the
-catalogue, a commit's title as written; on one screen, pictures aside.
+(decisions.md#short-description): the main changes shown, the smaller
+ones folded, housekeeping left out. Plain words, no dashes, the
+project's spelling, each line's words from the plans or the catalogue, a
+commit's title as written; on one screen with the fold closed, pictures
+aside. It is written for the pull request as it stands, so a fix to what
+an earlier plan of it added changes that line's sentence and adds none.
 
 ```
 <The owner's paragraphs, word for word, when the body has some>
@@ -401,13 +404,19 @@ Related:                                      <- when a plan has a Related line
 
 ## Changes
 
-- **<What was added or changed, two to five words.>** <One sentence of
-  what a person can now do or see.>
+- **<A main change, two to five words.>** <One sentence of what a
+  person can now do or see.>
 
   ![<What the picture shows, in one line.>](plans/<topic>/<file>.png)
 
-- **<What was added or changed.>** <One sentence.>
+- **<A main change.>** <One sentence.>
+
+<details><summary>Other changes</summary>
+
+- <A smaller change, one short sentence.>
 - <The commit's title.> (<author>)
+
+</details>
 
 ## To try it
 
@@ -441,18 +450,29 @@ to a Claude session left out>
   `Closes` or `Builds on` line names and the pull request itself; none
   left, no `Related:` line. Look for no related work yourself, and
   comment on no other person's pull request.
-- **Changes**: one bullet per thing a person can now do or see, from
-  every plan of the topic, oldest first: a plan's central decision, each
-  "Done when" scenario a person sees, and a plan's small changes folded
-  into one bullet; the lead in bold is the thing, two to five words, in
-  the words the plans and the catalogue use; the sentence is plain, one
-  line of what it does, with no tier, date, struck rule or catalogue id.
-  A bullet whose change replaces a rule with another person's name says
-  so in its sentence, `replacing <name>'s call`, and goes first
-  (decisions.md#decision-has-a-name). A decision taken after thirty
-  minutes unanswered says `taken for <the owner>, unanswered` in its
-  sentence, and one taken in place of a question (a `Taken on` line of
-  "Built") says `taken for <the owner>`. Then, last, a line per commit on the topic's branch that this
+- **Changes**: the main changes, five bullets at most, oldest first. A
+  main change is a plan's central decision, what its title says the
+  project now does; plans that did one thing share a bullet. Under five,
+  a "Done when" scenario a person sees joins them when it is a thing of
+  its own, not a state of a bullet already there. Over five, keep this
+  plan's, what the title names, then what a person meets before what is
+  behind it, then the older. The lead in bold is the thing, two to five
+  words, in the words of the plans and the catalogue; the sentence is
+  plain, one line of what it does, with no tier, date, struck rule or
+  catalogue id. A bullet whose change replaces a rule with another
+  person's name says so in its sentence, `replacing <name>'s call`, is a
+  main change whatever its size and goes first, past five if more than
+  five do (decisions.md#decision-has-a-name). A decision taken after
+  thirty minutes unanswered says `taken for <the owner>, unanswered` in
+  its line, here or under Other changes, and one taken in place of a
+  question (a `Taken on` line of "Built") says `taken for <the owner>`.
+- **Other changes**: everything else a person can now do or see, in a
+  closed section under the bullets, `<details><summary>Other
+  changes</summary>`, a blank line before and after its list: each
+  scenario a person sees that is no main change and a plan's small
+  changes, one plain sentence a line, 100 characters at most, with no
+  lead, what several plans did to one thing in one line, oldest first.
+  Then, last, a line per commit on the topic's branch that this
   checkout's plans do not account for (`git log
   origin/<base>..origin/<name> --format='%H%x09%an%x09%s'` after the
   push), as `- <the commit's title> (<author>)`, another person's merge
@@ -460,17 +480,26 @@ to a Claude session left out>
   plan's commits and merges (`git log --first-parent <tip>..HEAD
   --format=%H`, and a merge this plan made before its tip); a commit a
   plan of the topic names by hash in its "Built", the shorter a prefix
-  of the longer; on a branch stacked on a pull request since merged, the commits of each merged pull request down the
-  stack, found by the `Builds on #<n>` line of its body (`gh api
-  --paginate repos/{owner}/{repo}/pulls/<n>/commits --jq '.[].sha'`).
-  Nothing is left out by author or by title.
-- **Screenshots**: one under a bullet at most, only where it shows
-  exactly what the bullet added or changed, in light mode at desktop
-  width; dark mode or a phone width only for a bullet about the theme or
-  about that width; its line, what the picture shows, is its alt text and
-  the `#<the line>` of its `--attach`. The screenshots the plan took for
-  its review stay in `plans/<topic>/`; only the ones the body names are
-  attached. A bullet with nothing to show has no picture.
+  of the longer; on a branch stacked on a pull request since merged, the
+  commits of each merged pull request down the stack, found by the
+  `Builds on #<n>` line of its body (`gh api --paginate
+  repos/{owner}/{repo}/pulls/<n>/commits --jq '.[].sha'`). Nothing is
+  left out by author or by title. With no line, no section. An old fold
+  is not the owner's, and ends his section.
+- **Left out**: housekeeping, which changes nothing for a person once
+  the pull request is merged: a merge of the base and a refresh, a
+  test's timeout or flake, and a fix to what this pull request itself
+  added, a later plan's as much as a review's. This is about what the
+  plans did; a commit no plan accounts for is listed whatever its title.
+  A pull request that holds nothing else lists these as its bullets.
+- **Screenshots**: one under a main bullet at most, none under Other
+  changes, only where it shows exactly what the bullet added or changed,
+  in light mode at desktop width; dark mode or a phone width only for a
+  bullet about the theme or about that width; its line, what the picture
+  shows, is its alt text and the `#<the line>` of its `--attach`. The
+  screenshots the plan took for its review stay in `plans/<topic>/`;
+  only the ones the body names are attached. On a rewrite, a picture
+  whose bullet is no longer a main one leaves the body.
 - **To try it**: a line from the project file's "After the push", else
   "Check out the branch."
 - **The title** is one sentence saying what the whole pull request
@@ -481,7 +510,7 @@ to a Claude session left out>
   `Title:` line of the topic's latest "Built" that has one, else its
   first plan's title, is a person's: it stays, and "Built" says `Title
   kept: a person's.` The queue's own stays while it covers every
-  bullet under Changes, and is written again when this plan adds one
+  main change, and is written again when this plan adds one
   it does not cover: the first plan's thing, then what was added, or
   the area they share when that is more than three things. "Built"
   gets `Title: <the sentence>` after its first line whenever the
@@ -506,6 +535,12 @@ sections are kept as in a topic's.
 
   ![<What the picture shows, in one line.>](plans/<x>/<file>.png)
 
+<details><summary>Other fixes</summary>
+
+- <The commit's title.>
+
+</details>
+
 ## Already on <branch>
 
 - <The commit's title.> (<the commit's short sha, linked>)
@@ -520,9 +555,13 @@ sections are kept as in a topic's.
 to a Claude session left out>
 ```
 
-- **Fixes**: every fix on the day's branch, oldest first, its
-  screenshot by the topic's rule: one at most, light mode, desktop
-  width, only where it shows the fix.
+- **Fixes**: five fixes at most, chosen as a topic's main changes are,
+  oldest first, each the commit's title, its screenshot by the topic's
+  rule: one at most, light mode, desktop width, only where it shows the
+  fix. The other fixes follow in a closed `<details><summary>Other
+  fixes</summary>`, a title a line, oldest first; with none, no section.
+  Housekeeping is left out as in a topic's, and listed when the day
+  holds nothing else.
 - **Already on <branch>**: the day's fixes pushed straight, from `git log
   origin/<branch> --first-parent --since=<the day's start> --format='%h
   %s'`, without merge commits and commits whose title ends in ` (#<n>)`;

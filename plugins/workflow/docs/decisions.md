@@ -312,25 +312,45 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   pushed straight to the branch and listed in the day's fixes.** (Javi,
   30 October) A fix the site needs today cannot wait for a merge.
   plans/pull-requests-by-topic.md.
-- `short-description` **The description is a short list of what
-  changed: a few bullets, each a bold lead and one plain sentence of
-  what a person can now do or see, one screenshot under a bullet only
-  where it shows it, then To try it; the related pull requests, issues
-  and branches in one list, each once; no tiers, dates, struck rules or
-  ids.** (Javi, 27 November) Nobody read the long one; the decisions are
-  in the catalogue, whose diff the pull request shows; Google's CL
-  descriptions guide puts one summary first and the detail in an
-  informative body, GitHub's "How to write the perfect pull request"
-  says what the change does and shows it. A bullet that replaces
-  another person's call names them; the commits no plan here accounts
-  for stay, as bullets with their author. A section the owner adds
-  anywhere in the body, a topic's or the day's fixes, is kept on every
-  rewrite (Javi). GitHub shows a reference alone in a list item with
-  its title and state ("Autolinked references and URLs"), and asks the
-  closing keyword for each issue.
+- `short-description` **The description shows a pull request's main
+  changes, five bullets at most, each a bold lead and one plain sentence
+  of what a person can now do or see, one screenshot under a bullet only
+  where it shows it; the smaller changes are a short line each in a
+  closed `Other changes` section under them, and housekeeping is in
+  neither; then To try it; the related pull requests, issues and
+  branches in one list, each once; no tiers, dates, struck rules or
+  ids.** (Javi, 28 November) One bullet per thing from every plan had
+  grown a description to 42 bullets, a merge of the base branch among
+  them, and he asked for the main changes alone, the rest folded rather
+  than dropped. Keep a Changelog asks for a curated list of notable
+  changes and calls a commit log full of noise, merge commits first.
+  Dependabot folds a pull request's release notes, changelog and commits
+  each in a closed `<details>` named for what is inside, and GitHub's
+  collapsed sections are closed by default. Housekeeping is a merge of
+  the base, a refresh, a test's timeout or flake, and a fix to what the
+  pull request itself added: Google's CL descriptions guide has the
+  description read again before submitting so that it still reflects
+  what the change does, so it is written for the pull request as it
+  stands. Five is what a pull request takes in plans
+  (`pull-request-full`). The decisions are in the catalogue, whose diff
+  the pull request shows. A bullet that replaces another person's call
+  names them, is always shown and goes first, past five if need be; a
+  pull request of housekeeping alone lists it; the commits no plan here
+  accounts for stay, as bullets with their author, last under `Other
+  changes`. A section the owner adds anywhere in the body, a topic's or
+  the day's fixes, is kept on every rewrite (Javi). GitHub shows a
+  reference alone in a list item with its title and state ("Autolinked
+  references and URLs"), and asks the closing keyword for each issue.
   plans/short-pull-request-descriptions.md,
   plans/short-pull-request-descriptions-follow-up.md,
-  plans/pull-requests-small-and-plain.md.
+  plans/pull-requests-small-and-plain.md,
+  plans/pr-description-main-changes.md.
+  - ~~The description is a short list of what changed: a few bullets,
+    each a bold lead and one plain sentence of what a person can now
+    do or see, one screenshot under a bullet only where it shows it,
+    then To try it; the related pull requests, issues and branches in
+    one list, each once; no tiers, dates, struck rules or ids.~~
+    (Javi, 27 November)
   - ~~The description is a short list of what changed: a few bullets,
     each a bold lead and one plain sentence of what a person can now do
     or see, one screenshot under a bullet only where it shows it, then

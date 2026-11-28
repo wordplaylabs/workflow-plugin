@@ -286,6 +286,10 @@ const fs = require("node:fs");
 const args = process.argv.slice(2);
 const rows = process.env.STUB_ROWS || ${JSON.stringify(rows)};
 ${calls ? `fs.appendFileSync(${JSON.stringify(calls)}, args.join(" ")${whole ? "" : ".slice(0, 80)"} + "\\n");` : ""}
+if (args[0] === "--version") {
+  if (process.env.STUB_VERSION) console.log(process.env.STUB_VERSION + " (Claude Code)");
+  process.exit(0);
+}
 if (args[0] === "stop") process.exit(process.env.STUB_STOP_FAILS ? 1 : 0);
 else if (args[0] === "agents") {
   const dir = require("node:path").dirname(rows);
@@ -2874,63 +2878,50 @@ describe("the planner queue", () => {
       rmSync(log, { force: true });
       rmSync(starts, { force: true });
       rmSync(join(repo, ".claude", "assistant.json"), { force: true });
+      rmSync(join(repo, ".claude", "assistant.copy.json"), { force: true });
     };
-    return { log, env, queue, row, old, fresh, lines, startLines, clean };
+    // The chat to be copied, as armCopy marks it; the mark, or null.
+    const copyFile = join(repo, ".claude", "assistant.copy.json");
+    const markCopy = (sessionId: string) =>
+      writeFileSync(copyFile, JSON.stringify({ sessionId, at: Date.now(), pid: null }));
+    const mark = () => (existsSync(copyFile) ? JSON.parse(readFileSync(copyFile, "utf8")) : null);
+    return { log, env, queue, row, old, fresh, lines, startLines, markCopy, mark, clean };
   };
 
   it("a chat to be copied is ended, with no copy started, once another is open", () => {
-    const { queue, old, fresh, lines, startLines, clean } = oneChat();
+    const { queue, old, fresh, lines, startLines, markCopy, mark, clean } = oneChat();
     clean();
     try {
-      writeFileSync(
-        stateFile(old.sessionId),
-        JSON.stringify({ agent: "assistant", handing: { at: Date.now() - 20 * 60_000 } }),
-      );
+      writeFileSync(stateFile(old.sessionId), JSON.stringify({ agent: "assistant" }));
+      markCopy(old.sessionId);
       queue([old, fresh], ["end", "--timer", String(Date.now()), old.sessionId]);
       expect(lines()).toContain(old.sessionId);
       expect(lines()).not.toContain(fresh.sessionId);
       expect(lines().some((line) => line.startsWith(`end ${old.sessionId} at `))).toBe(false);
       expect(startLines()).toBe("");
       const state = JSON.parse(readFileSync(stateFile(old.sessionId), "utf8"));
-      expect(state.handing).toBeUndefined();
+      expect(mark()).toBeNull();
       expect(state.end).toBeUndefined();
       expect(state.agent).toBe("assistant");
       // Its process gone, it is as quiet: ended the same way, not tried again (Codex C4).
       clean();
-      writeFileSync(
-        stateFile(old.sessionId),
-        JSON.stringify({ agent: "assistant", handing: { at: Date.now() - 20 * 60_000 } }),
-      );
+      writeFileSync(stateFile(old.sessionId), JSON.stringify({ agent: "assistant" }));
+      markCopy(old.sessionId);
       const gone = { ...old, pid: undefined, status: undefined };
       queue([gone, fresh], ["end", "--timer", String(Date.now()), old.sessionId]);
       // Nothing to stop (plans/assistant-takeover-never-leaves-none.md), its state cleared.
       expect(lines()).not.toContain(old.sessionId);
       expect(lines().some((line) => line.startsWith(`end ${old.sessionId} at `))).toBe(false);
       const cleared = JSON.parse(readFileSync(stateFile(old.sessionId), "utf8"));
-      expect(cleared.handing).toBeUndefined();
+      expect(mark()).toBeNull();
       expect(cleared.end).toBeUndefined();
-      // The other handed on too: no successor, so the fresh start is tried (paused here) and
-      // neither is stopped (/code-review).
-      clean();
-      const handing = { agent: "assistant", handing: { at: Date.now() - 20 * 60_000 } };
-      for (const one of [old, fresh])
-        writeFileSync(stateFile(one.sessionId), JSON.stringify(handing));
-      const pause = join(repo, ".claude", "executor.pause");
-      writeFileSync(pause, JSON.stringify({ at: "15:00" }));
-      try {
-        queue([old, fresh], ["end", "--timer", String(Date.now()), old.sessionId]);
-      } finally {
-        rmSync(pause, { force: true });
-      }
-      expect(lines()).not.toContain(old.sessionId);
-      expect(lines().some((line) => line.startsWith(`end ${old.sessionId} at `))).toBe(true);
     } finally {
       clean();
     }
   });
 
   it("the copy's timer tries again until the old chat is ended", () => {
-    const { queue, row, old, fresh, lines, clean } = oneChat();
+    const { queue, row, old, fresh, lines, markCopy, mark, clean } = oneChat();
     // Busy or asking, a minute on; with the chats unread, ten minutes on.
     const cases: [string, object[], object, number][] = [
       ["busy", [row(old.sessionId, 1000, "busy"), fresh], {}, 1],
@@ -2946,10 +2937,8 @@ describe("the planner queue", () => {
     for (const [what, rows, extra, minutes] of cases) {
       clean();
       try {
-        writeFileSync(
-          stateFile(old.sessionId),
-          JSON.stringify({ agent: "assistant", handing: { at: Date.now() - 20 * 60_000 } }),
-        );
+        writeFileSync(stateFile(old.sessionId), JSON.stringify({ agent: "assistant" }));
+        markCopy(old.sessionId);
         queue(rows, ["end", "--timer", String(Date.now()), old.sessionId], extra);
         expect(lines(), what).not.toContain(old.sessionId);
         const at = Number(
@@ -2959,7 +2948,12 @@ describe("the planner queue", () => {
         );
         expect(at, what).toBeGreaterThan(Date.now() + (minutes - 0.5) * 60_000);
         expect(at, what).toBeLessThan(Date.now() + (minutes + 0.5) * 60_000);
-        expect(JSON.parse(readFileSync(stateFile(old.sessionId), "utf8")).end.at, what).toBe(at);
+        // In the mark's file, not the chat's state, which older hooks re-arm.
+        expect(mark().at, what).toBe(at);
+        expect(
+          JSON.parse(readFileSync(stateFile(old.sessionId), "utf8")).end,
+          what,
+        ).toBeUndefined();
       } finally {
         clean();
       }
@@ -3039,11 +3033,16 @@ describe("the planner queue", () => {
       cwd: dir,
     };
     const state = stateFile(old.sessionId);
-    const handOn = () =>
+    // The chat to be copied, as armCopy marks it; the mark, or null.
+    const copyFile = join(dir, ".claude", "assistant.copy.json");
+    const handOn = () => {
+      writeFileSync(state, JSON.stringify({ agent: "assistant" }));
       writeFileSync(
-        state,
-        JSON.stringify({ agent: "assistant", handing: { at: Date.now() - 20 * 60_000 } }),
+        copyFile,
+        JSON.stringify({ sessionId: old.sessionId, at: Date.now(), pid: null }),
       );
+    };
+    const mark = () => (existsSync(copyFile) ? JSON.parse(readFileSync(copyFile, "utf8")) : null);
     const queue = (args: string[], extra: Record<string, string> = {}) => {
       const { WORKFLOW_LIVE: _, ...rest } = process.env;
       return execFileSync("node", [join(here, "plan-queue.mjs"), ...args], {
@@ -3091,6 +3090,7 @@ describe("the planner queue", () => {
       old,
       state,
       handOn,
+      mark,
       queue,
       timer,
       lines,
@@ -3105,8 +3105,20 @@ describe("the planner queue", () => {
     "a copy whose launch fails keeps the old chat, and the next timer opens the copy",
     { timeout: 60_000 },
     () => {
-      const { rows, old, handOn, timer, lines, ends, startLines, stateNow, record, called, clean } =
-        takeover("83000000");
+      const {
+        rows,
+        old,
+        handOn,
+        mark,
+        timer,
+        lines,
+        ends,
+        startLines,
+        stateNow,
+        record,
+        called,
+        clean,
+      } = takeover("83000000");
       try {
         writeFileSync(rows, JSON.stringify([old]));
         handOn();
@@ -3116,7 +3128,7 @@ describe("the planner queue", () => {
         expect(ends()[0]).toBeGreaterThan(Date.now() + 9 * 60_000);
         expect(ends()[0]).toBeLessThan(Date.now() + 11 * 60_000);
         expect(startLines()).toEqual([]);
-        expect(stateNow().handing).toBeDefined();
+        expect(mark().sessionId).toBe(old.sessionId);
         // The next firing, the launch working: the copy open, the old one stopped.
         timer();
         expect(startLines()).toHaveLength(1);
@@ -3124,7 +3136,7 @@ describe("the planner queue", () => {
         expect(called()).toContain(`--bg --resume ${old.sessionId} `);
         expect(record().sessionId).toMatch(/^stub-/);
         expect(lines().filter((line) => line === old.sessionId)).toHaveLength(1);
-        expect(stateNow().handing).toBeUndefined();
+        expect(mark()).toBeNull();
         expect(stateNow().end).toBeUndefined();
       } finally {
         clean();
@@ -3135,8 +3147,7 @@ describe("the planner queue", () => {
   it("a copy confirmed but not listed leaves the old one running", { timeout: 60_000 }, () => {
     // claude --bg's backgrounded line with no row: confirmed, but no other chat is open
     // (Codex C1).
-    const { rows, old, handOn, timer, lines, ends, startLines, stateNow, clean } =
-      takeover("89000000");
+    const { rows, old, handOn, mark, timer, lines, ends, startLines, clean } = takeover("89000000");
     try {
       writeFileSync(rows, JSON.stringify([old]));
       handOn();
@@ -3144,7 +3155,7 @@ describe("the planner queue", () => {
       expect(startLines()).toHaveLength(1);
       expect(lines()).not.toContain(old.sessionId);
       expect(ends()).toHaveLength(1);
-      expect(stateNow().handing).toBeDefined();
+      expect(mark().sessionId).toBe(old.sessionId);
     } finally {
       clean();
     }
@@ -3172,44 +3183,6 @@ describe("the planner queue", () => {
       }
     },
   );
-
-  // plans/assistant-chat-counts-live-rows.md, item 2.
-  it("two chats to be copied at once are replaced by one copy", { timeout: 60_000 }, () => {
-    const { dir, rows, old, state, handOn, timer, lines, ends, startLines, clean } =
-      takeover("86000000");
-    const second = {
-      ...old,
-      sessionId: "87000000-aaaa-0000-0000-000000000000",
-      pid: 1001,
-      startedAt: 1001,
-    };
-    const secondState = stateFile(second.sessionId);
-    try {
-      writeFileSync(rows, JSON.stringify([old, second]));
-      handOn();
-      writeFileSync(secondState, readFileSync(state, "utf8"));
-      // The fresh chat confirmed by claude --bg's line but not listed yet: the other chat
-      // handed on is no successor, so the old one is kept and tried again (Codex C1).
-      timer({ STUB: "backgrounded" });
-      expect(lines()).not.toContain(old.sessionId);
-      expect(ends()).toHaveLength(1);
-      writeFileSync(rows, JSON.stringify([old, second]));
-      rmSync(join(dir, ".claude", "starts.log"), { force: true });
-      // The launch listed: one copy, each old one stopped, the second by the same firing's
-      // sweep, no refusal tried again. The timer prints nothing, so a refusal shows as a
-      // re-armed end.
-      timer();
-      expect(startLines()).toHaveLength(1);
-      expect(JSON.parse(startLines()[0]).paths).toEqual([]);
-      expect(lines().filter((line) => line === old.sessionId)).toHaveLength(1);
-      expect(lines().filter((line) => line === second.sessionId)).toHaveLength(1);
-      expect(ends()).toHaveLength(1);
-      expect(lines().some((line) => line.startsWith(`end ${second.sessionId} at `))).toBe(false);
-    } finally {
-      rmSync(secondState, { force: true });
-      clean();
-    }
-  });
 
   it("an assistant chat is opened beside a row with no process", { timeout: 60_000 }, () => {
     const { rows, old, queue, startLines, clean } = takeover("88000000");
@@ -3323,7 +3296,11 @@ describe("the planner queue", () => {
       expect(dry("reuse:\n  assistant: 120000\n", assistant)).toContain('"--autocompact" "120000"');
       // Never under Claude Code's least, 100k.
       expect(dry("reuse:\n  assistant: 90000\n", assistant)).toContain('"--autocompact" "100000"');
-      const old = dry("", assistant, { HOME: home });
+      // The launch runs the installed binary, so its link's version is read.
+      const old = dry("", assistant, {
+        HOME: home,
+        WORKFLOW_CLAUDE: join(home, ".local", "bin", "claude"),
+      });
       expect(old).toContain("Would run: claude");
       expect(old).not.toContain("--autocompact");
       for (const args of [["--agent", "planner", "plans/brief.md"], ["plans/ready.md"]]) {
@@ -3396,6 +3373,7 @@ describe("the planner queue", () => {
         ends,
         startLines,
         stateNow,
+        mark,
         record,
         called,
         clean,
@@ -3411,7 +3389,9 @@ describe("the planner queue", () => {
         expect(ends()).toHaveLength(1);
         expect(ends()[0]).toBeGreaterThan(Date.now() + 10_000);
         expect(ends()[0]).toBeLessThan(Date.now() + 30_000);
-        expect(stateNow().handing).toBeDefined();
+        expect(mark().sessionId).toBe(old.sessionId);
+        expect(mark().at).toBe(ends()[0]);
+        expect(stateNow().end).toBeUndefined();
         // A firing that finds it busy comes back a minute on, nothing started.
         writeFileSync(rows, JSON.stringify([{ ...old, status: "busy" }]));
         timer();
@@ -3425,8 +3405,8 @@ describe("the planner queue", () => {
           '<cross-session-message from="uds:/tmp/x.sock" from-name="Executor">\nBuilt: plans/q.md.\n</cross-session-message>',
         ]) {
           hook("prompt", old.sessionId, { prompt, transcript_path: transcript });
-          expect(stateNow().handing, prompt).toBeDefined();
-          expect(stateNow().end, prompt).toBeDefined();
+          expect(mark().sessionId, prompt).toBe(old.sessionId);
+          expect(ends(), prompt).toHaveLength(2);
         }
         // The next firing, idle: the copy resumes it with the window, and the old one is stopped.
         writeFileSync(rows, JSON.stringify([old]));
@@ -3442,7 +3422,7 @@ describe("the planner queue", () => {
         expect(copy).toMatch(/^stub-/);
         expect(JSON.parse(readFileSync(stateFile(copy), "utf8")).window).toBe(150_000);
         expect(lines().filter((line) => line === old.sessionId)).toHaveLength(1);
-        expect(stateNow().handing).toBeUndefined();
+        expect(mark()).toBeNull();
         // When plans runs a minute on, its assistant line names one chat: the copy.
         const after = JSON.parse(readFileSync(rows, "utf8")).map((row: { sessionId: string }) =>
           row.sessionId === old.sessionId ? { ...row, pid: undefined, status: undefined } : row,
@@ -3459,8 +3439,7 @@ describe("the planner queue", () => {
   );
 
   it("a chat started with its window is never replaced", { timeout: 60_000 }, () => {
-    const { dir, rows, old, state, queue, ends, startLines, stateNow, clean } =
-      takeover("95000000");
+    const { dir, rows, old, state, queue, ends, startLines, mark, clean } = takeover("95000000");
     const hook = hookOf(dir, join(dir, "claude"));
     const projects = join(dir, "projects");
     const transcript = join(transcriptsDir(dir, projects), `${old.sessionId}.jsonl`);
@@ -3477,7 +3456,7 @@ describe("the planner queue", () => {
         WORKFLOW_PROJECTS: projects,
       });
       expect(ends()).toEqual([]);
-      expect(stateNow().handing).toBeUndefined();
+      expect(mark()).toBeNull();
       expect(startLines()).toEqual([]);
       // A Claude Code with no --autocompact: no copy is armed for a chat with no window (Codex C2).
       const home = temp("queue-home-");
@@ -3486,11 +3465,16 @@ describe("the planner queue", () => {
       symlinkSync(join(home, "2.1.200"), join(home, ".local", "bin", "claude"));
       try {
         writeFileSync(state, JSON.stringify({ agent: "assistant" }));
-        expect(hook("stop", old.sessionId, { transcript_path: transcript }, { HOME: home })).toBe(
-          "",
-        );
+        expect(
+          hook(
+            "stop",
+            old.sessionId,
+            { transcript_path: transcript },
+            { HOME: home, STUB_VERSION: "2.1.200" },
+          ),
+        ).toBe("");
         expect(ends()).toEqual([]);
-        expect(stateNow().handing).toBeUndefined();
+        expect(mark()).toBeNull();
       } finally {
         rmSync(home, { recursive: true, force: true });
       }
@@ -3503,7 +3487,8 @@ describe("the planner queue", () => {
     "an earlier assistant chat passes on what reaches it and is stopped",
     { timeout: 60_000 },
     () => {
-      const { dir, rows, old, queue, timer, lines, ends, startLines, clean } = takeover("96000000");
+      const { dir, rows, old, queue, timer, lines, ends, startLines, mark, clean } =
+        takeover("96000000");
       const hook = hookOf(dir, join(dir, "claude"));
       // The record's chat started before the earlier one, so the record decides, not the order.
       const open = {
@@ -3524,7 +3509,7 @@ describe("the planner queue", () => {
         );
         const said = (prompt: string, extra: Record<string, string> = {}) =>
           contextOf(hook("prompt", old.sessionId, { prompt }, { WORKFLOW_SOCKS: socks, ...extra }));
-        const closed = `Test Assistant [96100000] is the open assistant chat, and this one is closed: send it what this prompt brought in one SendMessage to \`uds:${join(socks, "2000.sock")}\`, Javi's words under the first line \`From Javi: said in Test Assistant [96000000], ${day}.\` and another chat's message as it came; when the words were his, tell him in one line \`This chat is closed. I passed that to the open Test Assistant chat, the newest of that name in your list; write there.\`; and do nothing else.`;
+        const closed = `Test Assistant [96100000] is the open assistant chat, and this one is closed: send it what this prompt brought in one SendMessage to \`uds:${join(socks, "2000.sock")}\`, Javi's words under the first line \`From Javi: said in Test Assistant [96000000], ${day}.\` and another chat's message as it came; when the words were his, tell him in one line \`This chat is closed. I passed that to the open Test Assistant chat, [96100000] in your list; write there.\`; and do nothing else.`;
         expect(said("Anything new?")).toBe(closed);
         expect(
           said(
@@ -3533,7 +3518,7 @@ describe("the planner queue", () => {
         ).toBe(closed);
         // No address found: he is told which chat to use.
         expect(said("Anything new?", { WORKFLOW_SOCKS: join(dir, "none") })).toBe(
-          "Test Assistant [96100000] is the open assistant chat, and this one is closed: tell Javi in one line `This chat is closed. Write in the open Test Assistant chat, the newest of that name in your list.`, and do nothing else.",
+          "Test Assistant [96100000] is the open assistant chat, and this one is closed: tell Javi in one line `This chat is closed. Write in the open Test Assistant chat, [96100000] in your list.`, and do nothing else.",
         );
         // A heartbeat gets the heartbeat's line.
         expect(said("Heartbeat.")).toBe("Nothing is under way.");
@@ -3552,7 +3537,7 @@ describe("the planner queue", () => {
         expect(lines()).toContain(old.sessionId);
         expect(lines()).not.toContain(open.sessionId);
         const openState = JSON.parse(readFileSync(stateFile(open.sessionId), "utf8"));
-        expect(openState.handing).toBeUndefined();
+        expect(mark()).toBeNull();
         expect(openState.end).toBeUndefined();
         expect(startLines()).toEqual([]);
         // Busy, its timer comes back a minute on.
@@ -3608,8 +3593,7 @@ describe("the planner queue", () => {
     "plans start --agent assistant beside a chat over its ceiling arms the copy and says so",
     { timeout: 60_000 },
     () => {
-      const { dir, rows, old, state, queue, ends, startLines, stateNow, clean } =
-        takeover("98000000");
+      const { dir, rows, old, state, queue, ends, startLines, mark, clean } = takeover("98000000");
       const projects = join(dir, "projects");
       try {
         writeFileSync(rows, JSON.stringify([old]));
@@ -3618,7 +3602,7 @@ describe("the planner queue", () => {
         expect(queue(["start", "--agent", "assistant"], { WORKFLOW_PROJECTS: projects })).toContain(
           "Test Assistant [98000000] is over its ceiling (160k of 150k): a copy of it with its window takes over once it is idle.",
         );
-        expect(stateNow().handing).toBeDefined();
+        expect(mark().sessionId).toBe(old.sessionId);
         expect(ends()).toHaveLength(1);
         expect(ends()[0]).toBeLessThan(Date.now() + 30_000);
         expect(startLines()).toEqual([]);
@@ -3654,9 +3638,10 @@ describe("the planner queue", () => {
         join(dir, ".claude", "assistant.json"),
         JSON.stringify({ sessionId: open.sessionId, at: Date.now() }),
       );
+      writeFileSync(stateFile(open.sessionId), JSON.stringify({ agent: "assistant" }));
       writeFileSync(
-        stateFile(open.sessionId),
-        JSON.stringify({ agent: "assistant", handing: { at: Date.now() - 60_000 } }),
+        join(dir, ".claude", "assistant.copy.json"),
+        JSON.stringify({ sessionId: open.sessionId, at: Date.now(), pid: null }),
       );
       queue(["end", "--timer", String(Date.now()), open.sessionId]);
       // The copy is started first, then the marked chat stopped, and the earlier one by the sweep.
@@ -3669,6 +3654,219 @@ describe("the planner queue", () => {
       clean();
     }
   });
+
+  // plans/assistant-handover-that-happens-follow-up.md: a chat opened before the copy runs
+  // older hooks, which clear a mark in its state at his prompt and re-arm its state's timer.
+  it(
+    "an old chat's prompt and stop hooks leave the copy's mark and timer alone",
+    { timeout: 60_000 },
+    () => {
+      const { dir, rows, old, state, timer, lines, ends, startLines, mark, called, clean } =
+        takeover("99300000");
+      const hook = hookOf(dir, join(dir, "claude"));
+      const transcript = join(dir, "transcript.jsonl");
+      try {
+        writeFileSync(rows, JSON.stringify([old]));
+        writeFileSync(state, JSON.stringify({ agent: "assistant" }));
+        transcriptAt(transcript, 160_000);
+        expect(hook("stop", old.sessionId, { transcript_path: transcript })).toBe("");
+        expect(ends()).toHaveLength(1);
+        expect(mark()).toEqual({ sessionId: old.sessionId, at: ends()[0], pid: null });
+        // Its timer is in no state an older hook kills or re-arms (Codex C4).
+        expect(JSON.parse(readFileSync(state, "utf8")).end).toBeUndefined();
+        // The old hooks: his prompt cleared its state's mark, a stop re-armed its state's timer.
+        writeFileSync(
+          state,
+          JSON.stringify({ agent: "assistant", end: { pid: 999_999, at: Date.now() + 3_600_000 } }),
+        );
+        // The copy's timer fires: the copy takes over, and says so once.
+        timer();
+        expect(startLines()).toHaveLength(1);
+        expect(called().split("this is the assistant chat from now on.")).toHaveLength(2);
+        expect(lines().filter((line) => line === old.sessionId)).toHaveLength(1);
+        expect(mark()).toBeNull();
+      } finally {
+        clean();
+      }
+    },
+  );
+
+  it(
+    "a planner's prompt hook arms the copy for an open assistant over its ceiling with no window",
+    { timeout: 60_000 },
+    () => {
+      const { dir, rows, old, state, ends, startLines, mark, clean } = takeover("99400000");
+      const hook = hookOf(dir, join(dir, "claude"));
+      const projects = join(dir, "projects");
+      const planner = {
+        ...old,
+        sessionId: "99410000-aaaa-0000-0000-000000000000",
+        name: "Test Planner 1",
+        pid: 2000,
+      };
+      const executor = { ...planner, sessionId: "99420000-aaaa-0000-0000-000000000000" };
+      const transcript = join(transcriptsDir(dir, projects), `${old.sessionId}.jsonl`);
+      try {
+        writeFileSync(rows, JSON.stringify([old, planner, executor]));
+        writeFileSync(state, JSON.stringify({ agent: "assistant" }));
+        transcriptAt(transcript, 160_000);
+        const prompt = (one: typeof planner, agent: string) =>
+          hook(
+            "prompt",
+            one.sessionId,
+            { agent_type: agent, prompt: "Go on." },
+            { WORKFLOW_PROJECTS: projects },
+          );
+        prompt(planner, "workflow:planner");
+        expect(mark()?.sessionId).toBe(old.sessionId);
+        expect(ends()).toHaveLength(1);
+        expect(ends()[0]).toBeLessThan(Date.now() + 30_000);
+        expect(startLines()).toEqual([]);
+        // An executor's prompt too.
+        rmSync(join(dir, ".claude", "assistant.copy.json"));
+        prompt(executor, "workflow:executor");
+        expect(mark()?.sessionId).toBe(old.sessionId);
+        // With its window, or under its ceiling, nothing is armed.
+        rmSync(join(dir, ".claude", "assistant.copy.json"));
+        writeFileSync(state, JSON.stringify({ agent: "assistant", window: 150_000 }));
+        prompt(planner, "workflow:planner");
+        writeFileSync(state, JSON.stringify({ agent: "assistant" }));
+        transcriptAt(transcript, 120_000);
+        prompt(planner, "workflow:planner");
+        expect(mark()).toBeNull();
+      } finally {
+        for (const one of [planner, executor]) rmSync(stateFile(one.sessionId), { force: true });
+        clean();
+      }
+    },
+  );
+
+  it(
+    "two chats over their ceilings keep the one mark until it is settled",
+    { timeout: 60_000 },
+    () => {
+      // Codex C1: no record, so the mark would rank its chat second and pass to the other.
+      const { dir, rows, old, state, ends, mark, clean } = takeover("99600000");
+      const hook = hookOf(dir, join(dir, "claude"));
+      const projects = join(dir, "projects");
+      const other = { ...old, sessionId: "99610000-aaaa-0000-0000-000000000000", pid: 2000 };
+      const planner = {
+        ...old,
+        sessionId: "99620000-aaaa-0000-0000-000000000000",
+        name: "Test Planner 1",
+        pid: 3000,
+      };
+      try {
+        writeFileSync(rows, JSON.stringify([old, other, planner]));
+        for (const one of [old, other]) {
+          writeFileSync(stateFile(one.sessionId), JSON.stringify({ agent: "assistant" }));
+          transcriptAt(join(transcriptsDir(dir, projects), `${one.sessionId}.jsonl`), 160_000);
+        }
+        const prompt = () =>
+          hook(
+            "prompt",
+            planner.sessionId,
+            { agent_type: "workflow:planner", prompt: "Go on." },
+            { WORKFLOW_PROJECTS: projects },
+          );
+        prompt();
+        const first = mark().sessionId;
+        for (let i = 0; i < 2; i++) prompt();
+        expect(mark().sessionId).toBe(first);
+        expect(
+          readFileSync(join(dir, "stops.log"), "utf8")
+            .split("\n")
+            .filter((line) => line.startsWith("end ") && !line.startsWith(`end ${first} `)),
+        ).toEqual([]);
+      } finally {
+        for (const one of [other, planner]) rmSync(stateFile(one.sessionId), { force: true });
+        clean();
+      }
+    },
+  );
+
+  it("the closed chat's line names the open chat's short id", { timeout: 60_000 }, () => {
+    const { dir, rows, old, clean } = takeover("99500000");
+    const hook = hookOf(dir, join(dir, "claude"));
+    // Opened by hand after the record's chat: the newest of the name is not the open one.
+    const open = { ...old, sessionId: "99510000-aaaa-0000-0000-000000000000", pid: 2000 };
+    const later = { ...old, sessionId: "99520000-aaaa-0000-0000-000000000000", startedAt: 9000 };
+    const socks = join(dir, "socks");
+    mkdirSync(socks);
+    writeFileSync(join(socks, "2000.sock"), "");
+    try {
+      writeFileSync(rows, JSON.stringify([old, open, later]));
+      writeFileSync(
+        join(dir, ".claude", "assistant.json"),
+        JSON.stringify({ sessionId: open.sessionId, at: Date.now() }),
+      );
+      const said = (extra: Record<string, string>) =>
+        contextOf(hook("prompt", later.sessionId, { prompt: "Anything new?" }, extra));
+      expect(said({ WORKFLOW_SOCKS: join(dir, "none") })).toContain(
+        "`This chat is closed. Write in the open Test Assistant chat, [99510000] in your list.`",
+      );
+      expect(said({ WORKFLOW_SOCKS: socks })).toContain(
+        "`This chat is closed. I passed that to the open Test Assistant chat, [99510000] in your list; write there.`",
+      );
+    } finally {
+      rmSync(stateFile(later.sessionId), { force: true });
+      rmSync(stateFile(open.sessionId), { force: true });
+      clean();
+    }
+  });
+
+  it(
+    "a launch with an unreadable ~/.local/bin/claude reads claude --version and leaves out --autocompact under 2.1.221",
+    { timeout: 60_000 },
+    () => {
+      // A home with no ~/.local/bin/claude, and a launch binary of each version.
+      const home = temp("queue-home-");
+      const bin = temp("queue-bin-");
+      const binary = (name: string, body: string) => {
+        const file = join(bin, name);
+        writeFileSync(file, `#!/bin/sh\n${body}\n`);
+        chmodSync(file, 0o755);
+        return file;
+      };
+      const dir = fixture("Version");
+      const dry = (claude: string) =>
+        execFileSync(
+          "node",
+          [join(here, "plan-queue.mjs"), "start", "--dry", "--agent", "assistant"],
+          {
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              HOME: home,
+              CLAUDE_PROJECT_DIR: dir,
+              CLAUDE_CODE_SESSION_ID: "",
+              WORKFLOW_CLAUDE: claude,
+              WORKFLOW_LIVE: "[]",
+              WORKFLOW_STARTS_LOG: join(dir, ".claude", "starts.log"),
+              WORKFLOW_USAGE_FILE: join(dir, ".claude", "usage.json"),
+            },
+          },
+        );
+      try {
+        const old = dry(binary("old", 'echo "2.1.200 (Claude Code)"'));
+        expect(old).toContain("Would run: claude");
+        expect(old).not.toContain("--autocompact");
+        expect(dry(binary("new", 'echo "2.1.300 (Claude Code)"'))).toContain(
+          '"--autocompact" "150000"',
+        );
+        // Unread, the flag is still passed.
+        expect(dry(binary("failing", "exit 1"))).toContain('"--autocompact" "150000"');
+        // A link to a newer version is not the binary the launch runs (Codex C3).
+        mkdirSync(join(home, ".local", "bin"), { recursive: true });
+        writeFileSync(join(home, "2.1.300"), "");
+        symlinkSync(join(home, "2.1.300"), join(home, ".local", "bin", "claude"));
+        expect(dry(binary("older", 'echo "2.1.200 (Claude Code)"'))).not.toContain("--autocompact");
+        expect(dry(binary("silent", "true"))).toContain('"--autocompact" "150000"');
+      } finally {
+        for (const one of [home, bin, dir]) rmSync(one, { recursive: true, force: true });
+      }
+    },
+  );
 
   // plans/simpler-agents.md, part 3: the agent file carries the workflow.
   describe("a start prompt names the work", () => {
@@ -13621,9 +13819,12 @@ else if (args[0] === "-p") {
           const dir = project([]);
           const [older, newer] = [chat(dir, 111), chat(dir, 222)];
           const states = [older, newer].map((one) => stateFile(one.sessionId));
-          const picked = (rows: object[], state: Record<string, object>) => {
+          const copyFile = join(dir, ".claude", "assistant.copy.json");
+          const picked = (rows: object[], state: Record<string, object>, copied = "") => {
             for (const [i, one] of [older, newer].entries())
               writeFileSync(states[i], JSON.stringify(state[one.sessionId] || {}));
+            if (copied) writeFileSync(copyFile, JSON.stringify({ sessionId: copied, at: 0 }));
+            else rmSync(copyFile, { force: true });
             writeFileSync(join(dir, "rows.json"), JSON.stringify(rows));
             rmSync(join(dir, ".claude", "github-told.json"), { force: true });
             const before = sent(dir).length;
@@ -13631,14 +13832,17 @@ else if (args[0] === "-p") {
             return textOf(sent(dir)[before]).split("\n")[0];
           };
           const ran = { agent: "assistant" };
-          const handing = { agent: "assistant", handing: { at: Date.now() - 20 * 60_000 } };
           try {
-            // An older chat handed on and a newer one, both having run the agent: the newer.
+            // An older chat to be copied and a newer one, both having run the agent: the newer.
             expect(
-              picked([older, newer], { [older.sessionId]: handing, [newer.sessionId]: ran }),
+              picked(
+                [older, newer],
+                { [older.sessionId]: ran, [newer.sessionId]: ran },
+                older.sessionId,
+              ),
             ).toBe(`Recipient: uds:${join(socks, "222.sock")}`);
-            // The handed-on chat alone: it, the one chat until it is replaced.
-            expect(picked([older], { [older.sessionId]: handing })).toBe(
+            // The chat to be copied alone: it, the one chat until it is replaced.
+            expect(picked([older], { [older.sessionId]: ran }, older.sessionId)).toBe(
               `Recipient: uds:${join(socks, "111.sock")}`,
             );
             // Two that ran the agent, neither handed on: the one started last.

@@ -4408,7 +4408,7 @@ describe("one assistant chat is open, compacted where it is", () => {
       "Claude Code's `--autocompact` sets the window at launch (tried 28 November: a background chat compacted mid-turn and at the start of a turn another chat's message began, and its PreCompact hook's lines were kept), so the chat is compacted where it is and no file holds what it owes.",
     );
     expect(decisions).toContain(
-      "the queue records the chat it started last, and any other of the name takes no new work, as a terminating endpoint takes no new traffic, and is stopped once idle.",
+      "the queue records the chat it started last, and any other of the name takes no new work, as a terminating endpoint takes no new traffic, names the open chat by the short id his list and `plans` share, since one opened by hand may be newer, and is stopped once idle.",
     );
     expect(decisions).toContain(
       "~~A chat past its ceiling writes a hand-over file and a fresh chat of the same name takes over once it is quiet.~~ (Javi, 24 November, as the fallback)",

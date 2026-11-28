@@ -230,6 +230,10 @@ const files = {
   // The open assistant chat, the one the queue started last, a copy's
   // included: `{ sessionId, at }` (decisions.md#one-chat).
   assistant: () => join(root, ".claude", "assistant.json"),
+  // The chat to be copied and its copy's timer, `{ sessionId, at, pid }`: a
+  // file of the queue's own, which no older copy of the hooks writes
+  // (decisions.md#one-chat).
+  assistantCopy: () => join(root, ".claude", "assistant.copy.json"),
 };
 
 /** What `plans` says, and `plans start` refuses with, in a project with no project file. */
@@ -3082,20 +3086,22 @@ export function writtenAt(
  * `except`, with a process, the record's chat (`.claude/assistant.json`, the
  * one the queue started last) first, then ordered not to be copied before
  * to be copied, then one whose state says it ran the assistant's agent, then
- * the one started last. A chat to be copied alone is still first: it is the
- * one chat until it is replaced (plans/one-assistant-after-handover.md).
+ * the one started last. A chat to be copied (`.claude/assistant.copy.json`)
+ * alone is still first: it is the one chat until it is replaced
+ * (plans/one-assistant-after-handover.md).
  */
 export function liveAssistants(
   live,
   except = "",
   stateOf = readState,
   record = readJson(files.assistant()),
+  mark = copyMark(),
 ) {
   const rank = (row) => {
     const state = stateOf(row.sessionId) || {};
     return [
       record?.sessionId && sameSession(record.sessionId, row.sessionId) ? 0 : 1,
-      state.handing ? 1 : 0,
+      copying(row.sessionId, mark) ? 1 : 0,
       state.agent === "assistant" ? 0 : 1,
       -(row.startedAt || 0),
     ];
@@ -3124,10 +3130,9 @@ export function liveAssistants(
  * stopped once idle (Codex C1).
  */
 function openAssistants(rows, except = "", { handedOn = true } = {}) {
+  const mark = copyMark();
   return liveAssistants(rows, except)
-    .filter(
-      (row) => handedOn || (!readState(row.sessionId).handing && !earlierOf(row.sessionId, rows)),
-    )
+    .filter((row) => handedOn || (!copying(row.sessionId, mark) && !earlierOf(row.sessionId, rows)))
     .map((row) => `${row.name} [${String(row.sessionId).slice(0, 8)}]`);
 }
 
@@ -3536,18 +3541,83 @@ function armEnd(sessionId, live = null, at = Date.now() + CACHE_TTL) {
   const statePath = files.state(sessionId);
   const state = readJson(statePath) || {};
   killTimer(state.end?.pid, endTimer(sessionId));
-  // The tests' record of the timer, as `stopLater` records stops.
-  let pid = null;
-  if (process.env.WORKFLOW_STOP_LOG)
+  writeJson(statePath, { ...state, end: { pid: launchTimer(sessionId, at), at } });
+}
+
+/**
+ * Starts `plan-queue.mjs end --timer <at> <sessionId>`, detached; its pid,
+ * or null in the tests, whose log records it as `stopLater` records stops.
+ */
+function launchTimer(sessionId, at) {
+  if (process.env.WORKFLOW_STOP_LOG) {
     appendFileSync(process.env.WORKFLOW_STOP_LOG, `end ${sessionId} at ${at}\n`);
-  else
-    pid = detached(
-      process.execPath,
-      [join(here, "plan-queue.mjs"), "end", "--timer", String(at), sessionId],
-      // The timer runs as the command, so its root is said: this project's.
-      { ...process.env, WORKFLOW_ROOT: root },
-    );
-  writeJson(statePath, { ...state, end: { pid, at } });
+    return null;
+  }
+  return detached(
+    process.execPath,
+    [join(here, "plan-queue.mjs"), "end", "--timer", String(at), sessionId],
+    // The timer runs as the command, so its root is said: this project's.
+    { ...process.env, WORKFLOW_ROOT: root },
+  );
+}
+
+/**
+ * **The copy's mark and timer are the queue's own**
+ * (decisions.md#one-chat): `.claude/assistant.copy.json`, `{ sessionId, at,
+ * pid }`, the chat to be copied and its copy's timer, due at `at`. A chat
+ * opened before the copy runs older hooks, which clear a mark kept in its
+ * state at his prompt and kill and re-arm the timer in its state at every
+ * stop; neither reads this file.
+ */
+function copyMark() {
+  return readJson(files.assistantCopy());
+}
+
+/** Whether `sessionId` is the chat to be copied. */
+function copying(sessionId, mark = copyMark()) {
+  return Boolean(mark?.sessionId && sameSession(mark.sessionId, sessionId));
+}
+
+/**
+ * Marks `sessionId` to be copied, over any other mark, with its copy's timer
+ * due at `at`, the mark's earlier timer killed; a timer of its mark still
+ * alive in another process is left to fire, unless `replace`, or `forward`
+ * and it is due later (/code-review).
+ */
+function armCopyTimer(sessionId, at, { replace = false, forward = false } = {}) {
+  const mark = copyMark();
+  const alive = copyTimerAlive(mark);
+  if (!replace && copying(sessionId, mark) && alive && !(forward && mark.at > at)) return;
+  if (alive) killTimer(mark.pid, endTimer(mark.sessionId));
+  writeJson(files.assistantCopy(), { sessionId, at, pid: launchTimer(sessionId, at) });
+}
+
+/** Whether the mark's timer is alive in another process than this one. */
+function copyTimerAlive(mark = copyMark()) {
+  return Boolean(
+    mark?.pid &&
+    mark.pid !== process.pid &&
+    endTimer(mark.sessionId || "").test(commandOf(mark.pid)),
+  );
+}
+
+/**
+ * The chat to judge for a copy: the marked one while it is live, so two
+ * chats over their ceilings never trade the mark and hold off each other's
+ * timer (Codex C1), else the open one.
+ */
+function copyTarget(live) {
+  const chats = liveAssistants(live);
+  const mark = copyMark();
+  return chats.find((row) => copying(row.sessionId, mark)) || chats[0] || null;
+}
+
+/** The mark taken off `sessionId`, its copy's timer killed: no copy of it is due. */
+function dropCopy(sessionId) {
+  const mark = copyMark();
+  if (!copying(sessionId, mark)) return;
+  killTimer(mark.pid, endTimer(mark.sessionId));
+  rmSync(files.assistantCopy(), { force: true });
 }
 
 /**
@@ -3585,21 +3655,22 @@ function endSession(
 ) {
   const row = live?.find((r) => r.sessionId === sessionId) || null;
   const state = readState(sessionId);
+  const marked = copying(sessionId);
   const who = `${row?.name || String(sessionId).slice(0, 8)} [${String(sessionId).slice(0, 8)}]`;
   // **An assistant chat to be copied is ended, however long it takes**
   // (decisions.md#one-chat): with the chats unread the timer tries again
   // (`again`, how long on), since the chat may still be live.
-  if ((state.handing || state.closing) && !live)
+  if ((marked || state.closing) && !live)
     return {
       ended: false,
       again: AGAIN_LATER,
       line: `Not ended: ${who}, claude agents could not be read.`,
     };
   // A chat to be copied, gone from a list that was read, is still replaced.
-  if (!row && (!state.handing || immediate))
+  if (!row && (!marked || immediate))
     return { ended: false, line: `Not ended: ${who}, it is no live session.` };
   const assistant = Boolean(row) && isSession("assistant", row);
-  // Stopped with nothing in its place, its state's copy mark and timer gone;
+  // Stopped with nothing in its place, its copy's mark and its timers gone;
   // a row with no process, or none, has nothing to stop.
   const stopAssistant = (one = row) => {
     if (one && statusOf(one) !== "not running") {
@@ -3607,7 +3678,8 @@ function endSession(
       endSwarm(one.pid);
     }
     killTimer(state.end?.pid, endTimer(sessionId));
-    const { handing: _handing, closing: _closing, end: _end, ...rest } = readState(sessionId);
+    dropCopy(sessionId);
+    const { closing: _closing, end: _end, ...rest } = readState(sessionId);
     writeJson(files.state(sessionId), rest);
     return true;
   };
@@ -3643,7 +3715,7 @@ function endSession(
   // with another assistant chat live already, the old one is stopped with
   // nothing started. A busy chat is tried again a minute on, a refused or
   // failed start ten minutes on; a row that is no background chat is left.
-  if (state.handing && (!row || assistant)) {
+  if (marked && (!row || assistant)) {
     if (row && row.kind !== "background")
       return {
         ended: false,
@@ -3654,8 +3726,7 @@ function endSession(
     // A Claude Code with no `--autocompact` would start a copy with no
     // window, itself copied again: none is started, and the mark goes.
     if (!assistantWindow()) {
-      const { handing: _handing, ...rest } = readState(sessionId);
-      writeJson(files.state(sessionId), rest);
+      dropCopy(sessionId);
       return {
         ended: false,
         line: `Not ended: ${who}, the installed Claude Code has no --autocompact, so no copy of it is started.`,
@@ -3663,8 +3734,7 @@ function endSession(
     }
     // Another chat to be copied too is no successor: both would stop; nor is
     // an earlier chat, which the open one never makes way for (Codex C1).
-    const successor = (one, rows) =>
-      !readState(one.sessionId).handing && !earlierOf(one.sessionId, rows);
+    const successor = (one, rows) => !copying(one.sessionId) && !earlierOf(one.sessionId, rows);
     const other = liveAssistants(live, sessionId).find((one) => successor(one, live));
     if (other) {
       if (!stopAssistant()) return failed;
@@ -5512,9 +5582,15 @@ function startHere(
   // its copy, and says so** (decisions.md#one-chat), so a chat running an
   // older copy of the hooks is reached from outside them.
   if (kind === "assistant" && !replace && live && !paused) {
-    const open = liveAssistants(live)[0];
+    const open = copyTarget(live);
     const armed =
-      open && armCopy(open.sessionId, { live, usage: () => sessionUsage(transcriptOf(open)), dry });
+      open &&
+      armCopy(open.sessionId, {
+        live,
+        usage: () => sessionUsage(transcriptOf(open)),
+        dry,
+        forward: true,
+      });
     // A message to deliver is still named, to the chat open until the copy (Codex C4).
     if (armed)
       return paths.length
@@ -7854,6 +7930,7 @@ function plannerHook(mode, input, sessionId, statePath) {
   }
   const live = liveSessions();
   if (mode === "prompt") {
+    copyFromPrompt(live);
     const named = PLANNER_PROMPT.exec(String(input.prompt || ""))?.[1];
     if (state.retired) {
       writeJson(statePath, { ...state, agent: "planner" });
@@ -8363,10 +8440,10 @@ const WINDOW_SINCE = [2, 1, 221];
 
 /**
  * **The assistant chat's auto-compact window** (decisions.md#one-chat): its
- * ceiling, never under Claude Code's least; 0 when the installed Claude Code
- * reads as older than the flag. Unread, the flag is passed.
+ * ceiling, never under Claude Code's least; 0 when the Claude Code the launch
+ * runs reads as older than the flag. Unread, the flag is passed.
  */
-export function assistantWindow(ceiling = proj().reuse.assistant, installed = installedVersion()) {
+export function assistantWindow(ceiling = proj().reuse.assistant, installed = launchVersion()) {
   const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(installed || "");
   if (parts) {
     const [major, minor, patch] = parts.slice(1).map(Number);
@@ -8374,6 +8451,52 @@ export function assistantWindow(ceiling = proj().reuse.assistant, installed = in
     if (major < a || (major === a && (minor < b || (minor === b && patch < c)))) return 0;
   }
   return Math.max(WINDOW_LEAST, Math.round(Number(ceiling) || 0));
+}
+
+let launchRead = null;
+
+/**
+ * The version of the Claude Code a launch runs: the installed one's when the
+ * launch's binary is `~/.local/bin/claude` and it links to a version, else
+ * what `claude --version` of the launch's binary prints, found on the
+ * launch's PATH (/code-review of plans/assistant-handover-that-happens.md;
+ * Codex C3); "" when neither reads. Read once a process.
+ */
+function launchVersion() {
+  if (launchRead !== null) return launchRead;
+  const bin = claudeBin();
+  const link = join(homedir(), ".local", "bin", "claude");
+  const real = (path) => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return "";
+    }
+  };
+  const found = bin.includes("/")
+    ? bin
+    : (sessionEnv().PATH || "")
+        .split(delimiter)
+        .filter(Boolean)
+        .map((dir) => join(dir, bin))
+        .find((path) => real(path));
+  const installed = installedVersion();
+  launchRead =
+    found && real(found) === real(link) && /^\d+\.\d+\.\d+/.test(installed) ? installed : "";
+  if (!launchRead)
+    try {
+      const said = execFileSync(bin, ["--version"], {
+        encoding: "utf8",
+        timeout: 10_000,
+        stdio: ["ignore", "pipe", "ignore"],
+        env: sessionEnv(),
+      });
+      launchRead = /^\s*(\d+\.\d+\.\d+)/.exec(said)?.[1] || "";
+    } catch {
+      // No binary, or one that fails: unread, and the flag is passed.
+      launchRead = "";
+    }
+  return launchRead;
 }
 
 /** The copy's first prompt (decisions.md#one-chat). */
@@ -8421,11 +8544,13 @@ function closedWords(open, sessionId, live) {
   const chat = assistantChat(live);
   const address = chat?.row.sessionId === open.sessionId ? chat.address : "";
   const who = owner();
+  // Named by the id `plans` and his list share, whichever chat opened later.
+  const short = String(open.sessionId).slice(0, 8);
   if (!address)
-    return `${head} tell ${who} in one line \`This chat is closed. Write in the open ${open.name} chat, the newest of that name in your list.\`, and do nothing else.`;
+    return `${head} tell ${who} in one line \`This chat is closed. Write in the open ${open.name} chat, [${short}] in your list.\`, and do nothing else.`;
   const day = new Date();
   const here = chatWords({ name: open.name, sessionId });
-  return `${head} send it what this prompt brought in one SendMessage to \`${address}\`, ${who}'s words under the first line \`From ${who}: said in ${here}, ${day.getDate()} ${MONTHS[day.getMonth()]}.\` and another chat's message as it came; when the words were his, tell him in one line \`This chat is closed. I passed that to the open ${open.name} chat, the newest of that name in your list; write there.\`; and do nothing else.`;
+  return `${head} send it what this prompt brought in one SendMessage to \`${address}\`, ${who}'s words under the first line \`From ${who}: said in ${here}, ${day.getDate()} ${MONTHS[day.getMonth()]}.\` and another chat's message as it came; when the words were his, tell him in one line \`This chat is closed. I passed that to the open ${open.name} chat, [${short}] in your list; write there.\`; and do nothing else.`;
 }
 
 /**
@@ -8451,26 +8576,26 @@ function armSoon(sessionId, live) {
  * **A chat over its ceiling with no window is replaced by a copy**
  * (decisions.md#one-chat): for the open assistant chat, a background one,
  * whose context is over `reuse.assistant` and whose state has no `window`,
- * `handing` is written, over any older one, and its end timer armed twenty
- * seconds on, where `endSession` starts the copy. The line saying so, or ""
- * when it is not one; `dry` writes nothing.
+ * the copy's mark is written (`armCopyTimer`), over any other, with its
+ * timer twenty seconds on, where `endSession` starts the copy; a timer of
+ * the mark's still alive is left to fire, brought forward only by
+ * `forward`, the chat's own stop and `plans start`, so a worker's prompt
+ * never hurries a retry. The line saying so, or "" when it is not one;
+ * `dry` writes nothing.
  */
-function armCopy(sessionId, { live, usage, dry = false }) {
+function armCopy(sessionId, { live, usage, dry = false, forward = false }) {
   if (!live) return "";
   const state = readJson(files.state(sessionId)) || {};
   if (state.window) return "";
   const row = live.find((one) => one.sessionId === sessionId);
   if (!row || row.kind !== "background" || !isSession("assistant", row)) return "";
-  if (liveAssistants(live)[0]?.sessionId !== sessionId) return "";
+  if (copyTarget(live)?.sessionId !== sessionId) return "";
   // The transcript is read last, `usage` a function to read it, and no copy
   // is armed without a window to start it with (Codex C2).
   const ceiling = proj().reuse.assistant;
   const used = typeof usage === "function" ? usage() : usage;
   if (!(used?.context > ceiling) || !assistantWindow()) return "";
-  if (!dry) {
-    writeJson(files.state(sessionId), { ...state, handing: { at: Date.now() } });
-    armSoon(sessionId, live);
-  }
+  if (!dry) armCopyTimer(sessionId, Date.now() + COPY_SOON, { forward });
   return `${chatWords(row)} is over its ceiling (${kTokens(used.context)} of ${kTokens(ceiling)}): a copy of it with its window takes over once it is idle.`;
 }
 
@@ -8492,8 +8617,30 @@ function assistantSweep(fired = "") {
       earlierOf(row.sessionId, live, record)
     )
       endSession(row.sessionId, { live });
-  const open = liveAssistants(live)[0];
-  if (open && open.sessionId !== fired)
+  armOpenCopy(live, fired);
+}
+
+/**
+ * **A planner's or an executor's prompt judges the open assistant chat for a
+ * copy** (decisions.md#one-chat), from the rows its hook read already; a
+ * fault leaves it to the next prompt or timer.
+ */
+function copyFromPrompt(live) {
+  try {
+    armOpenCopy(live);
+  } catch {
+    // A transcript or a state that cannot be read copies nothing yet.
+  }
+}
+
+/**
+ * The open assistant chat judged for a copy (`armCopy`), from rows already
+ * read, unless it is `except`: from any session's timer and a planner's or an
+ * executor's prompt, so a chat running older hooks is reached within minutes.
+ */
+function armOpenCopy(live, except = "") {
+  const open = copyTarget(live);
+  if (open && open.sessionId !== except)
     armCopy(open.sessionId, { live, usage: () => sessionUsage(transcriptOf(open)) });
 }
 
@@ -8604,7 +8751,7 @@ function hook(mode, input) {
         const state = readJson(files.state(sessionId)) || {};
         writeJson(files.state(sessionId), { ...state, closing: { at: Date.now() } });
         armSoon(sessionId, live);
-      } else armCopy(sessionId, { live, usage });
+      } else armCopy(sessionId, { live, usage, forward: true });
     }
     // **Ready plans never wait with no executor**
     // (decisions.md#plans-reach-an-executor): its cheap gate reads no
@@ -8749,6 +8896,7 @@ function hook(mode, input) {
   }
   const live = liveSessions();
   if (mode === "prompt") {
+    copyFromPrompt(live);
     // **The checkout is for reading** (decisions.md#executors-in-worktrees): an
     // executor's chat opened anywhere but its worktree builds nothing.
     if (!executorNumber(input)) {
@@ -11393,15 +11541,20 @@ export function main(args = process.argv.slice(2)) {
           let handed = false;
           let again = false;
           try {
-            if (sessionId) ({ handed = false, again = false } = endSession(sessionId));
+            // A copy's timer the mark does not record leaves the copy to the
+            // one it does (Codex C2).
+            const other = sessionId && copying(sessionId) && copyTimerAlive();
+            if (sessionId && !other) ({ handed = false, again = false } = endSession(sessionId));
           } catch {
             // A timer that fails ends nothing: the supervisor's own clock remains.
           }
           // **An assistant chat to be copied or stopped is ended, however long
           // it takes** (decisions.md#one-chat): a refusal arms the timer again
-          // as long on as it says; `clearEnd` below then leaves the new one's
-          // registration.
-          if (again) armEnd(sessionId, null, Date.now() + Number(again));
+          // as long on as it says, the copy's in its own file; `clearEnd`
+          // below then leaves the new one's registration.
+          if (again && copying(sessionId))
+            armCopyTimer(sessionId, Date.now() + Number(again), { replace: true });
+          else if (again) armEnd(sessionId, null, Date.now() + Number(again));
           // **Every timer sweeps the assistant chats** (decisions.md#one-chat).
           try {
             assistantSweep(sessionId);

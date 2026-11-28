@@ -126,12 +126,22 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   the chat is compacted where it is and no file holds what it owes. A
   chat with no window is replaced once by a copy of itself, which
   `claude --bg --resume <id>` with flags starts with the conversation
-  kept. Which chat was the one was read from the rows' order, which a
-  restarted chat changes: the queue records the chat it started last,
-  and any other of the name takes no new work, as a terminating endpoint
-  takes no new traffic, and is stopped once idle. While work runs it
-  is kept warm: a turn that reads the cache renews its hour for about a
-  fortieth of what the first turn of a cold chat costs (`context-cost`).
+  kept; the flag is left out only for a Claude Code that reads as older,
+  from `~/.local/bin/claude` when the launch runs it, else from `claude
+  --version`. A chat opened before then runs the hooks it started with,
+  which cleared a mark in its state at his prompt and killed the timer
+  there at every stop, as the hand-over had been held off; so the copy's
+  mark and timer are a file of the queue's own,
+  `.claude/assistant.copy.json`, which no older hook writes, and a
+  planner's or an executor's prompt arms the copy too, so an old chat is
+  reached within minutes. Which chat was the one was read from the rows'
+  order, which a restarted chat changes: the queue records the chat it
+  started last, and any other of the name takes no new work, as a
+  terminating endpoint takes no new traffic, names the open chat by the
+  short id his list and `plans` share, since one opened by hand may be
+  newer, and is stopped once idle. While work runs it is kept warm: a
+  turn that reads the cache renews its hour for about a fortieth of what
+  the first turn of a cold chat costs (`context-cost`).
   The workers keep nothing that was for him (a task list, files sent, a
   message written to be read): what one makes for him to see is kept
   beside its plan and the assistant brings it up. Three chats of the
@@ -149,15 +159,16 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   update brings the new copy up before it takes the old one down; and a
   chat with no process is not open, since it takes no message: one is
   opened beside its row. Two chats to be replaced at once each counted
-  the other as open, so neither was; one on its way out is not open to
-  a copy's start, and one copy replaces both. A stopped row beside the
-  live chat made its name shared, so a note waited; only rows with a
-  process share it.
+  the other as open, so neither was; one on its way out is not open to a
+  copy's start, and one copy replaces both; with the mark one file, one
+  chat is marked at a time. A stopped row beside the live chat made its
+  name shared, so a note waited; only rows with a process share it.
   plans/one-assistant-chat.md, plans/quiet-worker-starts.md,
   plans/prs-close-their-issues.md, plans/one-assistant-after-handover.md,
   plans/assistant-takeover-never-leaves-none.md,
   plans/assistant-chat-counts-live-rows.md,
-  plans/assistant-handover-that-happens.md.
+  plans/assistant-handover-that-happens.md,
+  plans/assistant-handover-that-happens-follow-up.md.
   - ~~Planners and executors stay openable, in his chat list.~~
     (Javi, 24 November)
   - ~~A chat past its ceiling writes a hand-over file and a fresh chat of

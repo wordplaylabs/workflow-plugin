@@ -63,6 +63,24 @@ plugins/workflow/docs/decisions.md`, searched for the entry's id).
   plan's, the other file an agent reads whole. The handbook and this
   file are looked up by a rule's name or id and have none.
   plans/landing-doc-length.md.
+- `agent-file-length` **An agent file is fifteen thousand characters at
+  most, held by a test; one over it gives a procedure to the step file
+  read at that step, or loses a repeat, and a bigger cap is the owner's
+  call.** (Javi, 28 November) An agent file is in the agent's context
+  at every turn and a step file only once its step comes, so it gets
+  half a step file's cap: Claude Code's memory page says a longer
+  always-loaded file takes more context and is followed less, and
+  sends a multi-step procedure out of it; Anthropic's skill guide
+  keeps the loaded file under five thousand tokens and splits the rest
+  into files named from it. The plan that made the big agent files
+  about fifteen thousand characters had nothing check it, and in three
+  weeks the executor's was 19,710 and the assistant's 22,188. So the
+  executor's push and what follows it are push.md, and the assistant's
+  short plan, brief, follow-ups and decisions log are handing-on.md;
+  each heading a hook names stays in the agent file with the pointer.
+  The owner's name and the plugin's folder are written `<the owner>`
+  and `<the plugin>` there, since Claude Code fills its variables in
+  an agent file only. plans/agent-files-length.md.
 - `report-is-short` **An agent's report is short: what changed, what
   waits on the owner, the evidence by command and count, nothing the
   plan says.** (Javi, 6 November) He reads the final messages on his

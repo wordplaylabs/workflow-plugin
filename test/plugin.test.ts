@@ -390,8 +390,9 @@ describe("the plugin's queue in any project", () => {
     expect(description).toContain("- <The commit's title.> (<author>)");
     expect(both).not.toContain("credited by GitHub's commits list");
     expect(executor).toContain("its link and what it was marked related to");
-    for (const agent of ["planner", "assistant"])
-      expect(text(`agents/${agent}.md`), agent).toContain("`Related: #31.`");
+    // plans/agent-files-length.md: the assistant's handing-on is handing-on.md's.
+    for (const file of ["agents/planner.md", "docs/handing-on.md"])
+      expect(text(file), file).toContain("`Related: #31.`");
     const doc = text("docs/workflow.md");
     expect(doc).toContain("**A decision has a name; a part has none.**");
     expect(doc).toContain("**A change one person started is anyone's to go on with.**");
@@ -588,10 +589,9 @@ describe("the plugin's queue in any project", () => {
   it("names the Dropped section in the agents and the state in the doc's queue", () => {
     const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
     const text = (path: string) => readFileSync(join(plugin, path), "utf8").replace(/\s+/g, " ");
-    for (const agent of ["planner", "assistant"])
-      expect(text(`agents/${agent}.md`), agent).toContain(
-        "`Dropped on ${user_config.owner}'s word:",
-      );
+    expect(text("agents/planner.md")).toContain("`Dropped on ${user_config.owner}'s word:");
+    // plans/agent-files-length.md: the assistant's is in handing-on.md, the owner written out.
+    expect(text("docs/handing-on.md")).toContain("`Dropped on <the owner>'s word:");
     expect(text("agents/executor.md")).toContain("A plan with a `## Dropped` section is nobody's");
     const doc = text("docs/workflow.md");
     const queue = doc.slice(doc.indexOf("## The queue"));
@@ -629,9 +629,8 @@ describe("the plugin's queue in any project", () => {
     expect(assistant).toContain("What crosses chats");
     expect(assistant).toContain("Change from ${user_config.owner}: plans/<x>.md.");
     expect(assistant).not.toContain("Change from Javi");
-    expect(text("agents/executor.md")).toContain(
-      "`<Project> Assistant` on this machine by `ListAgents`",
-    );
+    // plans/agent-files-length.md: the executor's After is push.md's.
+    expect(text("docs/push.md")).toContain("`<Project> Assistant` on this machine by `ListAgents`");
     const doc = text("docs/workflow.md");
     expect(doc).toContain("What he writes in a worker's chat is passed on");
     expect(doc).toContain("Handed to the assistant");
@@ -1342,13 +1341,34 @@ describe("the handbook holds every rule the plugin cites", () => {
   it("every rule an agent file cites is in the handbook", () => {
     const flatProse = prose.replace(/\s+/g, " ");
     let cited = 0;
-    for (const agent of readdirSync(join(plugin, "agents"))) {
-      const text = readFileSync(join(plugin, "agents", agent), "utf8");
+    const leads = (text: string) => [
+      ...[...text.matchAll(/^## (.+)$/gm)].map((m) => m[1]),
+      ...[
+        ...text
+          .replace(/```[\s\S]*?```/g, "")
+          .replace(/\s+/g, " ")
+          .matchAll(/\*\*([^*]+?)\*\*/g),
+      ].map((m) => m[1]),
+    ];
+    const agentFile = (name: string) => readFileSync(join(plugin, "agents", name), "utf8");
+    // plans/agent-files-length.md: a step file's names are checked too, its own headings and
+    // lead-ins and those of the agent file that sends the agent to it counting as its own.
+    const files = [
+      ...readdirSync(join(plugin, "agents")).map((agent) => ({
+        agent,
+        text: agentFile(agent),
+        own: leads(agentFile(agent)),
+      })),
+      ...[
+        ["push.md", "executor.md"],
+        ["handing-on.md", "assistant.md"],
+      ].map(([step, agent]) => {
+        const text = readFileSync(join(plugin, "docs", step), "utf8");
+        return { agent: `docs/${step}`, text, own: [...leads(text), ...leads(agentFile(agent))] };
+      }),
+    ];
+    for (const { agent, text, own } of files) {
       const flat = text.replace(/```[\s\S]*?```/g, "").replace(/\s+/g, " ");
-      const own = [
-        ...[...text.matchAll(/^## (.+)$/gm)].map((m) => m[1]),
-        ...[...flat.matchAll(/\*\*([^*]+?)\*\*/g)].map((m) => m[1]),
-      ];
       for (const [, name] of flat.matchAll(/(?:the docs' |the handbook's |\()"([A-Z`][^"]+?)"/g)) {
         cited++;
         expect(
@@ -1387,7 +1407,8 @@ describe("a brief or a plan is a prompt", () => {
   });
 
   it("the assistant's brief and short plan each hold Done when and no Tests", () => {
-    const text = agent("assistant");
+    // plans/agent-files-length.md: both templates are handing-on.md's.
+    const text = readFileSync(join(plugin, "docs", "handing-on.md"), "utf8");
     const blocks = [...text.matchAll(/```\n(\s*# <Title[\s\S]*?)```/g)].map((m) => m[1]);
     const brief = blocks.find((b) => b.includes("Brief for the planner"))!;
     const short = blocks.find((b) => b.includes("Short plan, <date>"))!;
@@ -1413,7 +1434,9 @@ describe("a brief or a plan is a prompt", () => {
   it("the executor's Built rule and its four-part rule, and the reviewer's second check, name Done when", () => {
     const executor = flat(agent("executor"));
     // Each rule read to its end: the Built bullet to the next bullet, the four-part rule to its last sentence.
-    const built = /\*\*"Built"\*\*.*? - \*\*/.exec(executor)![0];
+    // plans/agent-files-length.md: the Built bullet is push.md's.
+    const push = flat(readFileSync(join(plugin, "docs", "push.md"), "utf8"));
+    const built = /\*\*"Built"\*\*.*? - \*\*/.exec(push)![0];
     expect(built).toContain('"Done when"');
     // The four parts, done when among them, are the handbook rule the brief names.
     const brief = /A brief has the four parts of .*?three hundred words\./.exec(executor)![0];
@@ -1445,10 +1468,12 @@ describe("a brief or a plan is a prompt", () => {
     );
     expect(done).toMatch(/- When [^,]+, then /);
     const assistant = flat(agent("assistant"));
-    expect(assistant).toMatch(
+    // plans/agent-files-length.md: the brief's and the short plan's Done when are handing-on.md's.
+    const handing = flat(readFileSync(join(plugin, "docs", "handing-on.md"), "utf8"));
+    expect(handing).toMatch(
       /"Done when" \(the checks he would run[^)]*When <what he does>, then <what he sees>/,
     );
-    expect(assistant).toMatch(
+    expect(handing).toMatch(
       /the test files and cases to add among them; a behavior a person sees is a scenario/,
     );
     expect(assistant).toMatch(/## The final message [^#]*When <what he does>, then <what he sees>/);
@@ -1460,7 +1485,9 @@ describe("a brief or a plan is a prompt", () => {
     expect(executor).toContain(
       'Give each When … then … line of "Done when" the test it names, one per scenario',
     );
-    expect(executor).toMatch(/Built: plans\/<x>\.md\..{0,120}as When … then …/);
+    // plans/agent-files-length.md: the Built: message and the reviews are push.md's.
+    const push = flat(readFileSync(join(plugin, "docs", "push.md"), "utf8"));
+    expect(push).toMatch(/Built: plans\/<x>\.md\..{0,120}as When … then …/);
     // The reviewer checks the scenarios rather than writing them: its check 2, to check 3.
     const check = flat(
       /2\. \*\*Every line of its "Done when"[^]*?(?=\n3\. )/.exec(agent("reviewer"))![0],
@@ -1474,9 +1501,7 @@ describe("a brief or a plan is a prompt", () => {
     expect(rule).toContain(
       "for one looked at on screen the executor names the screenshot that shows it",
     );
-    expect(executor).toContain(
-      "each screenshot by path with what it shows and its When … then … line",
-    );
+    expect(push).toContain("each screenshot by path with what it shows and its When … then … line");
   });
 });
 
@@ -1573,8 +1598,9 @@ describe("a message for another person only when the owner asks", () => {
     const assistant = read("agents/assistant.md");
     expect(assistant).toContain("say in a line whose call it is and what to ask them");
     expect(assistant).toContain("only when ${user_config.owner} asks for one");
-    expect(assistant).toContain(
-      'when ${user_config.owner} asks for a message, it goes in the brief\'s "Decided" for the planner',
+    // plans/agent-files-length.md: the brief is handing-on.md's, the owner written out.
+    expect(read("docs/handing-on.md")).toContain(
+      'when the owner asks for a message, it goes in the brief\'s "Decided" for the planner',
     );
   });
 });
@@ -2339,10 +2365,11 @@ describe("a plan still asking, whoever names it", () => {
   });
 
   it("has the assistant hold back a plan still asking", () => {
-    const handOver = /3\. \*\*A short plan for the executor\.\*\*[\s\S]*?\n4\. /.exec(
-      agent("assistant"),
+    // plans/agent-files-length.md: exit 3's hand-over is handing-on.md's "A short plan".
+    const handOver = /^## A short plan\n[\s\S]*?\n## /m.exec(
+      readFileSync(new URL("../plugins/workflow/docs/handing-on.md", import.meta.url), "utf8"),
     )![0];
-    expect(handOver).toContain('lists under "Asking ${user_config.owner}" is not sent');
+    expect(handOver).toContain('lists under "Asking <the owner>" is not sent');
   });
 });
 
@@ -2753,8 +2780,9 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     expect(read("docs/workflow.md").replace(/\s+/g, " ")).toContain(
       "Without the heading, a plan resting on the queue's own pull request marked ready is stacked on it, and one that shares files with an open pull request gets a `Related` line and a pull request of its own.",
     );
-    for (const agent of ["planner", "assistant"])
-      expect(read(`agents/${agent}.md`).replace(/\s+/g, " ")).toContain(
+    // plans/agent-files-length.md: the assistant's rule is handing-on.md's.
+    for (const path of ["agents/planner.md", "docs/handing-on.md"])
+      expect(read(path).replace(/\s+/g, " "), path).toContain(
         "only when it uses what that plan adds, never for a shared file",
       );
   });
@@ -2767,6 +2795,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
       "docs/landing.md",
       "agents/planner.md",
       "agents/assistant.md",
+      "docs/handing-on.md",
     ]) {
       const text = read(path).replace(/\s+/g, " ");
       expect(text).not.toContain("same file is neither");
@@ -2775,7 +2804,7 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     expect(read("docs/decisions.md").replace(/\s+/g, " ")).toContain(
       "one that only changes the same file is neither.~~ (Javi, 4 November)",
     );
-    expect(read("agents/assistant.md").replace(/\s+/g, " ")).toContain(
+    expect(read("docs/handing-on.md").replace(/\s+/g, " ")).toContain(
       "then go by the project file's **Pull requests** heading",
     );
     expect(read("agents/planner.md").replace(/\s+/g, " ")).toContain(
@@ -2904,13 +2933,15 @@ describe("a pull request stacked only on one it cannot be built without", () => 
     expect(fresh).toContain("`git switch -c <name> origin/<base>`, the topic's base above");
     expect(fresh).not.toContain("<that head branch>");
     expect(fresh).not.toContain("that plan's pull request is open: then");
-    for (const agent of ["planner", "assistant"]) {
-      const text = read(`agents/${agent}.md`).replace(/\s+/g, " ");
-      expect(text).toContain(
+    // plans/agent-files-length.md: the assistant's rule is handing-on.md's; the guard reads both.
+    for (const path of ["agents/planner.md", "docs/handing-on.md"]) {
+      const text = read(path).replace(/\s+/g, " ");
+      expect(text, path).toContain(
         "an open draft of this queue's own it lands in (\"lands in #<n>\", its `Lands` that draft's topic), another person's it is stacked on (\"stacked on #<n>\"), one of this queue's marked ready by the **Pull requests** heading, stacked without it",
       );
       expect(text).not.toContain("build it on #<n>'s branch");
     }
+    expect(read("agents/assistant.md")).not.toContain("build it on #<n>'s branch");
     const entry = read("docs/decisions.md").replace(/\s+/g, " ");
     expect(entry).toContain(
       "~~A plan that rests on an open pull request (uses what it adds) is stacked on it; one that only changes the same file is not.~~ (Javi, 30 October)",
@@ -3007,8 +3038,9 @@ describe("a pull request per topic", () => {
     );
     expect(handbook).toContain("lands in it, and one that rests");
     const planner = read("agents/planner.md");
-    const assistant = read("agents/assistant.md");
-    for (const agent of [planner, assistant]) {
+    // plans/agent-files-length.md: the assistant's Lands rules are handing-on.md's.
+    const assistant = read("docs/handing-on.md");
+    for (const agent of [planner, read("agents/assistant.md"), assistant]) {
       expect(agent).not.toContain("plans full");
       expect(agent).not.toContain("as its fix");
     }
@@ -3221,13 +3253,15 @@ describe("a pull request per topic", () => {
     expect(read("docs/workflow.md").replace(/\s+/g, " ")).toContain(
       "the push and a picture's upload alone are the person's token.",
     );
-    expect(read("agents/assistant.md")).toContain("Lands: <fix | fix, now | topic <name>>.");
-    expect(read("agents/assistant.md")).toContain(
+    // plans/agent-files-length.md: the assistant's Lands rules are handing-on.md's.
+    expect(read("docs/handing-on.md")).toContain("Lands: <fix | fix, now | topic <name>>.");
+    expect(read("docs/handing-on.md")).toContain(
       "else `Lands: topic <name>.` (a topic `plans` lists, or a new one): its pull request opens by itself once nothing more of the topic is queued, so never ask him whether a topic is ready.",
     );
-    expect(read("agents/assistant.md")).not.toContain("That topic is ready");
-    expect(read("agents/assistant.md")).toContain("Lands: topic <name>; lands in #<n>.");
-    expect(read("agents/assistant.md")).toContain("`Lands: fix, now.` only when");
+    for (const path of ["agents/assistant.md", "docs/handing-on.md"])
+      expect(read(path), path).not.toContain("That topic is ready");
+    expect(read("docs/handing-on.md")).toContain("Lands: topic <name>; lands in #<n>.");
+    expect(read("docs/handing-on.md")).toContain("`Lands: fix, now.` only when");
     expect(read("agents/planner.md")).toContain(
       "With `land: pull-request`, `Lands: topic <name>.`, optionally `; lands in #<n>.` or `; stacked on #<n>.` after the name. `<name>` is the topic's branch, lower-case words joined by hyphens. A plan alone in a pull request titles it, so title it for what the project does after it. A brief's `Lands` line is carried.",
     );
@@ -3242,12 +3276,14 @@ describe("a pull request per topic", () => {
 
 describe("the reuse ceiling and the reviewer", () => {
   it("has the executor stop at one retry of a push refused for credentials", () => {
-    const text = readFileSync(
-      new URL("../plugins/workflow/agents/executor.md", import.meta.url),
-      "utf8",
-    );
+    // plans/agent-files-length.md: the push is push.md's.
+    const text = readFileSync(new URL("../plugins/workflow/docs/push.md", import.meta.url), "utf8");
     expect(text).toContain("Not pushed: <cause>");
     expect(text.replace(/\s+/g, " ")).toContain("Never a token in a URL, a remote or a config");
+    // Codex C4 of plans/agent-files-length.md: one retry, then the Not pushed line.
+    expect(text.replace(/\s+/g, " ")).toContain(
+      'or with `gh` missing: try once more, then write `Not pushed: <cause>` in "Built"',
+    );
   });
 
   it("reads land, push by default, and the starter names it", () => {
@@ -3879,13 +3915,19 @@ describe("a plan put first", () => {
   it("the Plan first message is one sentence in three files", () => {
     const message =
       "`Plan first: plans/<topic>.md. Build it next, once the plan in hand is built; nothing to answer.`";
+    // plans/agent-files-length.md: the assistant's is handing-on.md's.
+    const file = (agent: string) =>
+      agent === "assistant"
+        ? join(plugin, "docs", "handing-on.md")
+        : join(plugin, "agents", `${agent}.md`);
     for (const agent of ["executor", "assistant", "planner"]) {
-      const text = readFileSync(join(plugin, "agents", `${agent}.md`), "utf8");
+      const text = readFileSync(file(agent), "utf8");
       expect(text.replace(/\n[ \t]*/g, " "), agent).toContain(message);
       // plans/one-assistant-chat.md, part 6: putting a plan first is the assistant's, on his word.
       if (agent === "assistant") expect(text, agent).toContain("plans first");
       else expect(text, agent).not.toContain("plans first");
     }
+    expect(readFileSync(join(plugin, "docs", "push.md"), "utf8")).not.toContain("plans first");
     const handbook = readFileSync(join(plugin, "docs", "workflow.md"), "utf8");
     expect(handbook).toContain("**A plan put first is built next.**");
     expect(handbook).toContain("(decisions.md#plan-put-first)");
@@ -3920,9 +3962,10 @@ describe("a plan's commit holds the plan's files only", () => {
   // plans/owners-untracked-files-left-alone.md, item 2.
   const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
   const flat = (text: string) => text.replace(/\s+/g, " ");
+  // plans/agent-files-length.md: the executor's Before the push is push.md's.
   const before = () =>
     /## Before the push(.*?)## After/.exec(
-      flat(readFileSync(join(plugin, "agents/executor.md"), "utf8")),
+      flat(readFileSync(join(plugin, "docs/push.md"), "utf8")),
     )![1];
 
   it("stages the plan's files by path and leaves untracked files the executor did not write", () => {
@@ -3980,10 +4023,14 @@ describe("an executor never waits on the owner", () => {
     const text = flat(file);
     expect(text).toContain("Decision to check: plans/<x>.md.");
     expect(text).toContain("Checked: plans/<x>.md.");
-    expect(text).toContain("Taken on ${user_config.owner}'s standing word:");
-    expect(text).not.toContain("**ask**");
-    expect(text).not.toContain("asked once");
-    expect(text).not.toContain("is asked");
+    // plans/agent-files-length.md: "Built" is push.md's, the owner written out; the guards read both.
+    const push = flat(read("docs/push.md"));
+    expect(push).toContain("Taken on <the owner>'s standing word:");
+    for (const one of [text, push]) {
+      expect(one).not.toContain("**ask**");
+      expect(one).not.toContain("asked once");
+      expect(one).not.toContain("is asked");
+    }
     expect(text.split("question tool").length - 1).toBe(1);
     expect(text).toContain("You have no question tool");
   });
@@ -4031,11 +4078,13 @@ describe("an executor never waits on the owner", () => {
   it("the assistant keeps the log", () => {
     const text = flat(read("agents/assistant.md"));
     expect(text).toContain('`plans/decisions-taken.md` ("Decisions taken")');
-    expect(text).toContain("`# Decisions taken for ${user_config.owner}, for his review`");
-    expect(text).toContain(
+    // plans/agent-files-length.md: the log's rules are handing-on.md's, the owner written out.
+    const handing = flat(read("docs/handing-on.md"));
+    expect(handing).toContain("`# Decisions taken for <the owner>, for his review`");
+    expect(handing).toContain(
       "`- plans/<x>.md, <the executor's name>: <the question>. Taken: <the option>. Checked with <chat's name>:",
     );
-    expect(text).toContain('log what was taken ("Decisions taken")');
+    expect(handing).toContain('log what was taken ("Decisions taken")');
   });
 
   // plans/executor-never-waits-follow-up.md.
@@ -4451,7 +4500,8 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
     expect(flat("docs/decisions.md")).toContain(
       "~~Screenshots on a pull request or an issue go up through gh's `--attach`, as the project's app with Contents read and write.~~ (Javi, 25 November)",
     );
-    expect(flat("agents/assistant.md")).toContain(
+    // plans/agent-files-length.md: the follow-ups are handing-on.md's.
+    expect(flat("docs/handing-on.md")).toContain(
       "A `Screenshots not attached` line whose cause is the login gh has (none, ended, refused) is a step only he can take, told once with the cause as written;",
     );
   });
@@ -4513,7 +4563,8 @@ describe("the agents keep an issue tidy, build a finished plan, act on named peo
       "Such a plan is started like any other once its Ready section is written; a held one waits, and the message says the issue's address and what it waits for.",
     );
     expect(flat("agents/planner.md")).not.toContain("waits for `status: ready`");
-    expect(flat("agents/assistant.md")).not.toContain("waits for your word to build");
+    for (const path of ["agents/assistant.md", "docs/handing-on.md"])
+      expect(flat(path), path).not.toContain("waits for your word to build");
     expect(flat("docs/workflow.md")).toContain(
       "**A plan with an issue is built once planned**: the planner writes its Ready section on the owner's standing word",
     );
@@ -4695,7 +4746,7 @@ describe("a file an agent reads whole at a step is thirty thousand characters at
   const read = (path: string) => readFileSync(join(plugin, path), "utf8");
   const flat = (path: string) => read(path).replace(/\s+/g, " ");
 
-  it("holds landing.md, description.md, github.md and the skills' files to thirty thousand characters", () => {
+  it("holds landing.md, description.md, github.md, handing-on.md, push.md and the skills' files to thirty thousand characters", () => {
     // plans/step-file-cap-follow-up.md: a skill's files are read whole when it runs.
     const skills = readdirSync(join(plugin, "skills"), { recursive: true, encoding: "utf8" })
       .filter((name) => name.endsWith(".md"))
@@ -4713,7 +4764,9 @@ describe("a file an agent reads whole at a step is thirty thousand characters at
     expect(writing).toContain("plugins/writing/skills/draft/SKILL.md");
     for (const [path, text] of [
       ...[
-        ...["landing.md", "description.md", "github.md"].map((name) => `docs/${name}`),
+        ...["landing.md", "description.md", "github.md", "handing-on.md", "push.md"].map(
+          (name) => `docs/${name}`,
+        ),
         ...skills,
       ].map((path) => [path, read(path)]),
       ...writing.map((path) => [path, readFileSync(join(repo, path), "utf8")]),
@@ -4732,7 +4785,9 @@ describe("a file an agent reads whole at a step is thirty thousand characters at
       "decisions.md",
       "description.md",
       "github.md",
+      "handing-on.md",
       "landing.md",
+      "push.md",
       "workflow.md",
     ]);
   });
@@ -4773,6 +4828,98 @@ describe("a file an agent reads whole at a step is thirty thousand characters at
     );
     expect(flat("docs/decisions.md")).toContain(
       "- `step-file-length` **A file an agent reads whole at a step is thirty thousand characters at most, held by a test; one over it is split by the step each part is read at, and a bigger cap is the owner's call.** (Javi, 28 November)",
+    );
+  });
+});
+
+// plans/agent-files-length.md: an agent file is in the context at every turn, so it gets half
+// a step file's cap, and its push and handing-on steps are files read at their step.
+describe("an agent file is fifteen thousand characters at most", () => {
+  const plugin = new URL("../plugins/workflow/", import.meta.url).pathname;
+  const read = (path: string) => readFileSync(join(plugin, path), "utf8");
+  const flat = (path: string) => read(path).replace(/\s+/g, " ");
+
+  it("holds every agent file to fifteen thousand characters", () => {
+    const names = readdirSync(join(plugin, "agents")).filter((name) => name.endsWith(".md"));
+    expect(names.length).toBeGreaterThanOrEqual(5);
+    for (const name of names) {
+      // Counted as `wc -m` counts, by character and not by UTF-16 unit.
+      const length = [...read(`agents/${name}`)].length;
+      expect(
+        length,
+        `agents/${name} is ${length} characters, over the 15,000 of decisions.md#agent-file-length: move a procedure to the step file read at that step, or cut a repeat; a bigger cap is the owner's call`,
+      ).toBeLessThanOrEqual(15000);
+    }
+  });
+
+  it("the executor's and the assistant's files name their step files", () => {
+    const executor = flat("agents/executor.md");
+    expect(executor).toContain(
+      '## Before the push Once the plan\'s steps are built, read `${CLAUDE_PLUGIN_ROOT}/docs/push.md` whole, when it is not already in front of you, and follow its "Before the push" (decisions.md#agent-file-length): the screenshots, the reviews, the checks and suites, the commit and the push. `<the plugin>` in its commands is `${CLAUDE_PLUGIN_ROOT}`.',
+    );
+    expect(executor).toContain(
+      '## After After the push, or after `Not pushed: <cause>`, follow "After" in `${CLAUDE_PLUGIN_ROOT}/docs/push.md`: "Built", a `For` section\'s brief, the memory note, the `Built: plans/<x>.md.` message to the assistant and the final message.',
+    );
+    const assistant = flat("agents/assistant.md");
+    // Codex C1: the exits stay four, exit 4 saying when a topic is a brief, before the pointer.
+    expect(assistant).toContain(
+      "4. **A brief for the planner.** Anything else: a new screen or control, a choice between products, a schema or privacy change, a named rule, a change needing a sketch or touching five files. **Before you write a short plan or a brief**",
+    );
+    expect(assistant).toContain(
+      "**Before you write a short plan or a brief**, a follow-up among them, or drop one, read `${CLAUDE_PLUGIN_ROOT}/docs/handing-on.md` whole, when it is not already in front of you, and follow it (decisions.md#agent-file-length): each one's shape, its `Lands` and `Related` lines, and the command that hands it on.",
+    );
+    expect(assistant).toContain(
+      '**Follow-ups.** On `Built: plans/<x>.md.`, as a message or the prompt you were opened on (the two for one plan are one), do what "Follow-ups" in `${CLAUDE_PLUGIN_ROOT}/docs/handing-on.md` says: tell him, log what was taken, write what follows.',
+    );
+    expect(assistant).toContain(
+      '- **The log**, `plans/decisions-taken.md`, written on each `Built:` and read when he asks what was decided for him: "Decisions taken" in `${CLAUDE_PLUGIN_ROOT}/docs/handing-on.md`.',
+    );
+    expect(flat("docs/push.md")).toMatch(
+      /^# The push and after The executor reads this whole once a plan's steps are built, and again before it writes "Built" when it is no longer in front of it \(decisions\.md#agent-file-length\)\. `<the owner>` is the owner's name and `<the plugin>` the plugin's folder, as the agent file gives them\. A name in quotation marks that is no heading here is a rule of the handbook or a heading of the agent file \("Before the first edit", "A question is decided, not asked"\)\. With `land: pull-request`, "push" is the landing the agent file names\. ## Before the push /,
+    );
+    expect(flat("docs/handing-on.md")).toMatch(
+      /^# Handing a topic on The assistant reads this whole, when it is not already in front of it, before it writes or drops a short plan or a brief, and when a `Built:` message comes \(decisions\.md#agent-file-length\)\. `<the owner>` is the owner's name as the agent file gives it\. A name in quotation marks that is no heading or lead-in here is a rule of the handbook or a heading of the agent file \("What crosses chats", "What you tell him unasked"\)\. ## A short plan /,
+    );
+    const moved: [string, string, string[]][] = [
+      [
+        "agents/executor.md",
+        "docs/push.md",
+        ["1. `codex`:", '**"Built"**', "Commit and push: one commit a plan"],
+      ],
+      [
+        "agents/assistant.md",
+        "docs/handing-on.md",
+        ["Short plan, <date>", "**Dropping.**", "**Related work**"],
+      ],
+    ];
+    for (const [agent, step, lines] of moved)
+      for (const line of lines) {
+        expect(read(agent), line).not.toContain(line);
+        expect(read(step).split(line), line).toHaveLength(2);
+      }
+  });
+
+  it("a heading a hook names is still in the agent file", () => {
+    const executor = read("agents/executor.md");
+    for (const heading of ["\n## Before the push\n", "\n## After\n", "the final message"])
+      expect(executor, heading).toContain(heading);
+    const assistant = read("agents/assistant.md");
+    for (const heading of ["\n## Where each topic ends\n", "\n## Decisions taken\n"])
+      expect(assistant, heading).toContain(heading);
+    for (const step of ["docs/push.md", "docs/handing-on.md"])
+      expect(read(step), step).not.toContain("${");
+  });
+
+  it("the handbook and the catalogue hold the rule", () => {
+    const handbook = flat("docs/workflow.md");
+    expect(handbook).toContain(
+      "an agent file is fifteen thousand characters at most, which a test holds, and one over it gives a procedure to the step file read at that step or loses a repeat (decisions.md#agent-file-length);",
+    );
+    expect(handbook).toContain(
+      "The step files are `docs/push.md` (the executor's push and what follows it), `docs/handing-on.md` (the assistant's short plan and brief, and what follows a build), `docs/github.md`, `docs/landing.md` and `docs/description.md`.",
+    );
+    expect(flat("docs/decisions.md")).toContain(
+      "- `agent-file-length` **An agent file is fifteen thousand characters at most, held by a test; one over it gives a procedure to the step file read at that step, or loses a repeat, and a bigger cap is the owner's call.** (Javi, 28 November)",
     );
   });
 });

@@ -51,15 +51,21 @@ the work.** Each agent file says what the agent does, in the order it
 does it, each rule once and in the file of the agent that acts on it,
 as an instruction with the handbook rule it rests on named in
 parentheses, never the history of how it was decided; a negative is
-paired with what to do instead; emphasis words are not used; a
-procedure the agent runs in one phase of one mode is a file the agent
+paired with what to do instead; emphasis words are not used; an agent
+file is fifteen thousand characters at most, which a test holds, and
+one over it gives a procedure to the step file read at that step or
+loses a repeat (decisions.md#agent-file-length); a procedure the agent
+runs in one phase of one mode is a file the agent
 reads at that step, named in the agent file, thirty thousand
 characters at most, which a test holds, and split by step once it is
 over (decisions.md#step-file-length); a line the agent would
 find by opening a file the plan or the project file names is left out;
 and a string the scripts parse (a section heading, a line `plans`
 reads, a message's first line) is written out exactly, in backticks.
-The prompt the queue starts a chat with is one line: the path and what
+The step files are `docs/push.md` (the executor's push and what follows
+it), `docs/handing-on.md` (the assistant's short plan and brief, and
+what follows a build), `docs/github.md`, `docs/landing.md` and
+`docs/description.md`. The prompt the queue starts a chat with is one line: the path and what
 it is (`Plan plans/<x>.md: it is a brief.`, `Build plans/<x>.md.`, `Built: plans/<x>.md.`), and a hook's words
 are the state and the facts, with the rule named by its heading in the
 agent file where the agent must act. (decisions.md#agent-file-is-instructions)
